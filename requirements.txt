@@ -1,0 +1,20 @@
+SQLAlchemy
+python-dotenv
+psycopg2-binary
+qdrant-client[fastembed]
+requests
+redis[hiredis]
+
+rank_bm25
+langchain
+langchain-openai
+langchain-community
+transformers
+
+torch --index-url https://download.pytorch.org/whl/cpu
+torchvision --index-url https://download.pytorch.org/whl/cpu
+torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+fastapi
+uvicorn
+

@@ -1,0 +1,12 @@
+/.rag
+*__pycache__
+*/.ipynb_checkpoints/
+*/.vscode/
+*/.pytest_cache/
+*/.mypy_cache/
+*/.mypy/
+*/.coverage
+/ollama
+/postgres
+/qdrant_storage
+/redis_data
