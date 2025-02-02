@@ -5,6 +5,10 @@ from ...db.base import get_db
 from ...models.user import User
 from ...schemas.user import UserCreate, User as UserSchema
 from app.api.v1.core.security import get_password_hash
+from ...schemas.user import UserCreate, User as UserSchema, UserResponse
+from datetime import datetime, UTC
+from ...schemas.user import TokenResponse, SignInRequest
+from app.api.v1.core.security import get_password_hash, verify_password, create_access_token
 
 router = APIRouter()
 
@@ -31,3 +35,58 @@ def read_user(user_id: int, db: Session = Depends(get_db)):
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+@router.post("/signup", response_model=UserResponse)
+async def signup(user_in: UserCreate, db: Session = Depends(get_db)):
+    # Check if user exists
+    existing_user = (
+        db.query(User)
+        .filter(
+            (User.username == user_in.username) | (User.email == user_in.email)
+        )
+        .first()
+    )
+    if existing_user:
+        raise HTTPException(status_code=400, detail="User already exists")
+    
+    # Create new user
+    db_user = User(
+        username=user_in.username,
+        email=user_in.email,
+        password=get_password_hash(user_in.password),
+        is_active=True,
+        created_at=datetime.now(UTC)
+    )
+    
+    try:
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        return {"userId": db_user.id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Could not create user")
+    
+
+@router.post("/signin", response_model=TokenResponse)
+async def signin(request: SignInRequest, db: Session = Depends(get_db)):
+    # Find user
+    user = db.query(User).filter(User.username == request.username).first()
+    if not user:
+        raise HTTPException(status_code=403, detail="User not found")
+    
+    # Verify password
+    if not verify_password(request.password, user.password):
+        raise HTTPException(status_code=403, detail="Invalid password")
+    
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+        
+    # Create token
+    token = create_access_token({
+        "sub": str(user.id),
+        "email": user.email,
+        "username": user.username
+    })
+    
+    return {"token": token}

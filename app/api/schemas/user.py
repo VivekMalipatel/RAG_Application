@@ -23,3 +23,13 @@ class UserInDBBase(UserBase):
 
 class User(UserInDBBase):
     pass
+
+class SignInRequest(BaseModel):
+    username: str
+    password: str
+
+class TokenResponse(BaseModel):
+    token: str
+
+class UserResponse(BaseModel):
+    userId: int
