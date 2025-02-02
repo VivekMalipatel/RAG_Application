@@ -10,6 +10,11 @@ langchain
 langchain-openai
 langchain-community
 transformers
+llama_index
+pypdf
+llama-index-vector-stores-qdrant
+llama-index-readers-file
+llama-index-embeddings-fastembed
 
 torch --index-url https://download.pytorch.org/whl/cpu
 torchvision --index-url https://download.pytorch.org/whl/cpu

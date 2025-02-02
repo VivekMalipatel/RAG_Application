@@ -15,7 +15,7 @@ services:
       - ./postgres:/var/lib/postgresql/data
   
   qdrant:
-    image: qdrant/qdrant:v1.10.0
+    image: qdrant/qdrant:latest
     container_name: omnirag_qdrant
     restart: always
     ports:

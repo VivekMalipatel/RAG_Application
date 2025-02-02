@@ -13,5 +13,4 @@ class HuggingFaceEmbeddingGenerator:
             outputs = self.model(**inputs)
         sentence_embeddings = outputs.last_hidden_state[:, 0]
         normalized = self.torch.nn.functional.normalize(sentence_embeddings, p=2, dim=1)
-        print(normalized.squeeze().tolist())
         return normalized.squeeze().tolist()
