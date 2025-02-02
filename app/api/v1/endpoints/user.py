@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from ...db.base import get_db
@@ -38,7 +38,14 @@ def read_user(user_id: int, db: Session = Depends(get_db)):
 
 @router.post("/signup", response_model=UserResponse)
 async def signup(user_in: UserCreate, db: Session = Depends(get_db)):
-    # Check if user exists
+    # Input validation
+    if len(user_in.password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters"
+        )
+
+    # Check existing user
     existing_user = (
         db.query(User)
         .filter(
@@ -47,25 +54,45 @@ async def signup(user_in: UserCreate, db: Session = Depends(get_db)):
         .first()
     )
     if existing_user:
-        raise HTTPException(status_code=400, detail="User already exists")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Username or email already registered"
+        )
     
     # Create new user
     db_user = User(
         username=user_in.username,
         email=user_in.email,
-        hashed_password=get_password_hash(user_in.password),  # Changed from password to hashed_password
+        hashed_password=get_password_hash(user_in.password),
         is_active=True,
         created_at=datetime.now(timezone.utc)
     )
     
     try:
+        # Save user to database
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
-        return {"userId": db_user.id}
+
+        # Generate access token
+        access_token = create_access_token(data={"sub": db_user.email})
+        
+        # Return response
+        return UserResponse(
+            userId=db_user.id, 
+            username=db_user.username,
+            email=db_user.email,
+            is_active=db_user.is_active,
+            created_at=db_user.created_at,
+            access_token=access_token,
+            token_type="bearer"
+        )
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Could not create user")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.post("/signin", response_model=TokenResponse)
 async def signin(request: SignInRequest, db: Session = Depends(get_db)):
