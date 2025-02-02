@@ -31,3 +31,8 @@ passlib
 python-multipart
 psycopg2-binary
 bcrypt
+
+minio
+pymupdf
+python-magic
+python-multipart
