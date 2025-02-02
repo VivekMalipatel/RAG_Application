@@ -22,4 +22,12 @@ torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 fastapi
 uvicorn
+pydantic
+pydantic-settings
+python-dotenv
+email-validator
+python-jose
+passlib
+python-multipart
+psycopg2-binary
 

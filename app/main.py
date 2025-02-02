@@ -1,11 +1,8 @@
 from fastapi import FastAPI
-from app.api.v1.endpoints import search  # Import your API
+from app.api.v1 import api_router
+from app.api.db.base import Base, engine
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="OmniRAG Assistant")
-
-# Include API endpoints
-app.include_router(search.router, prefix="/search", tags=["Search"])
-
-@app.get("/")
-def root():
-    return {"message": "🚀 OmniRAG API is running!"}
+app.include_router(api_router, prefix="/api/v1")
