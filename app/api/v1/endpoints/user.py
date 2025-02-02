@@ -6,7 +6,7 @@ from ...models.user import User
 from ...schemas.user import UserCreate, User as UserSchema
 from app.api.v1.core.security import get_password_hash
 from ...schemas.user import UserCreate, User as UserSchema, UserResponse
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from ...schemas.user import TokenResponse, SignInRequest
 from app.api.v1.core.security import get_password_hash, verify_password, create_access_token
 
@@ -53,9 +53,9 @@ async def signup(user_in: UserCreate, db: Session = Depends(get_db)):
     db_user = User(
         username=user_in.username,
         email=user_in.email,
-        password=get_password_hash(user_in.password),
+        hashed_password=get_password_hash(user_in.password),  # Changed from password to hashed_password
         is_active=True,
-        created_at=datetime.now(UTC)
+        created_at=datetime.now(timezone.utc)
     )
     
     try:
@@ -66,7 +66,6 @@ async def signup(user_in: UserCreate, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail="Could not create user")
-    
 
 @router.post("/signin", response_model=TokenResponse)
 async def signin(request: SignInRequest, db: Session = Depends(get_db)):
@@ -76,7 +75,7 @@ async def signin(request: SignInRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="User not found")
     
     # Verify password
-    if not verify_password(request.password, user.password):
+    if not verify_password(request.password, user.hashed_password):  # Changed from password to hashed_password
         raise HTTPException(status_code=403, detail="Invalid password")
     
     if not user.is_active:
