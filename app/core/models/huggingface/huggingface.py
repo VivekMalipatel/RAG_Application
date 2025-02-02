@@ -14,3 +14,7 @@ class HuggingFaceEmbeddingGenerator:
         sentence_embeddings = outputs.last_hidden_state[:, 0]
         normalized = self.torch.nn.functional.normalize(sentence_embeddings, p=2, dim=1)
         return normalized.squeeze().tolist()
+    
+    def check_embedding_size(model, text):
+        embedding = model.generate_embedding(text)
+        print(f"Embedding size: {len(embedding)}")

@@ -5,6 +5,7 @@ qdrant-client[fastembed]
 requests
 redis[hiredis]
 
+numpy
 rank_bm25
 langchain
 langchain-openai
@@ -15,6 +16,14 @@ pypdf
 llama-index-vector-stores-qdrant
 llama-index-readers-file
 llama-index-embeddings-fastembed
+pymupdf
+pdf2image
+pytesseract
+whisper-openai
+unstructured
+opencv-python
+pytesseract
+openai-whisper
 
 torch --index-url https://download.pytorch.org/whl/cpu
 torchvision --index-url https://download.pytorch.org/whl/cpu
@@ -36,3 +45,8 @@ minio
 pymupdf
 python-magic
 python-multipart
+python-magic
+watchdog
+
+aiobotocore
+aiofiles

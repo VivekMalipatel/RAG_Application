@@ -11,3 +11,4 @@
 /qdrant_storage
 /redis_data
 /minio_data
+/tesseract_data
