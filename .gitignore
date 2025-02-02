@@ -10,3 +10,4 @@
 /postgres
 /qdrant_storage
 /redis_data
+/minio_data
