@@ -1,16 +1,24 @@
 import fitz  # PyMuPDF
-import os
+import logging
 
 class TextProcessor:
-    """Extracts text from PDFs and DOCX files."""
+    """Extracts text from PDF files."""
 
-    def extract_text(self, file_path: str):
-        """Handles PDF text extraction."""
+    def extract_text(self, file_path: str) -> str:
+        """
+        Extracts text from a PDF file.
+
+        Args:
+            file_path (str): Path to the PDF file.
+
+        Returns:
+            str: Extracted text content.
+        """
         text = ""
         try:
-            doc = fitz.open(file_path)
-            for page in doc:
-                text += page.get_text()
+            with fitz.open(file_path) as doc:
+                text = "\n".join(page.get_text() for page in doc)
+            logging.info(f"Successfully extracted text from {file_path}")
         except Exception as e:
-            print(f"🔹 PDF Processing Error: {e}")
+            logging.error(f"Error processing PDF file '{file_path}': {e}")
         return text.strip()
