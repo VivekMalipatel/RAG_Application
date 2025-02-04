@@ -7,7 +7,7 @@ class UploadRequestReceiver:
     def __init__(self):
         self.validator = RequestValidator()  # Instance of RequestValidator
 
-    def receive_upload_request(self, request_data: dict):
+    async def receive_upload_request(self, request_data: dict):
         """
         Processes an incoming file upload request.
 
@@ -25,16 +25,20 @@ class UploadRequestReceiver:
         Returns:
             dict: Response indicating whether the request is valid.
         """
+        try:
+            # Extract user_id for authentication
+            user_id = request_data.get("user_id")
+            if not user_id:
+                logging.error("Unauthorized request: Missing user_id.")
+                return {"success": False, "error": "Unauthorized request."}
 
-        # Extract user_id for authentication
-        user_id = request_data.get("user_id")
-        if not user_id:
-            logging.error("Unauthorized request: Missing user_id.")
-            return {"success": False, "error": "Unauthorized request."}
+            logging.info(f"Received upload request from user: {user_id}, File: {request_data['file_name']}")
 
-        logging.info(f"Received upload request from user: {user_id}, File: {request_data['file_name']}")
+            # Forward request to Request Validator (ensure it's awaited)
+            validation_response = await self.validator.validate_request(request_data)
 
-        # Forward request to Request Validator
-        validation_response = self.validator.validate_request(request_data)
+            return validation_response
 
-        return validation_response
+        except Exception as e:
+            logging.error(f"Unexpected error in upload request processing: {e}")
+            return {"success": False, "error": "Internal server error."}
