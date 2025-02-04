@@ -50,3 +50,4 @@ watchdog
 
 aiobotocore
 aiofiles
+aiokafka
