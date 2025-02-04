@@ -13,14 +13,6 @@ class UploadRequestReceiver:
 
         Args:
             request_data (dict): Contains file details such as:
-                - user_id (str)
-                - file_name (str)
-                - relative_path (str)
-                - upload_id (str, optional for multipart)
-                - chunk_number (int, optional for multipart)
-                - file_size (int)
-                - mime_type (str)
-                - metadata (dict, optional)
 
         Returns:
             dict: Response indicating whether the request is valid.
