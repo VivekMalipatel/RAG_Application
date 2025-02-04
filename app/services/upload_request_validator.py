@@ -112,7 +112,7 @@ class RequestValidator:
                 file_size=file_size,
                 mime_type=mime_type,
                 total_chunks=total_chunks,
-                uploaded_chunks=[],  # Use list instead of set (Postgres JSON compatibility)
+                uploaded_chunks={},  
             )
 
             logging.info(f"Upload approved for {file_name}, Upload ID: {upload_id}, Approval ID: {uploadapproval_id}")
@@ -165,7 +165,7 @@ class RequestValidator:
                 existing_upload["total_chunks"] != total_chunks or
                 existing_upload["relative_path"] != relative_path or
                 existing_upload["mime_type"] != mime_type or
-                chunk_number in uploaded_chunks
+                str(chunk_number) in uploaded_chunks
             ):
                 logging.error("File metadata mismatch for upload request.")
                 return {"success": False, "error": "File metadata mismatch."}
