@@ -1,8 +1,11 @@
 import logging
+import asyncio
 import uuid
+import hashlib
 from app.core.storage_bin.minio.minio_handler import MinIOHandler
 from app.core.storage_bin.postgres.postgres_handler import PostgresHandler
 from app.core.kafka.kafka_handler import KafkaHandler
+from app.core.cache.redis_cache import RedisCache 
 
 class RequestValidator:
     """
@@ -10,7 +13,7 @@ class RequestValidator:
     and multipart upload approvals.
     """
 
-    def __init__(self, minio_config: dict, db_url: str, kafka_config: dict):
+    def __init__(self, minio_config: dict, db_url: str, kafka_config: dict, redis_config: dict):
         """
         Initializes request validator with MinIO, PostgreSQL, and Kafka handlers.
 
@@ -22,6 +25,7 @@ class RequestValidator:
         self.minio = MinIOHandler(**minio_config)
         self.db = PostgresHandler(db_url)
         self.kafka = KafkaHandler(**kafka_config)
+        self.redis = RedisCache(**redis_config)
 
     async def validate_request(self, request_data: dict, file_data: bytes = None):
         """
@@ -82,27 +86,26 @@ class RequestValidator:
 
             # Step 1: Validate file type
             if not self._validate_file_type(mime_type):
-                logging.error(f"File type {mime_type} not supported.")
+                logging.error(f"Rejected {file_name}: Unsupported file type {mime_type}")
                 return {"success": False, "error": "Unsupported file type."}
 
-            # Step 2: Check for duplicate file names in MinIO
             minio_path = f"{user_id}/{relative_path}/{file_name}"
-            existing_file = await self.db.get_file_metadata(user_id, file_name)
 
+            # Step 2: Check for duplicate file names in PostgreSQL
+            existing_file = await self.db.get_file_metadata(user_id, file_name)
             if existing_file:
-                logging.error(f"File {file_name} already exists in {relative_path}.")
+                logging.error(f"File '{file_name}' already exists in {relative_path}.")
                 return {"success": False, "error": "File name already exists."}
 
             # Step 3: Request a new multipart upload from MinIO
             upload_id = await self.minio.start_multipart_upload(minio_path)
             if not upload_id:
-                logging.error("Failed to initiate multipart upload.")
+                logging.error(f"Failed to initiate multipart upload for {file_name}")
                 return {"success": False, "error": "Failed to start upload."}
 
             # Step 4: Generate upload approval ID and store request details in PostgreSQL
             uploadapproval_id = str(uuid.uuid4())
 
-            # Store complete request details for tracking and approval verification later
             await self.db.insert_multipart_upload(
                 user_id=user_id,
                 file_name=file_name,
@@ -124,7 +127,7 @@ class RequestValidator:
             }
 
         except Exception as e:
-            logging.error(f"Error during new file validation: {e}")
+            logging.error(f"Error validating new file {request_data['file_name']}: {e}")
             return {"success": False, "error": "Internal server error."}
 
     async def _handle_existing_upload(self, request_data: dict, file_data: bytes = None):
@@ -156,19 +159,30 @@ class RequestValidator:
                 return {"success": False, "error": "Invalid upload request."}
 
             # Step 2: Verify metadata consistency
-            uploaded_chunks = set(existing_upload["uploaded_chunks"])  # Convert to set for faster lookup
-            if (
-                existing_upload["file_name"] != file_name or
-                existing_upload["upload_id"] != upload_id or
-                existing_upload["file_size"] != file_size or
-                existing_upload["user_id"] != user_id or
-                existing_upload["total_chunks"] != total_chunks or
-                existing_upload["relative_path"] != relative_path or
-                existing_upload["mime_type"] != mime_type or
+            uploaded_chunks = set(existing_upload["uploaded_chunks"])  # O(1) lookup
+            metadata_mismatch = any([
+                existing_upload["file_name"] != file_name,
+                existing_upload["upload_id"] != upload_id,
+                existing_upload["file_size"] != file_size,
+                existing_upload["user_id"] != user_id,
+                existing_upload["total_chunks"] != total_chunks,
+                existing_upload["relative_path"] != relative_path,
+                existing_upload["mime_type"] != mime_type,
                 str(chunk_number) in uploaded_chunks
-            ):
-                logging.error("File metadata mismatch for upload request.")
+            ])
+
+            if metadata_mismatch:
+                logging.error(f"File metadata mismatch for {file_name} (Upload ID: {upload_id})")
                 return {"success": False, "error": "File metadata mismatch."}
+            
+            # Step 2: Compute MD5 Hash for Chunk Validation
+            chunk_hash = hashlib.md5(file_data).hexdigest()
+
+            # Step 3: Store Chunk in Redis (Temporary Storage)
+            chunk_storage_key = f"{upload_id}_chunk_{chunk_number}"
+            hash_storage_key = f"{upload_id}_chunk_{chunk_number}_hash"
+            await self.redis.set(chunk_storage_key, file_data)
+            await self.redis.set(hash_storage_key, chunk_hash)
 
             # Step 3: If file data is provided, add the upload request to Kafka queue
             if file_data:
@@ -178,22 +192,23 @@ class RequestValidator:
                     "relative_path": relative_path,
                     "upload_id": upload_id,
                     "chunk_number": chunk_number,
-                    "file_data": file_data,
+                    "chunk_storage_key": chunk_storage_key,
                     "file_size": file_size,
                     "mime_type": mime_type,
                     "total_chunks": total_chunks,
-                    "uploadapproval_id": uploadapproval_id
+                    "uploadapproval_id": uploadapproval_id,
+                    "chunk_hash": chunk_hash
                 }
                 await self.kafka.add_to_queue("file_upload_requests", kafka_payload)
                 logging.info(f"Upload request added to Kafka: {file_name}, Chunk: {chunk_number}")
 
                 return {"success": True, "message": "Upload request queued for processing."}
             
-            logging.warning("No file data provided for multipart upload.")
+            logging.warning(f"No file data received for {file_name}, chunk {chunk_number}.")
             return {"success": False, "error": "No file data received."}
 
         except Exception as e:
-            logging.error(f"Error handling existing upload request: {e}")
+            logging.error(f"Error handling existing upload for {request_data['file_name']}: {e}")
             return {"success": False, "error": "Internal server error."}
 
     def _validate_file_type(self, mime_type: str) -> bool:

@@ -7,7 +7,7 @@ class UploadRequestReceiver:
     def __init__(self):
         self.validator = RequestValidator()  # Instance of RequestValidator
 
-    async def receive_upload_request(self, request_data: dict):
+    async def receive_upload_request(self, request_data: dict, file_data: bytes = None):
         """
         Processes an incoming file upload request.
 
@@ -27,7 +27,7 @@ class UploadRequestReceiver:
             logging.info(f"Received upload request from user: {user_id}, File: {request_data['file_name']}")
 
             # Forward request to Request Validator (ensure it's awaited)
-            validation_response = await self.validator.validate_request(request_data)
+            validation_response = await self.validator.validate_request(request_data, file_data)
 
             return validation_response
 
