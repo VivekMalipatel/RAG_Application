@@ -109,13 +109,38 @@ class FileUploadProcessor:
             uploaded_chunks = upload_status["uploaded_chunks"]
 
             if len(uploaded_chunks) == total_chunks:
-                # Finalize the upload in MinIO
+                # Prepare the part list for finalization
                 all_parts = [{"part_number": k, "etag": v} for k, v in uploaded_chunks.items()]
-                success = await self.minio.complete_multipart_upload(upload_status["relative_path"], upload_id, all_parts)
+                
+                # Call MinIO to complete the multipart upload
+                minio_response = await self.minio.complete_multipart_upload(
+                    upload_status["relative_path"], upload_id, all_parts
+                )
 
-                if success:
-                    await self.db.complete_multipart_upload(upload_id)
-                    logging.info(f"Upload {upload_id} finalized in MinIO.")
+                if minio_response:
+                    etag = minio_response.get("ETag")
+                    location = minio_response.get("Location")
+                    version_id = minio_response.get("VersionID")  # Optional
+                    bucket = minio_response.get("Bucket")
+                    object_key = minio_response.get("Key")
+
+                    # Push success message to Kafka queue for PostgreSQL update
+                    kafka_message = {
+                        "user_id": upload_status["user_id"],
+                        "file_name": upload_status["file_name"],
+                        "relative_path": upload_status["relative_path"],
+                        "upload_id": upload_id,
+                        "file_size": upload_status["file_size"],
+                        "mime_type": upload_status["mime_type"],
+                        "etag": etag,
+                        "location": location,
+                        "bucket": bucket,
+                        "object_key": object_key,
+                        "version_id": version_id if version_id else None
+                    }
+                    await self.kafka.add_to_queue("file_upload_success", kafka_message)
+
+                    logging.info(f"Upload {upload_id} finalized in MinIO. Sent success event to Kafka.")
                     return True
 
         except Exception as e:
