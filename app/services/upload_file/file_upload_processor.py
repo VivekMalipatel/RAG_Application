@@ -1,9 +1,7 @@
 import logging
-from app.core.kafka.kafka_handler import KafkaHandler
 from app.core.storage_bin.minio.minio_handler import MinIOHandler
 from app.core.storage_bin.postgres.postgres_handler import PostgresHandler
 from app.core.cache.redis_cache import RedisCache
-import hashlib
 
 class FileUploadProcessor:
     """
@@ -22,6 +20,7 @@ class FileUploadProcessor:
         """
         self.minio = MinIOHandler(**minio_config)
         self.db = PostgresHandler(db_url)
+        self.cache = RedisCache()
 
     async def process_upload(self, upload_request: dict):
         """
@@ -38,25 +37,25 @@ class FileUploadProcessor:
             chunk_number = upload_request["chunk_number"]
             total_chunks = upload_request["total_chunks"]
             relative_path = upload_request["relative_path"]
-            uploadapproval_id = upload_request["uploadapproval_id"]
             file_data = upload_request["file_data"]
             file_size = upload_request["file_size"]
             mime_type = upload_request["mime_type"]
 
             logging.info(f"Processing chunk {chunk_number}/{total_chunks} for {file_name}")
 
-            # **Step 5: Upload Chunk to MinIO**
+            logging.debug(f"Uploading chunk {chunk_number} to MinIO at path {minio_path}")
             minio_path = f"{user_id}/{relative_path}/{file_name}"
             part_info = await self.minio.upload_part(minio_path, upload_id, chunk_number, file_data)
-            # part_info : {"part_number": chunk_number, "etag": response.etag}
 
             if not part_info:
                 logging.error("Failed to upload chunk. Retrying...")
 
-            # Step 7: Check if Upload is Complete
-            response = await self.check_and_finalize_upload(upload_id, total_chunks)
+            logging.debug("Checking if all chunks are uploaded...")
+            response = await self.check_and_finalize_upload(upload_id, total_chunks, relative_path)
             if response:
                 await self.update_postgres(response["minio_path"], user_id, file_name, file_size, response["etag"], mime_type)
+                # Delete the approval ID from Redis
+                await self.cache.delete(upload_request["uploadapproval_id"])
                 logging.info(f"Upload completed for {file_name}.")
 
         except Exception as e:
@@ -77,6 +76,7 @@ class FileUploadProcessor:
             uploaded_chunks = await self.minio.get_uploaded_parts(upload_id)
             if len(uploaded_chunks) == total_chunks:
                 
+                logging.debug("Finalizing upload in MinIO...")
                 # Call MinIO to complete the multipart upload
                 minio_response = await self.minio.complete_multipart_upload(
                     relative_path, upload_id
@@ -100,6 +100,7 @@ class FileUploadProcessor:
         """
         try:
 
+            logging.debug("Inserting file metadata into PostgreSQL...")
             # Insert into files table with MinIO metadata
             await self.db.insert_file_metadata(
                 user_id=user_id,

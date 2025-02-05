@@ -1,8 +1,10 @@
 import logging
 import uuid
+import asyncio
 from app.core.storage_bin.minio.minio_handler import MinIOHandler
 from app.core.storage_bin.postgres.postgres_handler import PostgresHandler
 from app.services.upload_file.file_upload_processor import FileUploadProcessor
+from app.core.cache.redis_cache import RedisCache
 
 class RequestValidator:
     """
@@ -20,7 +22,9 @@ class RequestValidator:
         """
         self.minio = MinIOHandler(**minio_config)
         self.db = PostgresHandler(db_url)
+        self.cache = RedisCache()
         self.file_upload_processor = FileUploadProcessor(minio_config, db_url)
+        self.approval_cache = {}
 
     async def validate_request(self, request_data: dict, file_data: bytes = None):
         """
@@ -72,42 +76,35 @@ class RequestValidator:
             mime_type = request_data["mime_type"]
             total_chunks = request_data.get("total_chunks")
 
-            # Step 1: Validate file type
+            # Validate file type
             if not self._validate_file_type(mime_type):
                 logging.error("Unsupported file type.")
                 return {"success": False, "error": "Unsupported file type."}
 
             minio_path = f"{user_id}/{relative_path}/{file_name}"
 
-            # Step 2: Check for duplicate file names in PostgreSQL
+            # Check for duplicate file names in PostgreSQL
             existing_file = await self.db.get_file_metadata(user_id, file_name)
             if existing_file:
                 logging.error(f"File '{file_name}' already exists in {relative_path}.")
                 return {"success": False, "error": "File name already exists."}
 
-            # Step 3: Request a new multipart upload from MinIO
+            # Request a new multipart upload from MinIO
             upload_id = await self.minio.start_multipart_upload(minio_path)
             if not upload_id:
                 logging.error(f"Failed to initiate multipart upload for {file_name}")
                 return {"success": False, "error": "Failed to start upload."}
 
-            # Step 4: Generate upload approval ID and store request details in PostgreSQL
+            # Generate upload approval ID and store request details in Redis
             uploadapproval_id = str(uuid.uuid4())
 
-            check = await self.db.insert_multipart_upload(
-                user_id=user_id,
-                file_name=file_name,
-                upload_id=upload_id,
-                uploadapproval_id=uploadapproval_id,
-                relative_path=relative_path,
-                file_size=file_size,
-                mime_type=mime_type,
-                total_chunks=total_chunks,
-                uploaded_chunks={},
-            )
-            if not check:
-                logging.error(f"Failed to store request details for {file_name}")
-                return {"success": False, "error": "Failed to upload data into multipart_upload Table."}
+            # Store the approval ID and upload ID combination in Redis
+            redis_value = {
+                "upload_id": upload_id,
+                "relative_path": relative_path,
+                "total_chunks": total_chunks
+            }
+            await self.cache.set(uploadapproval_id, redis_value)
 
             logging.info(f"Upload approved for {file_name}, Upload ID: {upload_id}, Approval ID: {uploadapproval_id}")
 
@@ -143,30 +140,24 @@ class RequestValidator:
             file_size = request_data["file_size"]
             mime_type = request_data["mime_type"]
 
-            # Step 1: Check if approval exists in PostgreSQL
-            existing_upload = await self.db.get_multipart_upload(uploadapproval_id)
-            if not existing_upload:
-                logging.error(f"Invalid upload approval ID: {uploadapproval_id}")
-                return {"success": False, "error": "Invalid upload request."}
+            # Check if approval exists in local or Redis cache
+            if uploadapproval_id in self.approval_cache:
+                approval_data = self.approval_cache[uploadapproval_id]
+            else:
+                approval_data = await self.cache.get(uploadapproval_id)
+                if not approval_data:
+                    logging.error(f"Upload approval ID {uploadapproval_id} not found.")
+                    return {"success": False, "error": "Invalid upload approval ID."}
+                self.approval_cache[uploadapproval_id] = approval_data  # Cache it
 
-            # Step 2: Verify metadata consistency
-            uploaded_chunks = set(existing_upload["uploaded_chunks"])  # O(1) lookup
-            metadata_mismatch = any([
-                existing_upload["file_name"] != file_name,
-                existing_upload["upload_id"] != upload_id,
-                existing_upload["file_size"] != file_size,
-                existing_upload["user_id"] != user_id,
-                existing_upload["total_chunks"] != total_chunks,
-                existing_upload["relative_path"] != relative_path,
-                existing_upload["mime_type"] != mime_type,
-                str(chunk_number) in uploaded_chunks
-            ])
+            # Verify metadata consistency
+            metadata_mismatch = (
+                approval_data["relative_path"] != relative_path or
+                approval_data["total_chunks"] != total_chunks
+            )
 
-            if metadata_mismatch:
-                logging.error("File metadata mismatch.")
-                return {"success": False, "error": "File metadata mismatch."}
+            logging.error("File metadata mismatch.") if metadata_mismatch else None
 
-            # Step 3: If file data is provided, add the upload request to Kafka queue
             if file_data:
                 upload_payload = {
                     "user_id": user_id,
@@ -181,9 +172,10 @@ class RequestValidator:
                     "file_data": file_data
                 }
 
-                self.file_upload_processor.process_upload(upload_payload)
+                # Run upload in the background to avoid blocking request processing
+                asyncio.create_task(self.file_upload_processor.process_upload(upload_payload))
 
-                return {"success": True, "message": "Chunk uploaded successfully"}
+                return {"success": True, "message": "Chunk upload started."}
             
             logging.warning(f"No file data received for {file_name}, chunk {chunk_number}.")
             return {"success": False, "error": "No file data received."}
@@ -204,3 +196,9 @@ class RequestValidator:
         """
         allowed_types = ["image/png", "image/jpeg", "application/pdf", "text/plain"]
         return mime_type in allowed_types
+
+    def clear_approval(self, uploadapproval_id: str):
+        if uploadapproval_id in self.approval_cache:
+            del self.approval_cache[uploadapproval_id]
+        # Optionally also remove from Redis
+        asyncio.create_task(self.cache.delete(uploadapproval_id))

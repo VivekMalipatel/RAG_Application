@@ -24,6 +24,8 @@ class UploadRequestReceiver:
 
             validation_response = await self.validator.validate_request(request_data, file_data)
 
+            logging.debug(f"Validation response: {validation_response}")
+            
             return validation_response
 
         except Exception as e:
