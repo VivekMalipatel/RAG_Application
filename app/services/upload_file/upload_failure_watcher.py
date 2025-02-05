@@ -2,7 +2,7 @@ import logging
 import asyncio
 import os
 from app.core.kafka.kafka_handler import KafkaHandler
-from app.services.upload_failure_processor import UploadFailureProcessor
+from app.services.upload_file.upload_failure_processor import UploadFailureProcessor
 
 class UploadFailureWatcher:
     """

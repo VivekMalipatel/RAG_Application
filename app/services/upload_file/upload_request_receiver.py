@@ -1,5 +1,5 @@
 import logging
-from app.services.upload_request_validator import RequestValidator
+from app.services.upload_file.upload_request_validator import RequestValidator
 
 class UploadRequestReceiver:
     """Handles incoming file upload requests and forwards them for validation."""

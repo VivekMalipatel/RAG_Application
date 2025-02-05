@@ -73,6 +73,8 @@ class FileUploadSuccessWatcher:
                 version_id=version_id  # Optional: Store version ID if applicable
             )
 
+            await self.db.delete_multipart_upload(upload_id)
+
             logging.info(f"Successfully updated PostgreSQL for file: {file_name}, Path: {minio_path}")
 
         except Exception as e:
