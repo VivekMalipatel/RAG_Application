@@ -27,17 +27,20 @@ class FileMetadata(Base):
 
 
 class MultipartUpload(Base):
-    """ORM Model for tracking multipart uploads."""
     __tablename__ = "multipart_uploads"
 
     upload_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    uploadapproval_id = Column(String, primary_key=True)  # Composite primary key
+    file_name = Column(String, nullable=False)
     user_id = Column(String, nullable=False)
-    file_name = Column(Text, nullable=False)
-    total_parts = Column(Integer, nullable=False)
-    uploaded_parts = Column(JSON, default={})  # Stores part_number -> ETag mapping
-    status = Column(String, default="in-progress")  # 'in-progress', 'completed', 'failed'
+    relative_path = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
+    mime_type = Column(String, nullable=False)
+    total_chunks = Column(Integer, nullable=False)
+    uploaded_chunks = Column(JSON, nullable=False, default={})  # Storing chunk details as JSON
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
 
 
 # -------------------------------

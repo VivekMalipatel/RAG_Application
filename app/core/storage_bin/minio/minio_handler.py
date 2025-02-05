@@ -92,7 +92,7 @@ class MinIOHandler:
             logging.error(f"Uploading the part have been failed\n: {e}")
             return False
         
-    async def complete_multipart_upload(self, object_name: str, upload_id: str, parts: list):
+    async def complete_multipart_upload(self, object_name: str, upload_id: str):
         """
         Completes a multipart upload by combining all uploaded parts.
 
@@ -104,6 +104,7 @@ class MinIOHandler:
         Returns:
             str: The final object path in MinIO if successful, else None.
         """
+        parts = self.client.list_parts(self.bucket_name, object_name, upload_id)
         try:
             await asyncio.to_thread(
                 self.client.complete_multipart_upload,
