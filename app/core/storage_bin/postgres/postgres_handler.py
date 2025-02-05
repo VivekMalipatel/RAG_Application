@@ -125,23 +125,22 @@ class PostgresHandler:
                 await session.rollback()
                 return False
             
-        async def delete_multipart_upload(self, upload_id: str):
-
-            """Deletes multipart upload details from PostgreSQL."""
-            async with self.async_session() as session:
-                try:
-                    # Query to find the record
-                    result = await session.execute(select(MultipartUpload).filter_by(upload_id=upload_id))
-                    multipart_upload = result.scalars().first()
+    async def delete_multipart_upload(self, upload_id: str):
+        """Deletes multipart upload details from PostgreSQL."""
+        async with self.async_session() as session:
+            try:
+                # Query to find the record
+                result = await session.execute(select(MultipartUpload).filter_by(upload_id=upload_id))
+                multipart_upload = result.scalars().first()
     
-                    if multipart_upload:
-                        await session.delete(multipart_upload)  # Delete the found record
-                        await session.commit()  # Commit the deletion
-                    else:
-                        logging.warning(f"No multipart upload found with upload_id: {upload_id}")
-                except SQLAlchemyError as e:
-                    logging.error(f"Error deleting multipart upload with upload_id '{upload_id}': {e}")
-                    await session.rollback()  # Rollback transaction if error occurs
+                if multipart_upload:
+                    await session.delete(multipart_upload)  # Delete the found record
+                    await session.commit()  # Commit the deletion
+                else:
+                    logging.warning(f"No multipart upload found with upload_id: {upload_id}")
+            except SQLAlchemyError as e:
+                logging.error(f"Error deleting multipart upload with upload_id '{upload_id}': {e}")
+                await session.rollback()  # Rollback transaction if error occurs
             
     async def get_multipart_upload(self, uploadapproval_id: str):
         """Fetches multipart upload details from PostgreSQL."""
@@ -159,3 +158,6 @@ class PostgresHandler:
             except SQLAlchemyError as e:
                 logging.error(f"Error fetching multipart uploads for uploadapproval_id '{uploadapproval_id}': {e}")
                 return None
+            
+    async def update_multipart_upload(self, uploadapproval_id: str, uploaded_chunks: dict, etag):
+        

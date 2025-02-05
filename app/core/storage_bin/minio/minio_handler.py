@@ -63,94 +63,33 @@ class MinIOHandler:
             print(f"Initiating the Multipart upload have been failed\n: {e}")
             return None
             
-    async def upload_file_multipart(self, object_name: str, file_path: str, upload_id, part_size=5 * 1024 * 1024):
-        
+    
+    async def upload_part(self, minio_path, upload_id, chunk_number, file_data):
         """
-        Checks whther the upload_id is valid or not, if not it will start a new multipart upload session."""
+        # Upload a specific part of a file in a multipart upload session.
 
-        try:
-            # List all active multipart uploads for the bucket and object
-            uploads = self.client.list_multipart_uploads(self.bucket_name, prefix=object_name)
-            for upload in uploads:
-                if upload.key == object_name and upload.upload_id == upload_id:
-                    logging.info(f"Found active multipart upload for {object_name} with ID: {upload_id}")
-                    break
-        except S3Error as e:
-            logging.error(f"upload ID havent been found while uploading the file \n : {e}")
-            return None, None
-        
-        
-        """
-        Splits a file into multiple parts and uploads them asynchronously.
-        Returns a list of uploaded parts with `part_number` and `etag`.
-        """
-        try:
-            # Step 1: Start Multipart Upload
-            logging.info(f"Started multipart upload for '{object_name}', Upload ID: {upload_id}")
-
-            parts = []
-            part_number = 1
-
-            async with aiofiles.open(file_path, "rb") as f:
-                while True:
-                    file_data = await f.read(part_size)
-                    if not file_data:
-                        break
-
-                    # Upload each part
-                    part_info = await self.upload_part(object_name, upload_id, part_number, file_data)
-                    if part_info:
-                        parts.append(part_info)
-                        part_number += 1
-
-            logging.info(f"Uploaded {len(parts)} parts for '{object_name}'.")
-            return upload_id, parts  # Returns `upload_id` and `parts`
-
-        except S3Error as e:
-            logging.error(f"Multipart upload failed for '{object_name}': {e}")
-            return None, None
-
-    async def upload_part(self, object_name: str, upload_id: str, part_number: int, file_data: bytes):
-        """
-        Uploads a single file part asynchronously.
-        Returns a dictionary containing `part_number` and `etag`.
+        Args:
+            minio_path (str): The destination object path in MinIO.
+            upload_id (str): The multipart upload session ID.
+            chunk_number (int): The part number.
+            file_data (BytesIO): The file data to be uploaded.
         """
         try:
             file_stream = BytesIO(file_data)
             response = await asyncio.to_thread(
-                self.client.upload_part,
+                self.client.put_object,
                 self.bucket_name,
-                object_name,
-                upload_id,
-                part_number,
-                file_stream,
-                len(file_data)
+                minio_path,
+                file_data,
+                length=len(file_data),
+                part_number=chunk_number,
+                upload_id=upload_id
             )
-            logging.info(f"Part {part_number} uploaded for '{object_name}', Upload ID: {upload_id}")
-            return {"part_number": part_number, "etag": response.etag}
-
+            logging.info("Uploaded part {chunk_number} for {minio_path}")
+            return True
         except S3Error as e:
-            logging.error(f"Error uploading part {part_number} for '{object_name}': {e}")
-            return None
-
-    def complete_file_multipart(self, object_name: str, upload_id: str, parts: list):
-        """
-        Completes the multipart upload using the uploaded parts.
-
-        Args:
-            object_name (str): The destination object path in MinIO.
-            upload_id (str): The multipart upload session ID.
-            parts (list): List of uploaded parts.
-        """
-        try:
-            if not parts:
-                raise ValueError("No parts available to complete upload.")
-
-            self.client.complete_multipart_upload(self.bucket_name, object_name, upload_id, parts)
-            logging.info(f"Completed multipart upload for '{object_name}', Upload ID: {upload_id}")
-
-        except S3Error as e:
-            logging.error(f"Error completing multipart upload for '{object_name}': {e}")
+            logging.error("Uploading the part have been failed\n: {e}")
+            return False
         
     
     async def abort_multipart_upload(self, object_name: str, upload_id: str):

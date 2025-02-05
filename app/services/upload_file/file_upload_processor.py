@@ -53,23 +53,25 @@ class FileUploadProcessor:
                 logging.error(f"Invalid upload approval ID: {uploadapproval_id}")
                 return
             
+            # Step 2: Retrieve File Chunk from Redis**
             file_data = await self.redis.get(chunk_storage_key)
             if not file_data:
                 logging.error(f"Chunk {chunk_number} not found in Redis for {file_name}. Retrying...")
                 await self.retry_upload(upload_request, retries)
                 return
             
+            # **Step 3: Validate Chunk Integrity (Hash Check)**
             computed_hash = hashlib.md5(file_data).hexdigest()
             if computed_hash != stored_chunk_hash:
                 logging.error(f"Chunk {chunk_number} hash mismatch! Upload rejected.")
                 return  # Reject the upload if corruption detecteds
 
-            # Step 2: Ensure chunk has not already been uploaded
+             # **Step 4: Check if the Chunk Has Already Been Uploaded**
             if chunk_number in existing_upload["uploaded_chunks"]:
                 logging.warning(f"Chunk {chunk_number} already uploaded for {file_name}. Skipping...")
                 return
 
-            # Step 3: Upload Chunk to MinIO
+            # **Step 5: Upload Chunk to MinIO**
             minio_path = f"{user_id}/{relative_path}/{file_name}"
             part_info = await self.minio.upload_part(minio_path, upload_id, chunk_number, file_data)
 
@@ -78,13 +80,13 @@ class FileUploadProcessor:
                 await self.retry_upload(upload_request, retries)
                 return
 
-            # Step 4: Update PostgreSQL with chunk details
+            # Step 6: Update PostgreSQL with chunk details
             etag = part_info["etag"]
             await self.db.update_multipart_part(upload_id, chunk_number, etag)
             await self.redis.delete(chunk_storage_key)
             await self.redis.delete(stored_chunk_hash)
 
-            # Step 5: Check if Upload is Complete
+            # Step 7: Check if Upload is Complete
             is_complete = await self.check_and_finalize_upload(upload_id, total_chunks)
             if is_complete:
                 logging.info(f"Upload completed for {file_name}.")
