@@ -106,7 +106,7 @@ class RequestValidator:
             # Step 4: Generate upload approval ID and store request details in PostgreSQL
             uploadapproval_id = str(uuid.uuid4())
 
-            await self.db.insert_multipart_upload(
+            check = await self.db.insert_multipart_upload(
                 user_id=user_id,
                 file_name=file_name,
                 upload_id=upload_id,
@@ -117,6 +117,9 @@ class RequestValidator:
                 total_chunks=total_chunks,
                 uploaded_chunks={},  
             )
+            if not check:
+                logging.error(f"Failed to store request details for {file_name}")
+                return {"success": False, "error": "Failed to upload data into multipart_upload Table."}
 
             logging.info(f"Upload approved for {file_name}, Upload ID: {upload_id}, Approval ID: {uploadapproval_id}")
 
