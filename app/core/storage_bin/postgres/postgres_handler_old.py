@@ -112,29 +112,66 @@ class PostgresHandler:
     # MULTIPART UPLOAD TRACKING
     # -------------------------------
 
-    async def insert_multipart_upload(self, user_id: str, file_name: str, total_parts: int, upload_id: str):
+    async def insert_multipart_upload(self, user_id, file_name, upload_id, uploadapproval_id, relative_path, file_size, mime_type, total_chunks, uploaded_chunks):
         """Stores initial multipart upload metadata in PostgreSQL."""
         async with self.async_session() as session:
             try:
                 new_upload = MultipartUpload(
                     upload_id=upload_id,  # Store MinIO upload ID
-                    user_id=user_id,
+                    uploadapproval_id=uploadapproval_id,
                     file_name=file_name,
-                    total_parts=total_parts,
-                    uploaded_parts={},  # No parts uploaded yet
-                    status="in-progress"
+                    user_id=user_id,
+                    relative_path=relative_path,
+                    file_size=file_size,
+                    mime_type=mime_type,
+                    total_chunks=total_chunks,
+                    uploaded_chunks=uploaded_chunks,  
                 )
                 session.add(new_upload)
-                await session.commit()
-                logging.info(f"Multipart upload started for '{file_name}', Upload ID: {upload_id}")
-                return upload_id
-            except Exception as e:
+                await session.commit() # Commit transaction asynchronously
+                await session.refresh(new_upload) # Refresh object with DB-generated values
+                return True
+            except SQLAlchemyError as e:
                 logging.error(f"Error initializing multipart upload for '{file_name}': {e}")
                 await session.rollback()
+                return False
+            
+    async def delete_multipart_upload(self, upload_id: str):
+        """Deletes multipart upload details from PostgreSQL."""
+        async with self.async_session() as session:
+            try:
+                # Query to find the record
+                result = await session.execute(select(MultipartUpload).filter_by(upload_id=upload_id))
+                multipart_upload = result.scalars().first()
+    
+                if multipart_upload:
+                    await session.delete(multipart_upload)  # Delete the found record
+                    await session.commit()  # Commit the deletion
+                else:
+                    logging.warning(f"No multipart upload found with upload_id: {upload_id}")
+            except SQLAlchemyError as e:
+                logging.error(f"Error deleting multipart upload with upload_id '{upload_id}': {e}")
+                await session.rollback()  # Rollback transaction if error occurs
+            
+    async def get_multipart_upload(self, uploadapproval_id: str):
+        """Fetches multipart upload details from PostgreSQL."""
+
+        async with self.async_session() as session:
+            try:
+                stmt = select(MultipartUpload).filter_by(uploadapproval_id=uploadapproval_id)
+                result = await session.execute(stmt)
+                uploads = result.scalars().first()  # Get all matching records
+                
+                if not uploads:
+                    logging.warning(f"No multipart uploads found for uploadapproval_id: {uploadapproval_id}")
+                    
+                return uploads  # Returns a list of matching records
+            except SQLAlchemyError as e:
+                logging.error(f"Error fetching multipart uploads for uploadapproval_id '{uploadapproval_id}': {e}")
                 return None
-
-    async def update_multipart_part(self, upload_id: str, part_number: int, etag: str):
-        """Updates PostgreSQL with the uploaded part number and its ETag."""
+            
+    async def update_multipart_part(self, upload_id: str, chunk_number: int , etag: str):
+        """Apprehends the part_info into uploaded chunks for a multipart upload."""
         async with self.async_session() as session:
             try:
                 result = await session.execute(
@@ -145,63 +182,14 @@ class PostgresHandler:
                 if not upload_session:
                     logging.error(f"Multipart upload '{upload_id}' not found.")
                     return False
-
-                uploaded_parts = upload_session.uploaded_parts or {}
-                uploaded_parts[part_number] = etag
-                upload_session.uploaded_parts = uploaded_parts
+                
+                upload_session.uploaded_chunks[str(chunk_number)] = etag
 
                 await session.commit()
-                logging.info(f"Part {part_number} updated for upload ID '{upload_id}' with ETag: {etag}")
+                logging.info(f"Part {chunk_number} updated for upload ID '{upload_id}' with ETag: {etag}")
                 return True
-            except Exception as e:
-                logging.error(f"Error updating part {part_number} for upload ID '{upload_id}': {e}")
-                await session.rollback()
-                return False
 
-    async def complete_multipart_upload(self, upload_id: str):
-        """Marks a multipart upload as complete in PostgreSQL."""
-        async with self.async_session() as session:
-            try:
-                result = await session.execute(
-                    select(MultipartUpload).where(MultipartUpload.upload_id == upload_id)
-                )
-                upload_session = result.scalar_one_or_none()
-
-                if not upload_session:
-                    logging.error(f"Multipart upload '{upload_id}' not found.")
-                    return False
-
-                if len(upload_session.uploaded_parts) != upload_session.total_parts:
-                    logging.error(f"Upload '{upload_id}' incomplete. Missing parts.")
-                    return False
-
-                upload_session.status = "completed"
-                await session.commit()
-                logging.info(f"Upload '{upload_id}' marked as completed in PostgreSQL.")
-                return True
-            except Exception as e:
-                logging.error(f"Error completing multipart upload '{upload_id}': {e}")
-                await session.rollback()
-                return False
-
-    async def cancel_multipart_upload(self, upload_id: str):
-        """Cancels a multipart upload and removes its record from PostgreSQL."""
-        async with self.async_session() as session:
-            try:
-                result = await session.execute(
-                    select(MultipartUpload).where(MultipartUpload.upload_id == upload_id)
-                )
-                upload_session = result.scalar_one_or_none()
-
-                if not upload_session:
-                    logging.error(f"Multipart upload '{upload_id}' not found.")
-                    return False
-
-                await session.delete(upload_session)
-                await session.commit()
-                logging.info(f"Multipart upload '{upload_id}' canceled and removed from PostgreSQL.")
-                return True
-            except Exception as e:
-                logging.error(f"Error canceling multipart upload '{upload_id}': {e}")
+            except SQLAlchemyError as e:
+                logging.error(f"Error updating part {chunk_number} for upload ID '{upload_id}': {e}")
                 await session.rollback()
                 return False
