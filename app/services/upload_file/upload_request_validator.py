@@ -1,11 +1,8 @@
 import logging
-import asyncio
 import uuid
-import hashlib
 from app.core.storage_bin.minio.minio_handler import MinIOHandler
 from app.core.storage_bin.postgres.postgres_handler import PostgresHandler
-from app.core.kafka.kafka_handler import KafkaHandler
-from app.core.cache.redis_cache import RedisCache 
+from app.services.upload_file.file_upload_processor import FileUploadProcessor
 
 class RequestValidator:
     """
@@ -13,19 +10,17 @@ class RequestValidator:
     and multipart upload approvals.
     """
 
-    def __init__(self, minio_config: dict, db_url: str, kafka_config: dict, redis_config: dict):
+    def __init__(self, minio_config: dict, db_url: str):
         """
-        Initializes request validator with MinIO, PostgreSQL, and Kafka handlers.
+        Initializes request validator with MinIO and PostgreSQL handlers.
 
         Args:
-            minio_config (dict): MinIO connection parameters (endpoint, access key, etc.).
+            minio_config (dict): MinIO connection parameters.
             db_url (str): PostgreSQL database connection string.
-            kafka_config (dict): Kafka topic details.
         """
         self.minio = MinIOHandler(**minio_config)
         self.db = PostgresHandler(db_url)
-        self.kafka = KafkaHandler(**kafka_config)
-        self.redis = RedisCache(**redis_config)
+        self.file_upload_processor = FileUploadProcessor(minio_config, db_url)
 
     async def validate_request(self, request_data: dict, file_data: bytes = None):
         """
@@ -48,22 +43,15 @@ class RequestValidator:
             dict: Response indicating approval or rejection.
         """
         try:
-            user_id = request_data["user_id"]
-            file_name = request_data["file_name"]
-            upload_id = request_data.get("upload_id")
-            chunk_number = request_data.get("chunk_number")
-            uploadapproval_id = request_data.get("uploadapproval_id")
-
-            logging.info(f"Validating request for user: {user_id}, File: {file_name}")
+            logging.info(f"Validating request for user: {request_data['user_id']}, File: {request_data['file_name']}")
 
             # Determine if it's a new file upload or an existing multipart chunk
-            if not upload_id and not chunk_number and not uploadapproval_id:
+            if not request_data.get("upload_id") and not request_data.get("chunk_number") and not request_data.get("uploadapproval_id"):
                 return await self._handle_new_file(request_data)
-            else:
-                return await self._handle_existing_upload(request_data, file_data)
+            return await self._handle_existing_upload(request_data, file_data)
 
         except Exception as e:
-            logging.error(f"Unexpected error during request validation: {e}")
+            logging.error(f"Unexpected error: {e}")
             return {"success": False, "error": "Internal server error."}
 
     async def _handle_new_file(self, request_data: dict):
@@ -86,7 +74,7 @@ class RequestValidator:
 
             # Step 1: Validate file type
             if not self._validate_file_type(mime_type):
-                logging.error(f"Rejected {file_name}: Unsupported file type {mime_type}")
+                logging.error("Unsupported file type.")
                 return {"success": False, "error": "Unsupported file type."}
 
             minio_path = f"{user_id}/{relative_path}/{file_name}"
@@ -115,7 +103,7 @@ class RequestValidator:
                 file_size=file_size,
                 mime_type=mime_type,
                 total_chunks=total_chunks,
-                uploaded_chunks={},  
+                uploaded_chunks={},
             )
             if not check:
                 logging.error(f"Failed to store request details for {file_name}")
@@ -130,7 +118,7 @@ class RequestValidator:
             }
 
         except Exception as e:
-            logging.error(f"Error validating new file {request_data['file_name']}: {e}")
+            logging.error(f"Error validating new file: {e}")
             return {"success": False, "error": "Internal server error."}
 
     async def _handle_existing_upload(self, request_data: dict, file_data: bytes = None):
@@ -175,43 +163,33 @@ class RequestValidator:
             ])
 
             if metadata_mismatch:
-                logging.error(f"File metadata mismatch for {file_name} (Upload ID: {upload_id})")
+                logging.error("File metadata mismatch.")
                 return {"success": False, "error": "File metadata mismatch."}
-            
-            # Step 2: Compute MD5 Hash for Chunk Validation
-            chunk_hash = hashlib.md5(file_data).hexdigest()
-
-            # Step 3: Store Chunk in Redis (Temporary Storage)
-            chunk_storage_key = f"{upload_id}_chunk_{chunk_number}"
-            hash_storage_key = f"{upload_id}_chunk_{chunk_number}_hash"
-            await self.redis.set(chunk_storage_key, file_data)
-            await self.redis.set(hash_storage_key, chunk_hash)
 
             # Step 3: If file data is provided, add the upload request to Kafka queue
             if file_data:
-                kafka_payload = {
+                upload_payload = {
                     "user_id": user_id,
                     "file_name": file_name,
                     "relative_path": relative_path,
                     "upload_id": upload_id,
                     "chunk_number": chunk_number,
-                    "chunk_storage_key": chunk_storage_key,
                     "file_size": file_size,
                     "mime_type": mime_type,
                     "total_chunks": total_chunks,
                     "uploadapproval_id": uploadapproval_id,
-                    "chunk_hash": chunk_hash
+                    "file_data": file_data
                 }
-                await self.kafka.add_to_queue("file_upload_requests", kafka_payload)
-                logging.info(f"Upload request added to Kafka: {file_name}, Chunk: {chunk_number}")
 
-                return {"success": True, "message": "Upload request queued for processing."}
+                self.file_upload_processor.process_upload(upload_payload)
+
+                return {"success": True, "message": "Chunk uploaded successfully"}
             
             logging.warning(f"No file data received for {file_name}, chunk {chunk_number}.")
             return {"success": False, "error": "No file data received."}
 
         except Exception as e:
-            logging.error(f"Error handling existing upload for {request_data['file_name']}: {e}")
+            logging.error(f"Error handling existing upload: {e}")
             return {"success": False, "error": "Internal server error."}
 
     def _validate_file_type(self, mime_type: str) -> bool:

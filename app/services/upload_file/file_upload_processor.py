@@ -7,11 +7,11 @@ import hashlib
 
 class FileUploadProcessor:
     """
-    Consumes file upload requests from Kafka, validates, uploads to MinIO,
-    updates PostgreSQL, and handles multipart upload completion.
+    Processes file upload requests, uploads to MinIO, updates PostgreSQL,
+    and handles multipart upload completion.
     """
 
-    def __init__(self, kafka_config: dict, minio_config: dict, db_url: str, redis_url: str):
+    def __init__(self, minio_config: dict, db_url: str):
         """
         Initializes Kafka handler, MinIO client, and PostgreSQL handler.
 
@@ -20,10 +20,8 @@ class FileUploadProcessor:
             minio_config (dict): MinIO connection details.
             db_url (str): PostgreSQL database connection URL.
         """
-        self.kafka = KafkaHandler(**kafka_config)
         self.minio = MinIOHandler(**minio_config)
         self.db = PostgresHandler(db_url)
-        self.redis = RedisCache(redis_url)
 
     async def process_upload(self, upload_request: dict):
         """
@@ -41,35 +39,11 @@ class FileUploadProcessor:
             total_chunks = upload_request["total_chunks"]
             relative_path = upload_request["relative_path"]
             uploadapproval_id = upload_request["uploadapproval_id"]
-            chunk_storage_key = upload_request["chunk_storage_key"]
-            stored_chunk_hash = upload_request["chunk_hash"]
-            retries = upload_request.get("retries", 0)
+            file_data = upload_request["file_data"]
+            file_size = upload_request["file_size"]
+            mime_type = upload_request["mime_type"]
 
             logging.info(f"Processing chunk {chunk_number}/{total_chunks} for {file_name}")
-
-            # Step 1: Validate Upload Approval in PostgreSQL
-            existing_upload = await self.db.get_multipart_upload(uploadapproval_id)
-            if not existing_upload:
-                logging.error(f"Invalid upload approval ID: {uploadapproval_id}")
-                return
-            
-            # Step 2: Retrieve File Chunk from Redis**
-            file_data = await self.redis.get(chunk_storage_key)
-            if not file_data:
-                logging.error(f"Chunk {chunk_number} not found in Redis for {file_name}. Retrying...")
-                await self.retry_upload(upload_request, retries)
-                return
-            
-            # **Step 3: Validate Chunk Integrity (Hash Check)**
-            computed_hash = hashlib.md5(file_data).hexdigest()
-            if computed_hash != stored_chunk_hash:
-                logging.error(f"Chunk {chunk_number} hash mismatch! Upload rejected.")
-                return  # Reject the upload if corruption detecteds
-
-             # **Step 4: Check if the Chunk Has Already Been Uploaded**
-            if chunk_number in existing_upload["uploaded_chunks"]:
-                logging.warning(f"Chunk {chunk_number} already uploaded for {file_name}. Skipping...")
-                return
 
             # **Step 5: Upload Chunk to MinIO**
             minio_path = f"{user_id}/{relative_path}/{file_name}"
@@ -77,26 +51,18 @@ class FileUploadProcessor:
             # part_info : {"part_number": chunk_number, "etag": response.etag}
 
             if not part_info:
-                logging.error(f"Failed to upload chunk {chunk_number} for {file_name}. Retrying...")
-                await self.retry_upload(upload_request, retries)
-                return
-
-            # Step 6: Update PostgreSQL with chunk details
-            etag = part_info["etag"]
-            await self.db.update_multipart_part(upload_id, chunk_number , etag)
-            await self.redis.delete(chunk_storage_key)
-            await self.redis.delete(stored_chunk_hash)
+                logging.error("Failed to upload chunk. Retrying...")
 
             # Step 7: Check if Upload is Complete
-            is_complete = await self.check_and_finalize_upload(upload_id, total_chunks)
-            if is_complete:
+            response = await self.check_and_finalize_upload(upload_id, total_chunks)
+            if response:
+                await self.update_postgres(response["minio_path"], user_id, file_name, file_size, response["etag"], mime_type)
                 logging.info(f"Upload completed for {file_name}.")
 
         except Exception as e:
-            logging.error(f"Error processing upload request: {e}")
-            await self.retry_upload(upload_request, retries)
+            logging.error(f"Error processing upload: {e}")
 
-    async def check_and_finalize_upload(self, upload_id: str, total_chunks: int):
+    async def check_and_finalize_upload(self, upload_id: str, total_chunks: int, relative_path: str):
         """
         Checks if all chunks are uploaded and finalizes the upload.
 
@@ -108,59 +74,43 @@ class FileUploadProcessor:
             bool: True if upload is finalized, else False.
         """
         try:
-            upload_status = await self.db.get_multipart_upload(upload_id)
-            uploaded_chunks = upload_status["uploaded_chunks"]
-
+            uploaded_chunks = await self.minio.get_uploaded_parts(upload_id)
             if len(uploaded_chunks) == total_chunks:
-                # Prepare the part list for finalization
-                all_parts = [{"part_number": k, "etag": v} for k, v in uploaded_chunks.items()]
                 
                 # Call MinIO to complete the multipart upload
                 minio_response = await self.minio.complete_multipart_upload(
-                    upload_status["relative_path"], upload_id, all_parts
+                    relative_path, upload_id
                 )
 
                 if minio_response:
-                    etag = minio_response.get("ETag")
-                    location = minio_response.get("Location")
-                    version_id = minio_response.get("VersionID")  # Optional
-                    bucket = minio_response.get("Bucket")
-                    object_key = minio_response.get("Key")
-
-                    # Push success message to Kafka queue for PostgreSQL update
-                    kafka_message = {
-                        "user_id": upload_status["user_id"],
-                        "file_name": upload_status["file_name"],
-                        "relative_path": upload_status["relative_path"],
-                        "upload_id": upload_id,
-                        "file_size": upload_status["file_size"],
-                        "mime_type": upload_status["mime_type"],
-                        "etag": etag,
-                        "location": location,
-                        "bucket": bucket,
-                        "object_key": object_key,
-                        "version_id": version_id if version_id else None
-                    }
-                    await self.kafka.add_to_queue("file_upload_success", kafka_message)
-
-                    logging.info(f"Upload {upload_id} finalized in MinIO. Sent success event to Kafka.")
-                    return True
+                    logging.info("Upload finalized.")
+                    return minio_response
 
         except Exception as e:
             logging.error(f"Error finalizing upload: {e}")
 
-        return False
+        return
 
-    async def retry_upload(self, upload_request: dict):
+    async def update_postgres(self, minio_path: str, user_id: str, file_name: str, file_size: int, etag: str, mime_type: str):
         """
-        Pushes failed chunk uploads to the Kafka delayed queue.
+        Updates the PostgreSQL `files` table with the uploaded file metadata.
 
         Args:
-            upload_request (dict): The original upload request.
+            success_message (dict): File metadata from Kafka.
         """
         try:
-            await self.kafka.add_to_queue("file_upload_failures_delayed", upload_request)
-            logging.error(f"Failed to upload chunk {upload_request['chunk_number']}. Sent to delayed queue.")
+
+            # Insert into files table with MinIO metadata
+            await self.db.insert_file_metadata(
+                user_id=user_id,
+                file_name=file_name,
+                file_path=minio_path,  # Store MinIO path directly
+                file_size=file_size,
+                file_hash=etag,  # Use MinIO ETag for integrity verification
+                mime_type=mime_type,
+            )
+
+            logging.info("Successfully updated PostgreSQL.")
 
         except Exception as e:
-            logging.error(f"Error in retry mechanism: {e}")
+            logging.error(f"Failed to update PostgreSQL: {e}")
