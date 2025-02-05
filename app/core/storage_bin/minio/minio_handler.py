@@ -86,7 +86,7 @@ class MinIOHandler:
                 upload_id=upload_id
             )
             logging.info("Uploaded part {chunk_number} for {minio_path}")
-            return True
+            return {"part_number": chunk_number, "etag": response.etag}
         except S3Error as e:
             logging.error("Uploading the part have been failed\n: {e}")
             return False

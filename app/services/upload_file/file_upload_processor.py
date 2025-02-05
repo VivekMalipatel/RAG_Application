@@ -74,6 +74,7 @@ class FileUploadProcessor:
             # **Step 5: Upload Chunk to MinIO**
             minio_path = f"{user_id}/{relative_path}/{file_name}"
             part_info = await self.minio.upload_part(minio_path, upload_id, chunk_number, file_data)
+            # part_info : {"part_number": chunk_number, "etag": response.etag}
 
             if not part_info:
                 logging.error(f"Failed to upload chunk {chunk_number} for {file_name}. Retrying...")
@@ -82,7 +83,7 @@ class FileUploadProcessor:
 
             # Step 6: Update PostgreSQL with chunk details
             etag = part_info["etag"]
-            await self.db.update_multipart_part(upload_id, chunk_number, etag)
+            await self.db.update_multipart_part(upload_id, chunk_number , etag)
             await self.redis.delete(chunk_storage_key)
             await self.redis.delete(stored_chunk_hash)
 

@@ -159,5 +159,26 @@ class PostgresHandler:
                 logging.error(f"Error fetching multipart uploads for uploadapproval_id '{uploadapproval_id}': {e}")
                 return None
             
-    async def update_multipart_upload(self, uploadapproval_id: str, uploaded_chunks: dict, etag):
-        
+    async def update_multipart_part(self, upload_id: str, chunk_number: int , etag: str):
+        """Apprehends the part_info into uploaded chunks for a multipart upload."""
+        async with self.async_session() as session:
+            try:
+                result = await session.execute(
+                    select(MultipartUpload).where(MultipartUpload.upload_id == upload_id)
+                )
+                upload_session = result.scalar_one_or_none()
+
+                if not upload_session:
+                    logging.error(f"Multipart upload '{upload_id}' not found.")
+                    return False
+                
+                upload_session.uploaded_chunks[str(chunk_number)] = etag
+
+                await session.commit()
+                logging.info(f"Part {chunk_number} updated for upload ID '{upload_id}' with ETag: {etag}")
+                return True
+
+            except SQLAlchemyError as e:
+                logging.error(f"Error updating part {chunk_number} for upload ID '{upload_id}': {e}")
+                await session.rollback()
+                return False
