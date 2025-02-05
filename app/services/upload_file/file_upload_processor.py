@@ -73,7 +73,7 @@ class FileUploadProcessor:
             bool: True if upload is finalized, else False.
         """
         try:
-            uploaded_chunks = await self.minio.get_uploaded_parts(upload_id)
+            uploaded_chunks = await self.minio.get_uploaded_parts(relative_path,upload_id)
             if len(uploaded_chunks) == total_chunks:
                 
                 logging.debug("Finalizing upload in MinIO...")

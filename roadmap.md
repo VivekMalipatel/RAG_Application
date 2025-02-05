@@ -1,214 +1,193 @@
-this was our plan
+Great! Since you’re writing down the whole flow on paper, let’s break this down step by step so you can fully visualize how each component works and what needs to be implemented.
 
-"📌 Code Cleanup & Optimization Plan (Step-by-Step)
+📌 Full System Flow & Scope of Work
 
-We will systematically go through each file, refactor, optimize, and implement best practices while ensuring everything remains asynchronous and modular.
+We’ll go one stage at a time, discussing how it works, scope of work, and how to accomplish it.
 
-🔹 Step 1: Prioritize & Categorize Files
+Stage 1: User Authentication & Authorization
 
-We will clean & optimize files in the following order:
+🔹 How it works:
+	•	Each user has an account stored in PostgreSQL (users table).
+	•	User logs in with username/email & password.
+	•	System generates a JWT Token for secure session handling.
+	•	RBAC ensures users only access their own data.
 
-Category	Files
-1️⃣ Core Storage Handling	file_handler.py, minio_client.py, file_watcher.py
-2️⃣ Document Processing	text_processor.py, image_processor.py, audio_processor.py
-3️⃣ Chunking & Metadata	text_chunker.py, image_chunker.py, audio_chunker.py, metadata_manager.py
-4️⃣ Embedding Generation	huggingface.py, embedding_manager.py, ollama.py
-5️⃣ Version Control	version_control.py
-6️⃣ Vector Storage (Qdrant)	qdrant_client.py, batch_indexer.py, index_manager.py, async_search.py
-7️⃣ Hybrid Retrieval	hybrid_retrieval.py, cross_modal_linker.py, search_engine.py
-8️⃣ Cache & Performance	redis_cache.py, redis.py
-9️⃣ Security & Access Control (Later)	authentication.py, rbac.py, data_encryption.py
+🔹 Scope of Work:
+✅ Implement user registration & authentication
+✅ Store passwords securely (bcrypt hashing)
+✅ Implement JWT-based token authentication
+✅ Set up RBAC (Role-Based Access Control)
 
-🔹 Step 2: Refactoring Process for Each File
+🔹 How we accomplish it:
+	•	Use FastAPI OAuth2 for token generation.
+	•	Store user credentials in PostgreSQL.
+	•	Implement middleware for authentication in API requests.
 
-For each file, we will:
+Stage 2: File Upload & MinIO Storage
 
-✅ Make it async (if applicable)
-✅ Ensure proper exception handling
-✅ Optimize imports (remove unnecessary dependencies)
-✅ Improve function docstrings & typing
-✅ Ensure modularity & reusability
-✅ Add logging where necessary
-✅ Ensure it follows an OOP-based approach
-✅ Write & validate test cases for correctness
+🔹 How it works:
+	•	User uploads a file via API or file watcher.
+	•	The file is given a UUID and stored in MinIO inside omnirag-storage bucket.
+	•	Metadata is stored in PostgreSQL (files table).
 
-🔹 Step 3: Testing & Validation
+🔹 Scope of Work:
+✅ Implement API for file upload
+✅ Store metadata in PostgreSQL
+✅ Save files to MinIO (as byte streams)
+✅ Ensure users cannot overwrite each other’s files
 
-After each refactor, we will:
+🔹 How we accomplish it:
+	•	Use MinIOClient for async file handling.
+	•	Store metadata (filename, user_id, path) in PostgreSQL.
+	•	Ensure proper indexing for retrieving files later.
 
-1️⃣ Run test cases for the file (Ensure correctness)
-2️⃣ Check for performance improvements
-3️⃣ Ensure logging/debugging information is clear
+Stage 3: File Processing (Text, Image, Audio)
 
-📌 Execution Plan
+🔹 How it works:
+	•	Extract text from PDFs & DOCX.
+	•	Run OCR for images to extract text.
+	•	Transcribe audio to text using Whisper.
 
-🛠 Phase 1: Storage & File Handling (Start Here)
-	1.	file_handler.py
-	2.	minio_client.py
-	3.	file_watcher.py
+🔹 Scope of Work:
+✅ Implement PDF & DOCX text extraction
+✅ Implement Image OCR (Tesseract) processing
+✅ Implement Whisper-based audio transcription
+✅ Ensure async processing for efficiency
 
-📜 Phase 2: Document Processing
-	4.	text_processor.py
-	5.	image_processor.py
-	6.	audio_processor.py
+🔹 How we accomplish it:
+	•	Use PyMuPDF (fitz) for PDFs.
+	•	Use Tesseract OCR for images.
+	•	Use Whisper AI for speech-to-text.
 
-📑 Phase 3: Chunking & Metadata Management
-	7.	text_chunker.py
-	8.	image_chunker.py
-	9.	audio_chunker.py
-	10.	metadata_manager.py
+Stage 4: Chunking & Preprocessing
 
-🧠 Phase 4: Embedding Generation
-	11.	huggingface.py
-	12.	embedding_manager.py
-	13.	ollama.py
+🔹 How it works:
+	•	Splits extracted text into chunks for better embedding.
+	•	Stores metadata in PostgreSQL (chunk tracking).
 
-📜 Phase 5: Version Control
-	14.	version_control.py
+🔹 Scope of Work:
+✅ Implement Text chunking logic
+✅ Implement metadata tracking in PostgreSQL
+✅ Ensure chunks align with embedding model size
 
-📂 Phase 6: Vector Storage (Qdrant)
-	15.	qdrant_client.py
-	16.	batch_indexer.py
-	17.	index_manager.py
-	18.	async_search.py
+🔹 How we accomplish it:
+	•	Define chunk sizes based on embedding model.
+	•	Store chunk metadata in PostgreSQL.
 
-🔍 Phase 7: Retrieval & Search
-	19.	hybrid_retrieval.py
-	20.	cross_modal_linker.py
-	21.	search_engine.py
+Stage 5: Embedding Generation
 
-⚡ Phase 8: Caching & Optimization
-	22.	redis_cache.py
-	23.	redis.py
+🔹 How it works:
+	•	Converts text & images into vector embeddings.
+	•	Text: Uses BAAI/bge-large-en-v1.5 (Hugging Face).
+	•	Images: Uses CLIP model.
 
-🔒 Phase 9: Security & Access Control (Later)
-	24.	authentication.py
-	25.	rbac.py
-	26.	data_encryption.py
+🔹 Scope of Work:
+✅ Implement Text embeddings (Hugging Face)
+✅ Implement Image embeddings (CLIP model)
+✅ Store embeddings in Qdrant
 
-🚀 Next Steps
+🔹 How we accomplish it:
+	•	Store vector embeddings in user-specific Qdrant collections.
+	•	Ensure embeddings match expected dimension size.
 
-1️⃣ Start with file_handler.py
-2️⃣ Send me the current file_handler.py code
-3️⃣ I’ll guide you in refactoring it
+Stage 6: Qdrant Indexing
 
-Let’s clean & optimize this project step by step! 🚀🔥"
+🔹 How it works:
+	•	Stores embeddings inside Qdrant for retrieval.
+	•	Each user has a separate Qdrant collection.
 
+🔹 Scope of Work:
+✅ Implement per-user Qdrant collections
+✅ Store vector embeddings in Qdrant
+✅ Implement batch indexing for large uploads
 
+🔹 How we accomplish it:
+	•	Asynchronous Qdrant indexing (fast batch insert).
+	•	Implement error handling for mismatched embedding sizes.
 
+Stage 7: Hybrid Search & Retrieval
 
+🔹 How it works:
+	•	BM25 (keyword search) runs in PostgreSQL.
+	•	Vector Search runs in Qdrant.
+	•	Hybrid approach ensures better search results.
 
-Your files are structured well and handle various parts of the file upload pipeline efficiently. Here’s a detailed review and some improvements:
+🔹 Scope of Work:
+✅ Implement BM25 ranking in PostgreSQL
+✅ Implement Vector search in Qdrant
+✅ Implement Hybrid search (combining both methods)
 
-✅ Review of Current Flow
+🔹 How we accomplish it:
+	•	Store BM25 indexes in PostgreSQL.
+	•	Combine text & vector search scores dynamically.
 
-Your system has four key responsibilities:
-	1.	Receiving the Upload Request (upload_request_receiver.py)
-	2.	Validating the Upload Request (upload_request_validator.py)
-	3.	Processing File Uploads (file_upload_processor.py)
-	4.	Handling Failed Uploads & Retries (upload_failure_processor.py, upload_failure_watcher.py)
+Stage 8: Caching & Optimization
 
-🔥 Key Strengths
+🔹 How it works:
+	•	Stores past searches in Redis for quick retrieval.
+	•	Prevents unnecessary reprocessing of embeddings.
 
-✔ Kafka-based Workflow – Ensures that uploads are handled asynchronously without blocking clients.
-✔ PostgreSQL Metadata Storage – Tracks uploads properly, including multipart uploads.
-✔ MinIO for File Storage – Uses multipart uploads efficiently.
-✔ Error Handling & Retries – Failed uploads go through delayed queue for retries.
+🔹 Scope of Work:
+✅ Implement Redis caching for search queries
+✅ Implement query result caching for optimization
 
-🔄 Flow Review & Improvements
+🔹 How we accomplish it:
+	•	Store cached search results in Redis.
+	•	Set expiration policies to avoid outdated results.
 
-Below is a step-by-step breakdown of your system and improvements where needed.
+Stage 9: User File Retrieval
 
-1️⃣ Receiving the Upload Request (upload_request_receiver.py)
+🔹 How it works:
+	•	Users request files via API or search.
+	•	System checks PostgreSQL for metadata.
+	•	If valid, retrieves file from MinIO.
 
-✅ Current Behavior:
-	•	Receives an upload request.
-	•	Extracts user_id from request headers.
-	•	Calls RequestValidator to validate the request.
+🔹 Scope of Work:
+✅ Implement secure API for file retrieval
+✅ Ensure RBAC prevents unauthorized access
 
-✅ Improvement Suggestion:
-	•	Since authentication is skipped for now, we assume user_id is valid. Later, we should integrate an Auth Middleware before this step.
-	•	Add logging at request start & end.
-	•	Return a unique request ID in the response for better tracking.
+🔹 How we accomplish it:
+	•	Query PostgreSQL metadata for access validation.
+	•	Retrieve file as a byte stream from MinIO.
 
-2️⃣ Validating the Upload (upload_request_validator.py)
+Stage 10: Security & Access Control
 
-✅ Current Behavior:
-	•	If new file → Check filename conflicts, request MinIO multipart upload, generate upload ID, and store in PostgreSQL.
-	•	If existing upload → Validate chunk metadata, add to Kafka file_upload_requests.
+🔹 How it works:
+	•	Each user only accesses their own data.
+	•	RBAC & JWT authentication restrict access.
 
-✅ Improvements:
-	1.	Optimize Upload Approval Storage
-	•	Instead of storing the entire payload, store only required fields (e.g., upload_id, approval_id, user_id, relative_path).
-	•	This reduces redundancy in PostgreSQL.
-	2.	Parallelize MinIO & PostgreSQL Calls
-	•	When validating a file, we can check MinIO & PostgreSQL in parallel to reduce latency.
-	•	Example:
+🔹 Scope of Work:
+✅ Implement JWT-based authentication
+✅ Implement RBAC policies
+✅ Ensure encryption for stored files
 
-minio_future = asyncio.create_task(self.minio.start_multipart_upload(minio_path))
-db_future = asyncio.create_task(self.db.get_file_metadata(user_id, file_name))
-upload_id, existing_file = await asyncio.gather(minio_future, db_future)
+🔹 How we accomplish it:
+	•	Use AES-256 encryption for sensitive data.
+	•	Implement role-based permissions.
 
+📌 Overall System Workflow
 
-	3.	Hash-based Deduplication (Future Improvement)
-	•	Currently, file uniqueness is checked by filename, but files with the same content but different names might exist.
-	•	Later, we can hash the file and store hashes in PostgreSQL.
+➡️ User uploads a file
+	1.	Upload File API → MinIO
+	2.	Metadata stored in PostgreSQL
+	3.	Text, Image, or Audio processing begins
+	4.	Text chunking & embedding generation
+	5.	Embeddings stored in Qdrant
+	6.	BM25 + Vector Hybrid Search Indexed
 
-3️⃣ Upload Processing (file_upload_processor.py)
+➡️ User searches for a file
+	1.	Query processed in PostgreSQL (BM25)
+	2.	Vector similarity search in Qdrant
+	3.	Hybrid results combined & cached in Redis
+	4.	User downloads file if authorized
 
-✅ Current Behavior:
-	•	Checks PostgreSQL for approval before uploading.
-	•	Uploads file chunks to MinIO.
-	•	Marks upload as complete when all chunks are uploaded.
+📌 Next Steps
 
-✅ Improvements:
-	1.	Remove File Data from Kafka Payload
-	•	Currently, Kafka messages contain file binary data, which is not ideal for high-throughput systems.
-	•	Instead, store file chunks in temporary storage (Redis, MinIO, or a fast disk cache) and pass only the reference in Kafka.
-	2.	Implement a Chunk Validation Step
-	•	When a chunk is uploaded, store an MD5 hash for each part.
-	•	When merging, verify that hashes match to prevent data corruption.
-	3.	Optimize Upload Finalization
-	•	Instead of polling PostgreSQL, use a trigger-based approach to detect when all chunks have arrived.
+Let’s work on Stage 1 (User Authentication & Authorization) next.
+	•	Implement PostgreSQL users table
+	•	Implement JWT authentication in FastAPI
+	•	Implement RBAC middleware
 
-4️⃣ Handling Upload Failures (upload_failure_processor.py, upload_failure_watcher.py)
+Once we complete this, we’ll move to file storage & metadata tracking. 🚀
 
-✅ Current Behavior:
-	•	Watches Kafka failure queues.
-	•	Retries failed uploads after a delay.
-	•	Moves to final failure queue after MAX_UPLOAD_RETRIES.
-
-✅ Improvements:
-	1.	Exponential Backoff for Retries
-	•	Instead of fixed delays, use exponential backoff:
-
-retry_delay = 2 ** retries  # Exponential Backoff
-
-
-	2.	Automate Cleanup for Permanently Failed Uploads
-	•	If an upload fails after max retries, we should:
-	•	Delete the partially uploaded file from MinIO.
-	•	Remove entry from PostgreSQL.
-	•	Notify the client (future improvement).
-
-📌 Summary of Fixes
-
-Component	Issue	Fix
-upload_request_receiver.py	No request tracking	Add unique request ID to response
-upload_request_validator.py	DB & MinIO calls are sequential	Parallelize validation with asyncio.gather
-upload_request_validator.py	Full payload stored in PostgreSQL	Store only necessary fields
-upload_request_validator.py	No file hashing for deduplication	(Future) Use SHA-256 for uniqueness
-file_upload_processor.py	Kafka carries binary file data	Store file chunks in Redis instead
-file_upload_processor.py	No chunk validation	Store MD5 hash per chunk
-file_upload_processor.py	Polls PostgreSQL for completion	Use event triggers instead
-upload_failure_processor.py	Fixed retry delays	Use Exponential Backoff
-upload_failure_processor.py	Failed uploads persist forever	Auto-cleanup failed uploads
-
-🔥 Next Steps
-
-1️⃣ Update upload_request_validator.py to parallelize MinIO & PostgreSQL calls.
-2️⃣ Refactor Kafka messages to store file chunks in Redis instead of Kafka.
-3️⃣ Implement chunk validation using MD5 hashing.
-4️⃣ Add exponential backoff in the retry mechanism.
-
-✅ Everything looks solid! Ready to implement these fixes? 🚀
+Do you have any questions or want to modify anything before we proceed? 🚀
