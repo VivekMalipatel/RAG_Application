@@ -91,6 +91,31 @@ class MinIOHandler:
             logging.error("Uploading the part have been failed\n: {e}")
             return False
         
+    async def complete_multipart_upload(self, object_name: str, upload_id: str, parts: list):
+        """
+        Completes a multipart upload by combining all uploaded parts.
+
+        Args:
+            object_name (str): The destination object path in MinIO.
+            upload_id (str): The multipart upload session ID.
+            parts (list): List of uploaded parts.
+
+        Returns:
+            str: The final object path in MinIO if successful, else None.
+        """
+        try:
+            await asyncio.to_thread(
+                self.client.complete_multipart_upload,
+                self.bucket_name,
+                object_name,
+                upload_id,
+                parts
+            )
+            logging.info(f"Multipart upload completed for '{object_name}', Upload ID: {upload_id}")
+            return f"{self.bucket_name}/{object_name}"
+        except S3Error as e:
+            logging.error(f"Error completing multipart upload for '{object_name}': {e}")
+            return None
     
     async def abort_multipart_upload(self, object_name: str, upload_id: str):
         """
