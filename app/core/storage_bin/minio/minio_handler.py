@@ -12,7 +12,7 @@ load_dotenv()
 class MinIOHandler:
     """handles file storage operations with MinIO, 
     including file upload, download, and multipart upload."""
-    def __init__(self, endpoint: str, access_key: str, secret_key: str, bucket_name: str, secure: bool = False):
+    def __init__(self, endpoint: str, access_key: str, secret_key: str, secure: bool = False):
         """
         Initializes the MinIO client with configurable parameters.
 
@@ -20,17 +20,20 @@ class MinIOHandler:
             endpoint (str): MinIO server URL (e.g., 'localhost:9000').
             access_key (str): MinIO username or access key.
             secret_key (str): MinIO password or secret key.
-            bucket_name (str): The bucket name to be used.
             secure (bool, optional): Whether to use HTTPS. Defaults to True.
         """
-        self.client = Minio(
-            endpoint=endpoint,
-            access_key=access_key,
-            secret_key=secret_key,
-            secure=secure
-        )
-        self.bucket_name = bucket_name
-        self.ensure_bucket_exists()
+        try:
+            self.client = Minio(
+                endpoint=endpoint,
+                access_key=access_key,
+                secret_key=secret_key,
+                secure=secure
+            )
+            self.bucket_name = "miniobucket"
+            self.ensure_bucket_exists()
+        except Exception as e:
+            logging.error(f"Error initializing MinIO client: {e}")
+            return None
     
     def ensure_bucket_exists(self):
         """
@@ -40,9 +43,37 @@ class MinIOHandler:
             if not self.client.bucket_exists(self.bucket_name):
                 self.client.make_bucket(self.bucket_name)
                 logging.info(f"Bucket '{self.bucket_name}' created successfully.")
+                
         except S3Error as e:
             logging.error(f"Error ensuring MinIO bucket exists: {e}")
-            raise
+            raise Exception("Error creating MinIO bucket")
+        
+    #did for testing purposes
+    def abort_incomplete_upload(self, object_name: str):
+        incomplete_uploads = self.client._list_multipart_uploads(bucket_name=self. bucket_name, prefix=object_name)
+        count = 0
+        for upload in incomplete_uploads.uploads:
+            object_name= upload.object_name
+            upload_id= upload.upload_id
+            count += 1
+            print(count,": upload object_name=" ,upload.object_name ,"\nupload id =", upload.upload_id )
+            try:
+                self.client._abort_multipart_upload(
+                    self.bucket_name,
+                    object_name,
+                    upload_id
+                )
+            except S3Error as e:
+                logging.error(f"Aborted incomplete upload ID={upload.upload_id}")
+                print("error", e) 
+                raise e
+        print("abort completed")
+        incomplete = self.client._list_multipart_uploads(bucket_name=self. bucket_name, prefix=object_name)
+        count = 0
+        for upload in incomplete.uploads:
+            count += 1
+            #print("upload object_name=" ,upload.object_name ,"\nupload id =", upload.upload_id )
+        print("Count of incomplete uploads after aborting: ", count)
 
 
     async def start_multipart_upload(self, object_path: str) -> str:
@@ -56,11 +87,18 @@ class MinIOHandler:
             str: The upload ID if successful, else None.
         """
         try:
-            upload_id = self.client.create_multipart_upload(self.bucket_name, object_path)
-            logging.info(f"Multipart upload started for {object_path} with ID: {upload_id}")
+            # Abort any incomplete multipart uploads for this object  #used for testing purposes
+            print("Abort any incomplete multipart uploads for this object")
+            self.abort_incomplete_upload(object_name= object_path)
+            
+            upload_id = self.client._create_multipart_upload(bucket_name = self.bucket_name, object_name =object_path, headers={})
+            #logging.info(f"Multipart upload started for {object_path} with ID: {upload_id}")
+            logging.info(f"Multipart upload started for {object_path} with ID")
+            print(f"Multipart upload started for {object_path} with ID")
             return upload_id
         except S3Error as e:
             logging.error(f"Initiating the Multipart upload have been failed\n: {e}")
+            raise Exception("Initiating the Multipart upload have been failed")
             return None
             
     
@@ -75,19 +113,19 @@ class MinIOHandler:
             file_data (BytesIO): The file data to be uploaded.
         """
         try:
-            file_stream = BytesIO(file_data)
 
             response = await asyncio.to_thread(
-                self.client.upload_part,
-                self.bucket_name,
-                minio_path,
-                file_stream,
-                length=len(file_stream),
-                part_number=chunk_number,
-                upload_id=upload_id
+                self.client._upload_part,
+                bucket_name = self.bucket_name,
+                object_name = minio_path,
+                data = file_data,
+                part_number = chunk_number,
+                upload_id= upload_id,
+                headers = {}
             )
             logging.info(f"Uploaded part {chunk_number} for {minio_path}")
-            return {"part_number": chunk_number, "etag": response.etag}
+            print("response=", response)
+            return {"part_number": chunk_number, "etag": response}
         except S3Error as e:
             logging.error(f"Uploading the part have been failed\n: {e}")
             return False
@@ -107,11 +145,11 @@ class MinIOHandler:
         parts = self.client.list_parts(self.bucket_name, object_name, upload_id)
         try:
             await asyncio.to_thread(
-                self.client.complete_multipart_upload,
-                self.bucket_name,
-                object_name,
-                upload_id,
-                parts
+                self.client._complete_multipart_upload,
+                bucket_name= self.bucket_name,
+                object_name= object_name,
+                upload_id =upload_id,
+                parts =parts
             )
             logging.info(f"Multipart upload completed for '{object_name}', Upload ID: {upload_id}")
             return f"{self.bucket_name}/{object_name}"
@@ -129,9 +167,9 @@ class MinIOHandler:
         """
         try:
             # List all active multipart uploads for the bucket and object
-            uploads = self.client.list_multipart_uploads(self.bucket_name, prefix=object_name)
-            for upload in uploads:
-                if upload.key == object_name and upload.upload_id == upload_id:
+            Listuploads = self.client._list_multipart_uploads(bucket_name=self.bucket_name, prefix=object_name)
+            for upload in Listuploads.uploads:
+                if upload.object_name == object_name and upload.upload_id == upload_id:
                     logging.info(f"Found active multipart upload for {object_name} with ID: {upload_id}")
                     break
         except S3Error as e:
@@ -141,7 +179,7 @@ class MinIOHandler:
         # Abort the multipart upload
         try:
             await asyncio.to_thread(
-                self.client.abort_multipart_upload,
+                self.client._abort_multipart_upload,
                 self.bucket_name,
                 object_name,
                 upload_id
@@ -165,7 +203,7 @@ class MinIOHandler:
         """
         try:           
             # List all parts uploaded for the object
-            parts = self.client.list_parts(self.bucket_name, object_name, upload_id)
+            parts = self.client._list_parts(self.bucket_name, object_name, upload_id)
             return set(part.part_number for part in parts)
         except S3Error as e:
             logging.error(f"Error fetching uploaded parts for {object_name}: {e}")

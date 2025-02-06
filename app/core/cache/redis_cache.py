@@ -1,6 +1,7 @@
-import aioredis
+import redis.asyncio as aioredis
 import logging
 import os
+import json
 
 class RedisCache:
     """
@@ -15,7 +16,7 @@ class RedisCache:
             redis_url (str): Redis connection URL.
         """
         self.redis_url = redis_url
-        self.redis = None
+        self.redis = None 
 
     async def connect(self):
         """Establishes a connection to Redis."""
@@ -23,17 +24,20 @@ class RedisCache:
             self.redis = await aioredis.from_url(self.redis_url)
             logging.info("Connected to Redis.")
 
-    async def set(self, key: str, value: bytes, expire: int = 3600):
+    async def set(self, key: str, value: json, expire: int = 3600):
         """
         Stores a key-value pair in Redis with an expiration time.
 
         Args:
             key (str): The key to store.
-            value (bytes): The file chunk data.
+            value (dict) : { "upload_id": upload_id,
+                "relative_path": relative_path,
+                "total_chunks": total_chunks
+            }
             expire (int, optional): Expiration time in seconds. Defaults to 1 hour.
         """
         try:
-            await self.redis.set(key, value, ex=expire)
+            await self.redis.set(key, json.dumps(value), ex=expire)
             logging.info(f"Stored chunk in Redis: {key}")
         except Exception as e:
             logging.error(f"Error storing chunk in Redis: {e}")
@@ -50,7 +54,7 @@ class RedisCache:
         """
         try:
             data = await self.redis.get(key)
-            return data
+            return json.loads(data)
         except Exception as e:
             logging.error(f"Error retrieving chunk from Redis: {e}")
             return None

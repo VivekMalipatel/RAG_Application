@@ -21,8 +21,8 @@ class FileMetadata(Base):
     mime_type = Column(String, nullable=False)
     file_size = Column(Integer, nullable=False)
     file_hash = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class PostgresHandler:
@@ -39,7 +39,7 @@ class PostgresHandler:
         self.async_session = sessionmaker(
             bind=self.engine, expire_on_commit=False, class_=AsyncSession
         )
-    
+
     async def init_db(self):
         """Initializes the database (creates tables if they do not exist)."""
         async with self.engine.begin() as conn:
@@ -50,8 +50,9 @@ class PostgresHandler:
         """Closes the database engine."""
         await self.engine.dispose()
         logging.info("PostgreSQL connection closed.")
+        
  
- 
+
     # -------------------------------
     # FILE METADATA CRUD OPERATIONS
     # -------------------------------
@@ -72,7 +73,7 @@ class PostgresHandler:
                 await session.commit()
                 await session.refresh(new_file)
                 return new_file
-            except Exception as e:
+            except SQLAlchemyError as e:
                 logging.error(f"Error inserting file metadata for '{file_name}': {e}")
                 await session.rollback()
                 return None
@@ -83,7 +84,8 @@ class PostgresHandler:
             try:
                 stmt = select(FileMetadata).filter_by(user_id=user_id, file_name=file_name)
                 result = await session.execute(stmt)
-                return result.scalars().first()
-            except Exception as e:
+                return(result.scalars().first()) 
+            except SQLAlchemyError as e:
+                print("Error fetching file metadata")
                 logging.error(f"Error fetching file metadata for '{file_name}': {e}")
                 return None

@@ -9,7 +9,7 @@ class FileUploadProcessor:
     and handles multipart upload completion.
     """
 
-    def __init__(self, minio_config: dict, db_url: str):
+    def __init__(self, minio: MinIOHandler , db: PostgresHandler, cache: RedisCache):
         """
         Initializes Kafka handler, MinIO client, and PostgreSQL handler.
 
@@ -18,9 +18,9 @@ class FileUploadProcessor:
             minio_config (dict): MinIO connection details.
             db_url (str): PostgreSQL database connection URL.
         """
-        self.minio = MinIOHandler(**minio_config)
-        self.db = PostgresHandler(db_url)
-        self.cache = RedisCache()
+        self.minio = minio
+        self.db = db
+        self.cache = cache
 
     async def process_upload(self, upload_request: dict):
         """
@@ -41,14 +41,23 @@ class FileUploadProcessor:
             file_size = upload_request["file_size"]
             mime_type = upload_request["mime_type"]
 
+            minio_path = f"{user_id}/{relative_path}/{file_name}"
+            #minio_path = f"{user_id}/{relative_path}"
+
             logging.info(f"Processing chunk {chunk_number}/{total_chunks} for {file_name}")
+            print(f"Processing chunk {chunk_number}/{total_chunks} for {file_name}")
 
             logging.debug(f"Uploading chunk {chunk_number} to MinIO at path {minio_path}")
-            minio_path = f"{user_id}/{relative_path}/{file_name}"
+            print(f"Uploading chunk {chunk_number} to MinIO at path {minio_path}")
+
+            print("Upload the chunk to MinIO")
             part_info = await self.minio.upload_part(minio_path, upload_id, chunk_number, file_data)
 
             if not part_info:
                 logging.error("Failed to upload chunk. Retrying...")
+                print("Failed to upload chunk. Retrying...")
+            
+            print("Upload the chunk to MinIO is done")
 
             logging.debug("Checking if all chunks are uploaded...")
             response = await self.check_and_finalize_upload(upload_id, total_chunks, relative_path)
@@ -59,7 +68,8 @@ class FileUploadProcessor:
                 logging.info(f"Upload completed for {file_name}.")
 
         except Exception as e:
-            logging.error(f"Error processing upload: {e}")
+            logging.error(f"Error processing upload : {e}")
+            raise (e)
 
     async def check_and_finalize_upload(self, upload_id: str, total_chunks: int, relative_path: str):
         """
@@ -85,6 +95,7 @@ class FileUploadProcessor:
                 if minio_response:
                     logging.info("Upload finalized.")
                     return minio_response
+            self.db.close() # Close the database connection
 
         except Exception as e:
             logging.error(f"Error finalizing upload: {e}")
@@ -95,8 +106,6 @@ class FileUploadProcessor:
         """
         Updates the PostgreSQL `files` table with the uploaded file metadata.
 
-        Args:
-            success_message (dict): File metadata from Kafka.
         """
         try:
 
@@ -115,3 +124,4 @@ class FileUploadProcessor:
 
         except Exception as e:
             logging.error(f"Failed to update PostgreSQL: {e}")
+            raise (e)
