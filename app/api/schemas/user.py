@@ -6,9 +6,22 @@ class UserBase(BaseModel):
     email: EmailStr
     username: str
 
+class UserListResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    is_active: bool
+    created_at: datetime
 
-class UserUpdate(UserBase):
-    password: Optional[str] = None
+    class Config:
+        from_attributes = True
+
+class DeleteUserResponse(BaseModel):
+    message: str
+    username: str
+    
+class UserEmailUpdate(BaseModel):
+    email: EmailStr
 
 class UserInDBBase(UserBase):
     id: int
@@ -47,7 +60,7 @@ class UserData(UserBase):
     created_at: datetime
 
 class UserResponse(BaseModel):
-    userId: int  # Required field as per error
+    userId: int
     username: str
     email: str
     is_active: bool
