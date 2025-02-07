@@ -8,13 +8,7 @@ class UploadRequestReceiver:
         self.validator = RequestValidator(minio_config, db_url, redis_url)
 
     async def receive_upload_request(self, request_data: dict, file_data: bytes = None):
-        """
-        Processes an incoming file upload request.
 
-        Args:
-            request_data (dict): User and file details.
-            file_data (bytes): Optional chunk data.
-        """
         try:
             if not request_data.get("user_id"):
                 logging.error("Unauthorized request: Missing user_id.")

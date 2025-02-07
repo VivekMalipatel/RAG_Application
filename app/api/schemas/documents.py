@@ -30,3 +30,4 @@ class DocumentResponse(DocumentBase):
 
     class Config:
         from_attributes = True
+

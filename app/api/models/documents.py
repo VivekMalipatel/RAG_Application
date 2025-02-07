@@ -17,8 +17,11 @@ class Document(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    file_url = Column(String(500), nullable=False)
-    file_type = Column(String(50), nullable=False)
+    file_name = Column(Text, nullable=False)
+    file_path = Column(Text, nullable=False)
+    mime_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
+    file_hash = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     quadrant_status = Column(
         Enum(QuadrantStatus), 

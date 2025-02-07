@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     MINIO_BUCKET_NAME: str
     QDRANT_URL: str
     OLLAMA_URL: str
+    PROJECT_NAME: str = "FastAPI User Management"
+    VERSION: str = "1.0.0"
+    API_V1_STR: str = "/api/v1"
 
     class Config:
         env_file = ".env"
