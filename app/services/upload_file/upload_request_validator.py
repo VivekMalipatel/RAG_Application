@@ -61,7 +61,7 @@ class RequestValidator:
             logging.info(f"Validating request for user: {request_data['user_id']}, File: {request_data['file_name']}")
 
             # Determine if it's a new file upload or an existing multipart chunk
-            if not request_data.get("upload_id") and not request_data.get("chunk_number") and not request_data.get("uploadapproval_id"):
+            if not request_data.get("upload_id") and not request_data.get("chunk_number") and not request_data.get("uploadapproval_id") and (file_data is None):
                 logging.info(f"New file upload request for {request_data['file_name']}") #used for testing
                 return await self._handle_new_file(request_data)
             return await self._handle_existing_upload(request_data, file_data)
@@ -94,17 +94,12 @@ class RequestValidator:
                 return {"success": False, "error": "Unsupported file type."}
 
             minio_path = f"{user_id}/{relative_path}/{file_name}"
-            #minio_path = f"{user_id}/{relative_path}"
-            print(f"minio_path = {minio_path}")
 
             # Check for duplicate file names in PostgreSQL
             existing_file = await self.db.get_file_metadata(user_id, file_name)
             if existing_file:
                 logging.error(f"File '{file_name}' already exists in {relative_path}.")
                 return {"success": False, "error": "File name already exists."}
-            
-            else:
-                print(f"File '{file_name}' does not exist in {relative_path}.")
 
             # Request a new multipart upload from MinIO
             upload_id = await self.minio.start_multipart_upload(minio_path)
@@ -174,12 +169,13 @@ class RequestValidator:
                 approval_data["relative_path"] != relative_path or
                 approval_data["total_chunks"] != total_chunks
             )
+            print("metadata_mismatch=", metadata_mismatch)
 
             if metadata_mismatch:
                 logging.error("File metadata mismatch.")
                 return {"success": False, "error": "Metadata mismatch."}
-            else:
-                print("File metadata mismatch.")
+            
+            print("file_data=", file_data)
 
             if file_data:
                 upload_payload = {

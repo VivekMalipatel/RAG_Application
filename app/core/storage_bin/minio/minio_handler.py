@@ -29,7 +29,8 @@ class MinIOHandler:
                 secret_key=secret_key,
                 secure=secure
             )
-            self.bucket_name = "miniobucket"
+            print("Done++")
+            self.bucket_name = os.getenv("MINIO_BUCKET_NAME")
             self.ensure_bucket_exists()
         except Exception as e:
             logging.error(f"Error initializing MinIO client: {e}")
@@ -87,14 +88,10 @@ class MinIOHandler:
             str: The upload ID if successful, else None.
         """
         try:
-            # Abort any incomplete multipart uploads for this object  #used for testing purposes
-            print("Abort any incomplete multipart uploads for this object")
             self.abort_incomplete_upload(object_name= object_path)
             
             upload_id = self.client._create_multipart_upload(bucket_name = self.bucket_name, object_name =object_path, headers={})
-            #logging.info(f"Multipart upload started for {object_path} with ID: {upload_id}")
-            logging.info(f"Multipart upload started for {object_path} with ID")
-            print(f"Multipart upload started for {object_path} with ID")
+            logging.info(f"Multipart upload started for {object_path} with ID: {upload_id}")
             return upload_id
         except S3Error as e:
             logging.error(f"Initiating the Multipart upload have been failed\n: {e}")

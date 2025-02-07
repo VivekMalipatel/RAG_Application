@@ -1,6 +1,5 @@
 SQLAlchemy
 python-dotenv
-psycopg2-binary
 qdrant-client[fastembed]
 requests
 redis[hiredis]
@@ -38,7 +37,6 @@ email-validator
 python-jose
 passlib
 python-multipart
-psycopg2-binary
 bcrypt
 
 minio
