@@ -1,28 +1,22 @@
 from fastapi import FastAPI
 from app.api.v1.endpoints import agent, documents, user
-from app.core.cache.redis_cache import RedisCache
-from app.core.storage_bin.minio import MinIOHandler
-from app.config import settings
-from app.api.db.base import get_db
-import redis.asyncio as aioredis  # new import
+from app.api.db.base import get_db, close_db
+from app.core.storage_bin.minio import minio_session
+from app.core.cache import redis_session
+
 
 async def lifespan(app: FastAPI):
-    MINIO_CONFIG = {
-        "endpoint": settings.MINIO_ENDPOINT,
-        "access_key": settings.MINIO_ACCESS_KEY,
-        "secret_key": settings.MINIO_SECRET_KEY,
-    }
-    app.state.minio = MinIOHandler(**MINIO_CONFIG)
-    # Create and store the redis connection in app.state, then inject it into RedisCache.
-    redis_conn = await aioredis.from_url(settings.REDIS_URL)
-    app.state.redis = RedisCache(redis_conn)
-    await get_db()
+    """Startup and Shutdown events for FastAPI."""
+    
+    await get_db() 
+    await minio_session.connect()
+    await redis_session.connect()
+
     yield
-    # Shutdown: add shutdown logic if needed
-    if hasattr(app.state.minio, "close"):
-        await app.state.minio.close()
-    if hasattr(app.state.redis, "close"):
-        await app.state.redis.close()
+
+    await close_db() 
+    await minio_session.close()
+    await redis_session.close()
 
 # Create FastAPI instance with lifespan events
 app = FastAPI(

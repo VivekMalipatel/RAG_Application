@@ -1,40 +1,24 @@
-import redis.asyncio as aioredis
 import logging
-import os
 import json
+from app.core.cache.session_redis import redis_session
 
 class RedisCache:
     """
-    Handles temporary storage of file chunks in Redis.
+    Handles temporary storage of file chunks in Redis 
+    using the shared redis session.
     """
 
-    def __init__(self, redis_url: str):
+    def __init__(self):
         """
-        Initializes Redis connection.
-
-        Args:
-            redis_url (str): Redis connection URL.
+        Expects that main.py has already initialized the shared Redis session.
         """
-        self.redis_url = redis_url
-        self.redis = None 
-
-    async def connect(self):
-        """Establishes a connection to Redis."""
+        self.redis = redis_session.client
         if not self.redis:
-            self.redis = await aioredis.from_url(self.redis_url)
-            logging.info("Connected to Redis.")
+            logging.error("Redis client is not initialized. Check session_redis connection in main.py.")
 
-    async def set(self, key: str, value: json, expire: int = 3600):
+    async def set(self, key: str, value: dict, expire: int = 3600):
         """
         Stores a key-value pair in Redis with an expiration time.
-
-        Args:
-            key (str): The key to store.
-            value (dict) : { "upload_id": upload_id,
-                "relative_path": relative_path,
-                "total_chunks": total_chunks
-            }
-            expire (int, optional): Expiration time in seconds. Defaults to 1 hour.
         """
         try:
             await self.redis.set(key, json.dumps(value), ex=expire)
@@ -44,17 +28,11 @@ class RedisCache:
 
     async def get(self, key: str):
         """
-        Retrieves a key from Redis.
-
-        Args:
-            key (str): The key to retrieve.
-
-        Returns:
-            bytes: The file chunk data, or None if not found.
+        Retrieves a value from Redis.
         """
         try:
             data = await self.redis.get(key)
-            return json.loads(data)
+            return json.loads(data) if data else None
         except Exception as e:
             logging.error(f"Error retrieving chunk from Redis: {e}")
             return None
@@ -62,9 +40,6 @@ class RedisCache:
     async def delete(self, key: str):
         """
         Deletes a key from Redis.
-
-        Args:
-            key (str): The key to delete.
         """
         try:
             await self.redis.delete(key)

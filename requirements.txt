@@ -48,6 +48,6 @@ watchdog
 
 aiobotocore
 aiofiles
-aiokafka
+aioredis
 
 asyncpg

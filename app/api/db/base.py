@@ -15,3 +15,7 @@ Base = declarative_base()
 async def get_db():
     async with SessionLocal() as session:
         yield session
+
+async def close_db():
+    """Closes the database connection on FastAPI shutdown."""
+    await engine.dispose()
