@@ -1,14 +1,15 @@
 from fastapi import FastAPI
 from app.api.v1.endpoints import agent, documents, user
-from app.api.db.base import get_db, close_db
+from app.api.db.base import init_db, close_db
 from app.core.storage_bin.minio import minio_session
 from app.core.cache import redis_session
+import uvicorn
 
 
 async def lifespan(app: FastAPI):
     """Startup and Shutdown events for FastAPI."""
     
-    await get_db() 
+    await init_db()
     await minio_session.connect()
     await redis_session.connect()
 
@@ -34,3 +35,7 @@ app.include_router(documents.router, prefix="/documents", tags=["Documents"])
 @app.get("/")
 async def root():
     return {"message": "Welcome to OmniRAG API"}
+
+if __name__ == "__main__":
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

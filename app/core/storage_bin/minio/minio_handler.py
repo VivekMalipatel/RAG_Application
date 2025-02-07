@@ -1,9 +1,8 @@
 import asyncio
 import logging
-import aibotocore
 from io import BytesIO
 from minio.error import S3Error
-from config import settings
+from app.config import settings
 from app.core.storage_bin.minio.session_minio import minio_session
 
 class MinIOHandler:

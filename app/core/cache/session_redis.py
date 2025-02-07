@@ -1,4 +1,4 @@
-import aioredis
+import redis.asyncio as redis
 import logging
 from app.config import settings
 
@@ -10,7 +10,7 @@ class RedisClient:
     async def connect(self):
         """Create a Redis connection pool if not already initialized."""
         if self.client is None:
-            self.client = await aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+            self.client = redis.from_url(settings.REDIS_URL, decode_responses=True)
             logging.info("Redis connection pool initialized")
 
     async def close(self):
