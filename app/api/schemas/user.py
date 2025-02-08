@@ -67,3 +67,19 @@ class UserResponse(BaseModel):
     created_at: datetime
     access_token: str
     token_type: str
+    
+class SignInRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+class SignInResponse(BaseModel):
+    userId: int
+    username: str
+    email: str
+    is_active: bool
+    created_at: datetime
+    access_token: str
+    token_type: str
+
+    class Config:
+        from_attributes = True

@@ -6,6 +6,11 @@ from ...schemas.user import UserCreate, UserResponse, UserEmailUpdate, UserListR
 from ...core.crud import CRUDBase
 from ...core.security import get_password_hash, create_access_token
 router = APIRouter()
+from fastapi.security import OAuth2PasswordRequestForm
+from ...schemas.user import UserCreate, UserResponse, SignInRequest, SignInResponse
+from ...core.security import verify_password
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 def process_user_create(data: dict) -> dict:
     # Convert password to hashed_password
@@ -17,6 +22,75 @@ user_crud = (
     CRUDBase[User, UserCreate, UserResponse](User)
     .set_create_handler(process_user_create)
 )
+
+
+#auth
+@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def signup(user: UserCreate, db: AsyncSession = Depends(get_db)):
+    # Check existing user
+    query = select(User).where(
+        (User.email == user.email) | (User.username == user.username)
+    )
+    result = await db.execute(query)
+    existing_user = result.scalar_one_or_none()
+    
+    if existing_user:
+        if existing_user.email == user.email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already taken"
+        )
+    
+    # Create user
+    db_user = await user_crud.create(db=db, obj_in=user)
+    
+    # Generate token
+    access_token = create_access_token(data={"sub": db_user.email})
+    
+    return UserResponse(
+        userId=db_user.id,
+        username=db_user.username,
+        email=db_user.email,
+        is_active=db_user.is_active,
+        created_at=db_user.created_at,
+        access_token=access_token,
+        token_type="bearer"
+    )
+
+@router.post("/signin", response_model=SignInResponse)
+async def signin(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    query = select(User).where(User.username == form_data.username)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+    
+    if not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+    
+    access_token = create_access_token(data={"sub": user.email})
+    
+    return SignInResponse(
+        userId=user.id,
+        username=user.username,
+        email=user.email,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        access_token=access_token,
+        token_type="bearer"
+    )
+
 
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(user: UserCreate, db: Session = Depends(get_db)):

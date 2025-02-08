@@ -3,6 +3,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.db.base import Base
+from sqlalchemy import select
 
 ModelType = TypeVar("ModelType", bound=Base)
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
@@ -23,14 +24,16 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         return self
 
     async def get(self, db: AsyncSession, id: Any) -> Optional[ModelType]:
-        async with db.begin():
-            result = await db.execute(self.model.__table__.select().where(self.model.id == id))
-            return result.scalars().first()
+        result = await db.execute(
+            select(self.model).where(self.model.id == id)
+        )
+        return result.scalar_one_or_none()
 
     async def get_multi(self, db: AsyncSession, *, skip: int = 0, limit: int = 100) -> List[ModelType]:
-        async with db.begin():
-            result = await db.execute(self.model.__table__.select().offset(skip).limit(limit))
-            return result.scalars().all()
+        result = await db.execute(
+            select(self.model).offset(skip).limit(limit)
+        )
+        return result.scalars().all()
 
     async def create(self, db: AsyncSession, *, obj_in: CreateSchemaType) -> ModelType:
         obj_in_data = jsonable_encoder(obj_in)
@@ -38,8 +41,8 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             obj_in_data = self._process_create(obj_in_data)
 
         db_obj = self.model(**obj_in_data)
-        async with db.begin():
-            db.add(db_obj)
+        db.add(db_obj)
+        await db.commit()
         await db.refresh(db_obj)
         return db_obj
 
@@ -54,13 +57,14 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             if field in update_data:
                 setattr(db_obj, field, update_data[field])
 
-        async with db.begin():
-            db.add(db_obj)
+        db.add(db_obj)
+        await db.commit()
         await db.refresh(db_obj)
         return db_obj
 
     async def delete(self, db: AsyncSession, *, id: int) -> ModelType:
-        async with db.begin():
-            obj = await db.get(self.model, id)
+        obj = await self.get(db, id)
+        if obj:
             await db.delete(obj)
+            await db.commit()
         return obj
