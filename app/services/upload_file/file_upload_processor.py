@@ -40,7 +40,7 @@ class FileUploadProcessor:
 
             response = await self.check_and_finalize_upload(upload_id, total_chunks, minio_path)
             if response:
-                await self.update_postgres(response["minio_path"], user_id, file_name, file_size, response["etag"], mime_type)
+                await self.update_postgres(response["Key"], user_id, file_name, file_size, response["ETag"], mime_type)
                 await self.cache.delete(upload_request["uploadapproval_id"])
                 if approval_id in self.approval_cache:
                     del self.approval_cache[approval_id]
@@ -61,10 +61,10 @@ class FileUploadProcessor:
                 logging.debug("Finalizing upload in MinIO...")
                 
                 # Finalize the upload
-                await self.minio.complete_multipart_upload(minio_path, upload_id)
+                response = await self.minio.complete_multipart_upload(minio_path, upload_id)
                 
                 logging.info("Upload finalized.")
-                return True
+                return response
 
         except Exception as e:
             logging.error(f"Error finalizing upload: {e}")

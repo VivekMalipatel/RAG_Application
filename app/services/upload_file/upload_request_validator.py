@@ -28,7 +28,7 @@ class RequestValidator:
             logging.info(f"Validating request for user: {request_data['user_id']}, File: {request_data['file_name']}")
 
             # Determine if it's a new file upload or an existing multipart chunk
-            if not request_data.get("upload_id") and not request_data.get("chunk_number") and not request_data.get("uploadapproval_id") and (file_data is None):
+            if not request_data.get("upload_id") and not request_data.get("chunk_number") and not request_data.get("approval_id") and (file_data is None):
                 return await self._handle_new_file(request_data)
             return await self._handle_existing_upload(request_data, file_data)
 

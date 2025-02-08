@@ -104,7 +104,7 @@ class MinIOHandler:
             sorted_parts = sorted(parts, key=lambda part: part['PartNumber'])
             
             # Complete the multipart upload
-            await self.client.complete_multipart_upload(
+            response = await self.client.complete_multipart_upload(
                 Bucket=self.bucket_name,
                 Key=object_name,
                 UploadId=upload_id,
@@ -112,11 +112,10 @@ class MinIOHandler:
             )
             
             logging.info(f"Multipart upload completed for '{object_name}', Upload ID: {upload_id}")
+            return response
         except S3Error as e:
             logging.error(f"Completing the multipart upload failed: {e}")
             raise Exception("Completing the multipart upload failed")
-
-
     
     async def abort_multipart_upload(self, object_name: str, upload_id: str):
         """

@@ -20,7 +20,8 @@ class DocumentHandler:
                 "file_hash": file_hash,
                 "mime_type": mime_type
             }
-            new_file = await session.run_sync(self.document_crud.create, obj_in=file_data)
+            # Directly await the async create method
+            new_file = await self.document_crud.create(db=session, obj_in=file_data)
             return new_file
 
     async def get_file_metadata(self, user_id: str, file_name: str):
