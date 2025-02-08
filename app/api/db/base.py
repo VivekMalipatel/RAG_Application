@@ -8,28 +8,30 @@ import logging
 engine = create_async_engine(settings.DATABASE_URL, future=True, echo=True)
 
 # Create Async Session Factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=AsyncSession)
+AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 # Base Model
 Base = declarative_base()
 
 # Dependency for DB session (to be used in FastAPI endpoints)
 async def get_db():
-    async with SessionLocal() as session:
-        yield session
+    """Yields a new database session for each request."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
 
 async def init_db():
-    """
-    Initializes the database by testing the connection.
-    """
+    """Initializes the database on startup."""
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logging.info("Database connection test succeeded.")
+        logging.info("Database initialized successfully")
     except Exception as e:
         logging.error(f"Database initialization failed: {e}")
         raise e
 
 async def close_db():
-    """Closes the database connection on FastAPI shutdown."""
+    """Disposes of the database connection on FastAPI shutdown."""
     await engine.dispose()

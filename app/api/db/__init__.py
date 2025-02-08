@@ -1,1 +1,1 @@
-from .base import Base, engine, SessionLocal, get_db
+from .base import Base, engine,get_db, AsyncSessionLocal

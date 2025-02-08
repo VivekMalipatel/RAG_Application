@@ -9,11 +9,11 @@ class FileUploadProcessor:
     and handles multipart upload completion.
     """
 
-    def __init__(self, minio: MinIOHandler, db: DocumentHandler, cache: RedisCache, approval_cache: dict):
+    def __init__(self, approval_cache: dict):
 
-        self.minio = minio
-        self.db = db
-        self.cache = cache
+        self.minio = MinIOHandler()
+        self.db = DocumentHandler()
+        self.cache = RedisCache()
         self.approval_cache = approval_cache
 
     async def process_upload(self, upload_request: dict):
@@ -38,7 +38,7 @@ class FileUploadProcessor:
             if not part_info:
                 logging.error("Failed to upload chunk. Retrying...")
 
-            response = await self.check_and_finalize_upload(upload_id, total_chunks, relative_path)
+            response = await self.check_and_finalize_upload(upload_id, total_chunks, minio_path)
             if response:
                 await self.update_postgres(response["minio_path"], user_id, file_name, file_size, response["etag"], mime_type)
                 await self.cache.delete(upload_request["uploadapproval_id"])
@@ -50,24 +50,27 @@ class FileUploadProcessor:
             logging.error(f"Error processing upload : {e}")
             raise (e)
 
-    async def check_and_finalize_upload(self, upload_id: str, total_chunks: int, relative_path: str):
-
+    async def check_and_finalize_upload(self, upload_id: str, total_chunks: int, minio_path: str):
+        """
+        Checks if all chunks are uploaded and finalizes the multipart upload.
+        """
         try:
-            uploaded_chunks = await self.minio.get_uploaded_parts(relative_path,upload_id)
+            uploaded_chunks = await self.minio.get_uploaded_parts(minio_path, upload_id)
+            
             if len(uploaded_chunks) == total_chunks:
-                
                 logging.debug("Finalizing upload in MinIO...")
-                minio_response = await self.minio.complete_multipart_upload(
-                    relative_path, upload_id
-                )
-                if minio_response:
-                    logging.info("Upload finalized.")
-                    return minio_response
+                
+                # Finalize the upload
+                await self.minio.complete_multipart_upload(minio_path, upload_id)
+                
+                logging.info("Upload finalized.")
+                return True
 
         except Exception as e:
             logging.error(f"Error finalizing upload: {e}")
 
-        return
+        return False
+
 
     async def update_postgres(self, minio_path: str, user_id: str, file_name: str, file_size: int, etag: str, mime_type: str):
 

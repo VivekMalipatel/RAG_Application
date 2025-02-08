@@ -1,109 +1,98 @@
-import asyncio
 import os
-import logging
-import hashlib
-import aiofiles
+import requests
+import json
+import time
+import base64
 
-from app.services.upload_file.upload_request_receiver import UploadRequestReceiver
-from dotenv import load_dotenv
+# ✅ API Endpoints
+UPLOAD_APPROVAL_URL = "http://localhost:8000/files/upload/"
+USER_ID = 1234324
 
-load_dotenv()
-
-# Load Configurations from .env
-MINIO_CONFIG = {
-    "endpoint": os.getenv("MINIO_ENDPOINT"),
-    "access_key": os.getenv("MINIO_ACCESS_KEY"),
-    "secret_key": os.getenv("MINIO_SECRET_KEY"),
-}
-
-DB_URL = os.getenv("DATABASE_URL")
-REDIS_URL = os.getenv("REDIS_URL")
-
-# Initialize Upload Request Receiver
-upload_receiver = UploadRequestReceiver(MINIO_CONFIG, DB_URL, REDIS_URL)
-
-# File to be uploaded
-TEST_FILE_PATH = "ragas_paper.pdf"  # Replace with actual file
-USER_ID = "user-56789"
-RELATIVE_PATH = "uploads"  # Folder where file is stored inside MinIO
+# ✅ File Details
+FILE_PATH = "Temp_Files/docs/ragas_paper.pdf"
+FILE_NAME = "ragas_paper.pdf"
 CHUNK_SIZE = 5 * 1024 * 1024  # 5MB per chunk
 
-
-async def compute_file_hash(file_path):
-    """Computes SHA256 hash of the file for integrity verification."""
-    sha256 = hashlib.sha256()
-    async with aiofiles.open(file_path, "rb") as f:
-        while chunk := await f.read(CHUNK_SIZE):
-            sha256.update(chunk)
-    return sha256.hexdigest()
-
-
-async def simulate_upload():
+def get_upload_approval(file_name, total_chunks, file_size, mime_type):
     """
-    Simulates a frontend uploading a file in chunks and sending it to MinIO via our backend services.
+    Requests an upload approval ID from the API.
     """
-    # Step 1: Read File and Compute Metadata
-    file_size = os.path.getsize(TEST_FILE_PATH)
-    file_name = os.path.basename(TEST_FILE_PATH)
-    total_chunks = (file_size // CHUNK_SIZE) + (1 if file_size % CHUNK_SIZE != 0 else 0)
-
-    # Step 2: Send Metadata for Validation
-    metadata_payload = {
+    payload = {
         "user_id": USER_ID,
         "file_name": file_name,
-        "relative_path": RELATIVE_PATH,
+        "local_file_path": FILE_PATH,
+        "relative_path": "uploads",
+        "mime_type": mime_type,
+        "total_chunks": total_chunks,
+        "file_size": file_size,
+        "upload_id": None,
+        "approval_id": None,
+        "chunk_number": None
+    }
+    response = requests.post(UPLOAD_APPROVAL_URL, data={"request_data": json.dumps(payload)})
+    response = json.loads(response.json()[0])
+
+    return response.get("approval_id"), response.get("upload_id")
+
+
+def upload_chunk(upload_id, approval_id, chunk_number, total_chunks, file_data, file_size):
+    """
+    Uploads a file chunk to the server.
+    """
+    encoded_chunk = base64.b64encode(file_data).decode('utf-8')
+    payload = {
+        "user_id": USER_ID,
+        "approval_id": approval_id,
+        "upload_id": upload_id,
+        "chunk_number": chunk_number,
+        "total_chunks": total_chunks,
+        "relative_path": "uploads",
         "file_size": file_size,
         "mime_type": "application/pdf",
-        "total_chunks": total_chunks,
+        "file_name": FILE_NAME,
+        "local_file_path": FILE_PATH
     }
+    files = {"file_data":encoded_chunk}
+    response = requests.post(UPLOAD_APPROVAL_URL, data={"request_data": json.dumps(payload)}, files=files)
 
-    validation_response = await upload_receiver.receive_upload_request(metadata_payload)
-    print(validation_response)
-    
-    if not validation_response["success"]:
-        logging.error("File validation failed.")
-        return
-    
-    upload_id = validation_response["upload_id"]
-    uploadapproval_id = validation_response["uploadapproval_id"]
-
-    print(f"✅ File approved for upload. Upload ID: {upload_id}, Approval ID: {uploadapproval_id}")
-
-    # Step 3: Upload File in Chunks
-    async with aiofiles.open(TEST_FILE_PATH, "rb") as f:
-        for chunk_number in range(1, total_chunks + 1):
-            chunk_data = await f.read(CHUNK_SIZE)
-
-            chunk_payload = {
-                "user_id": USER_ID,
-                "file_name": file_name,
-                "relative_path": RELATIVE_PATH,
-                "file_size": file_size,
-                "mime_type": "text/plain",
-                "upload_id": upload_id,
-                "uploadapproval_id": uploadapproval_id,
-                "total_chunks": total_chunks,
-                "chunk_number": chunk_number,
-                "file_data": chunk_data,
-            }
-
-            upload_response = await upload_receiver.receive_upload_request(chunk_payload, chunk_data)
-            print(upload_response)
-
-            if not upload_response["success"]:
-                logging.error(f"Chunk {chunk_number} failed to upload.")
-                return
-
-            print(f"✅ Uploaded chunk {chunk_number}/{total_chunks}")
-
-    print(f"✅ File {file_name} uploaded successfully in {total_chunks} chunks.")
-
-    # Step 4: Check Metadata in PostgreSQL (Optional Verification)
-    stored_metadata = await upload_receiver.validator.db.get_file_metadata(USER_ID, file_name)
-    if stored_metadata:
-        print(f"✅ File metadata stored in PostgreSQL: {stored_metadata.file_path}")
+    if response.ok:
+        print(f"✅ Chunk {chunk_number}/{total_chunks} uploaded successfully.")
     else:
-        print("⚠ Metadata not found in PostgreSQL.")
+        print(f"❌ Failed to upload chunk {chunk_number}: {response.json()}")
 
-# Run the test
-asyncio.run(simulate_upload())
+
+def main():
+    """
+    Simulates the complete file upload in chunks.
+    """
+    # ✅ Step 1: Read File & Calculate Chunks
+    file_size = os.path.getsize(FILE_PATH)
+    total_chunks = (file_size // CHUNK_SIZE) + (1 if file_size % CHUNK_SIZE != 0 else 0)
+
+    # ✅ Step 2: Request Upload Approval
+    approval_id, upload_id = get_upload_approval(
+        file_name=os.path.basename(FILE_PATH),
+        total_chunks=total_chunks,
+        file_size=file_size,
+        mime_type="application/pdf"
+    )
+    
+    if not approval_id or not upload_id:
+        print("❌ Failed to get upload approval. Exiting.")
+        return
+
+    print(f"🆗 Upload approved. Upload ID: {upload_id}, Approval ID: {approval_id}")
+
+    # ✅ Step 3: Split File and Upload Chunks
+    with open(FILE_PATH, "rb") as file:
+        chunk_number = 1
+        while chunk := file.read(CHUNK_SIZE):
+            upload_chunk(upload_id, approval_id, chunk_number, total_chunks, chunk, file_size)
+            chunk_number += 1
+            time.sleep(0.5)  # Simulating network delay
+
+    print("🚀 File upload completed successfully!")
+
+
+if __name__ == "__main__":
+    main()

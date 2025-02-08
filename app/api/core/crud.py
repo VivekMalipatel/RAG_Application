@@ -1,8 +1,8 @@
 from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, Union, Callable
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from app.api.db import Base
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.api.db.base import Base
 
 ModelType = TypeVar("ModelType", bound=Base)
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
@@ -22,47 +22,45 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         self._process_update = handler
         return self
 
-    def get(self, db: Session, id: Any) -> Optional[ModelType]:
-        return db.query(self.model).filter(self.model.id == id).first()
+    async def get(self, db: AsyncSession, id: Any) -> Optional[ModelType]:
+        async with db.begin():
+            result = await db.execute(self.model.__table__.select().where(self.model.id == id))
+            return result.scalars().first()
 
-    def get_multi(self, db: Session, *, skip: int = 0, limit: int = 100) -> List[ModelType]:
-        return db.query(self.model).offset(skip).limit(limit).all()
+    async def get_multi(self, db: AsyncSession, *, skip: int = 0, limit: int = 100) -> List[ModelType]:
+        async with db.begin():
+            result = await db.execute(self.model.__table__.select().offset(skip).limit(limit))
+            return result.scalars().all()
 
-    def create(self, db: Session, *, obj_in: CreateSchemaType) -> ModelType:
+    async def create(self, db: AsyncSession, *, obj_in: CreateSchemaType) -> ModelType:
         obj_in_data = jsonable_encoder(obj_in)
-        
         if self._process_create:
             obj_in_data = self._process_create(obj_in_data)
-            
+
         db_obj = self.model(**obj_in_data)
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        async with db.begin():
+            db.add(db_obj)
+        await db.refresh(db_obj)
         return db_obj
-    
-    def update(self, db: Session, *, db_obj: ModelType, obj_in: Union[UpdateSchemaType, Dict[str, Any]]) -> ModelType:
+
+    async def update(self, db: AsyncSession, *, db_obj: ModelType, obj_in: Union[UpdateSchemaType, Dict[str, Any]]) -> ModelType:
         obj_data = jsonable_encoder(db_obj)
         update_data = obj_in if isinstance(obj_in, dict) else obj_in.dict(exclude_unset=True)
-        
+
         if self._process_update:
             update_data = self._process_update(update_data)
-            
+
         for field in obj_data:
             if field in update_data:
                 setattr(db_obj, field, update_data[field])
-        
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+
+        async with db.begin():
+            db.add(db_obj)
+        await db.refresh(db_obj)
         return db_obj
 
-    def delete(
-        self, 
-        db: Session, 
-        *, 
-        id: int
-    ) -> ModelType:
-        obj = db.query(self.model).get(id)
-        db.delete(obj)
-        db.commit()
+    async def delete(self, db: AsyncSession, *, id: int) -> ModelType:
+        async with db.begin():
+            obj = await db.get(self.model, id)
+            await db.delete(obj)
         return obj

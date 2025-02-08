@@ -1,20 +1,34 @@
 import redis.asyncio as redis
 import logging
+import asyncio
 from app.config import settings
 
 class RedisClient:
-    """Manages a Redis connection pool."""
+    """Manages Redis connection pool and automatic reconnection."""
+    
     def __init__(self):
         self.client = None
 
     async def connect(self):
-        """Create a Redis connection pool if not already initialized."""
-        if self.client is None:
-            self.client = redis.from_url(settings.REDIS_URL, decode_responses=True)
-            logging.info("Redis connection pool initialized")
+        """Initialize Redis connection with retries."""
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                self.client = await redis.from_url(
+                    settings.REDIS_URL, decode_responses=True
+                )
+                await self.client.ping()
+                logging.info("Redis connection established")
+                return
+            except Exception as e:
+                logging.error(f"Redis connection failed: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                else:
+                    raise e
 
     async def close(self):
-        """Closes the Redis connection pool on FastAPI shutdown."""
+        """Closes Redis connection pool."""
         if self.client:
             await self.client.close()
             self.client = None
@@ -23,6 +37,6 @@ class RedisClient:
 redis_session = RedisClient()
 
 async def get_redis():
-    """Yields the Redis client for dependency injection."""
+    """Yields Redis client for FastAPI dependency injection."""
     await redis_session.connect()
     yield redis_session.client

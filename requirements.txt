@@ -51,3 +51,7 @@ aiofiles
 aioredis
 
 asyncpg
+
+httpx 
+pytest 
+pytest-asyncio

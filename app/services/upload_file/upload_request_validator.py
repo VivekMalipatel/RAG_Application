@@ -12,14 +12,14 @@ class RequestValidator:
     and multipart upload approvals.
     """
 
-    def __init__(self, minio_config: dict, db_url: str, redis_url: str):
+    def __init__(self):
 
-        self.minio = MinIOHandler(**minio_config)
-        self.db = DocumentHandler(db_url)
-        self.cache = RedisCache(redis_url)
+        self.minio = MinIOHandler()
+        self.db = DocumentHandler()
+        self.cache = RedisCache()
 
         self.approval_cache = {}
-        self.file_upload_processor = FileUploadProcessor(self.minio, self.db, self.cache, self.approval_cache)
+        self.file_upload_processor = FileUploadProcessor(self.approval_cache)
         
 
     async def validate_request(self, request_data: dict, file_data: bytes = None):
@@ -41,8 +41,10 @@ class RequestValidator:
         try:
             user_id = request_data["user_id"]
             file_name = request_data["file_name"]
+            local_file_path = request_data["local_file_path"]
             relative_path = request_data["relative_path"]
             mime_type = request_data["mime_type"]
+            file_size = request_data["file_size"]
             total_chunks = request_data["total_chunks"]
 
             # Validate file type
@@ -53,7 +55,7 @@ class RequestValidator:
             minio_path = f"{user_id}/{relative_path}/{file_name}"
 
             # Check for duplicate file names in PostgreSQL
-            existing_file = await self.db.get_file_metadata(user_id, file_name)
+            existing_file = await self.db.get_file_metadata(user_id, minio_path)
             if existing_file:
                 logging.info(f"File '{file_name}' already exists in {relative_path}.")
                 return {"success": False, "error": "File name already exists."}
@@ -69,9 +71,14 @@ class RequestValidator:
 
             # Store the approval ID and upload ID combination in Redis
             redis_value = {
-                "upload_id": upload_id,
+                "user_id": user_id,
+                "file_name": file_name,
+                "local_file_path": local_file_path,
                 "relative_path": relative_path,
-                "total_chunks": total_chunks
+                "mime_type": mime_type,
+                "file_size": file_size,
+                "total_chunks": total_chunks,
+                "upload_id": upload_id
             }
 
             await self.cache.set(approval_id, redis_value)
@@ -80,8 +87,9 @@ class RequestValidator:
 
             return {
                 "success": True,
-                "uploadapproval_id": approval_id,
-                "upload_id": upload_id
+                "approval_id": approval_id,
+                "upload_id": upload_id,
+                "message": "Upload approved."
             }
 
         except Exception as e:
@@ -91,38 +99,42 @@ class RequestValidator:
     async def _handle_existing_upload(self, request_data: dict, file_data: bytes = None):
 
         try:
+
             user_id = request_data["user_id"]
             file_name = request_data["file_name"]
+            local_file_path = request_data["local_file_path"]
+            relative_path = request_data["relative_path"]
+            mime_type = request_data["mime_type"]
+            file_size = request_data["file_size"]
+            total_chunks = request_data["total_chunks"]
             approval_id = request_data["approval_id"]
             upload_id = request_data["upload_id"]
             chunk_number = request_data["chunk_number"]
-            total_chunks = request_data["total_chunks"]
-            relative_path = request_data["relative_path"]
-            file_size = request_data["file_size"]
-            mime_type = request_data["mime_type"]
-
-            # Check if approval exists in local or Redis cache
+        
             if approval_id in self.approval_cache:
                 approval_data = self.approval_cache[approval_id]
             else:
                 approval_data = await self.cache.get(approval_id)
                 if not approval_data:
                     logging.info(f"Upload approval ID {approval_id} not found.")
-                    return {"success": False, "error": "Invalid upload approval ID."}
+                    return {"success": False, "error": "You do not have permission to upload this file."}
                 self.approval_cache[approval_id] = approval_data
         
             # Verify metadata consistency
             metadata_mismatch = (
-                approval_data["relative_path"] != relative_path or
-                approval_data["total_chunks"] != total_chunks
+                user_id != approval_data["user_id"] or
+                file_name != approval_data["file_name"] or
+                local_file_path != approval_data["local_file_path"] or
+                relative_path != approval_data["relative_path"] or
+                mime_type != approval_data["mime_type"] or
+                file_size != approval_data["file_size"] or
+                total_chunks != approval_data["total_chunks"] or
+                upload_id != approval_data["upload_id"]
             )
-            print("metadata_mismatch=", metadata_mismatch)
 
             if metadata_mismatch:
                 logging.info("File metadata mismatch.")
-                return {"success": False, "error": "Metadata mismatch."}
-            
-            print("file_data=", file_data)
+                return {"success": False, "error": "Please re-upload the correct file."}
 
             if file_data:
                 upload_payload = {
@@ -142,7 +154,7 @@ class RequestValidator:
 
                 return {"success": True, "message": "Chunk upload started."}
             
-            logging.warning(f"No file data received for {file_name}, chunk {chunk_number}.")
+            logging.error(f"No file data received for {file_name}, chunk {chunk_number}.")
             return {"success": False, "error": "No file data received."}
 
         except Exception as e:
