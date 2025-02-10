@@ -1,0 +1,16 @@
+llm:
+  provider: "openai"
+  model: "gpt-3.5-turbo"  
+  temperature: 0.1
+  max_tokens: 1000
+  api_key: "your-openai-api-key"  
+
+content:
+  chunk_size: 500
+  chunk_overlap: 50
+  vector_store_path: "./content_store"
+
+teaching:
+  max_session_duration: 7200  # 2 hours in seconds
+  comprehension_check_interval: 3  # Check every 3 responses
+  min_responses_before_next_chunk: 3
