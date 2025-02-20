@@ -152,3 +152,18 @@ class MinIOHandler:
         except S3Error as e:
             logging.error(f"Fetching uploaded parts failed: {e}")
             raise Exception("Fetching uploaded parts failed")
+    
+    async def fetch_file_from_minio(file_path: str) -> BytesIO:
+        """Fetches a file from MinIO using its path."""
+        try:
+            client = minio_session.client
+            bucket_name = file_path.split('/')[0]  # Assuming bucket name is part of the path
+            object_name = '/'.join(file_path.split('/')[1:])
+            
+            response = await client.get_object(Bucket=bucket_name, Key=object_name)
+            file_data = BytesIO(await response['Body'].read())
+            await response['Body'].close()
+            return file_data
+        except Exception as e:
+            logging.error(f"Error fetching file from MinIO: {e}")
+            raise

@@ -12,3 +12,4 @@
 /redis_data
 /minio_data
 /tesseract_data
+.vscode/launch.json

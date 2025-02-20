@@ -1,6 +1,10 @@
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
+    APP_HOST: str
+    APP_PORT: int
+    DEBUG_MODE: bool
+    LOG_LEVEL: str
     DATABASE_URL: str
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
@@ -15,6 +19,10 @@ class Settings(BaseSettings):
     MINIO_BUCKET_NAME: str
     QDRANT_URL: str
     OLLAMA_URL: str
+    REDIS_CHAT_QUEUE: str
+    REDIS_STANDARD_QUEUE: str
+    MINIO_WEBHOOK_PATH: str 
+    MINIO_WEBHOOK_SECRET: str
     PROJECT_NAME: str = "FastAPI User Management"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
