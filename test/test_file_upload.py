@@ -3,15 +3,16 @@ import requests
 import json
 import time
 import base64
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ✅ API Endpoints
-UPLOAD_APPROVAL_URL = "http://localhost:8000/files/upload/"
+UPLOAD_APPROVAL_URL = "http://0.0.0.0:8000//api/v1/files/upload/"
 USER_ID = 1234324
 
 # ✅ File Details
-FILE_PATH = "Temp_Files/docs/ragas_paper.pdf"
-FILE_NAME = "ragas_paper.pdf"
-CHUNK_SIZE = 5 * 1024 * 1024  # 5MB per chunk
+FILE_PATH = "Temp_Files/video/RRR (2022) 4K HQ Telugu WEB-DL x265 10bit (DD.5.1 ATMOS - 448Kbps) 13.3GB ESub.mkv"
+FILE_NAME = "RRR (2022) 4K HQ Telugu WEB-DL x265 10bit (DD.5.1 ATMOS - 448Kbps) 13.3GB ESub.mkv"
+CHUNK_SIZE = 50 * 1024 * 1024  # 5MB per chunk
 
 def get_upload_approval(file_name, total_chunks, file_size, mime_type):
     """
@@ -83,13 +84,24 @@ def main():
 
     print(f"🆗 Upload approved. Upload ID: {upload_id}, Approval ID: {approval_id}")
 
-    # ✅ Step 3: Split File and Upload Chunks
+    # Read file and collect chunks
+    chunks = []
     with open(FILE_PATH, "rb") as file:
-        chunk_number = 1
         while chunk := file.read(CHUNK_SIZE):
-            upload_chunk(upload_id, approval_id, chunk_number, total_chunks, chunk, file_size)
-            chunk_number += 1
-            time.sleep(0.5)  # Simulating network delay
+            chunks.append(chunk)
+
+    # Upload chunks in parallel
+    with ThreadPoolExecutor(max_workers=100) as executor:
+        futures = []
+        for i, chunk in enumerate(chunks, start=1):
+            futures.append(executor.submit(
+                upload_chunk, upload_id, approval_id, i, total_chunks, chunk, file_size
+            ))
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"❌ Chunk upload failed with exception: {e}")
 
     print("🚀 File upload completed successfully!")
 

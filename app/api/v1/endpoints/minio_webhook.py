@@ -47,7 +47,7 @@ async def minio_webhook(request: Request):
             return {"status": "ignored", "reason": "Not a file event"}
 
         # Event Filtering (only process object creation & deletion events)
-        if not event_name.startswith('s3:ObjectCreated:Put') and \
+        if not event_name.startswith('s3:ObjectCreated:CompleteMultipartUpload') and \
            not event_name.startswith('s3:ObjectRemoved:Delete'):
             logging.info(f"Ignoring non-relevant event: {event_name}")
             return {"status": "ignored", "reason": "Non-file operation event"}
