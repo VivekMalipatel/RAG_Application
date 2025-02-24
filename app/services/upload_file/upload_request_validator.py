@@ -5,6 +5,7 @@ from app.core.storage_bin.minio import MinIOHandler
 from app.core.db_handler import DocumentHandler
 from app.services.upload_file import FileUploadProcessor
 from app.core.cache import RedisCache
+from app.config import settings
 
 class RequestValidator:
     """
@@ -55,7 +56,7 @@ class RequestValidator:
             minio_path = f"{user_id}/{relative_path}/{file_name}"
 
             # Check for duplicate file names in PostgreSQL
-            existing_file = await self.db.get_file_metadata(user_id, minio_path)
+            existing_file = await self.db.get_document_metadata(user_id, minio_path)
             if existing_file:
                 logging.info(f"File '{file_name}' already exists in {relative_path}.")
                 return {"success": False, "error": "File name already exists."}
@@ -166,8 +167,8 @@ class RequestValidator:
         allowed_types = ["image/png", "image/jpeg", "application/pdf", "text/plain"]
         return mime_type in allowed_types
 
-    def clear_approval(self, uploadapproval_id: str):
-        if uploadapproval_id in self.approval_cache:
-            del self.approval_cache[uploadapproval_id]
+    def clear_approval(self, approval_id: str):
+        if approval_id in self.approval_cache:
+            del self.approval_cache[approval_id]
         # Optionally also remove from Redis
-        asyncio.create_task(self.cache.delete(uploadapproval_id))
+        asyncio.create_task(self.cache.delete(approval_id))

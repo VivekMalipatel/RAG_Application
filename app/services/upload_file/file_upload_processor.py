@@ -40,8 +40,8 @@ class FileUploadProcessor:
 
             response = await self.check_and_finalize_upload(upload_id, total_chunks, minio_path)
             if response:
-                await self.update_postgres(response["Key"], user_id, file_name, file_size, response["ETag"], mime_type)
-                await self.cache.delete(upload_request["uploadapproval_id"])
+                await self.update_postgres(f"{response["Bucket"]}/{response["Key"]}", user_id, file_name, file_size, response["ETag"], mime_type)
+                await self.cache.delete(upload_request["approval_id"])
                 if approval_id in self.approval_cache:
                     del self.approval_cache[approval_id]
                 logging.info(f"Upload completed for {file_name}.")

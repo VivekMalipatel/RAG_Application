@@ -24,11 +24,11 @@ class DocumentHandler:
             new_file = await self.document_crud.create(db=session, obj_in=file_data)
             return new_file
 
-    async def get_file_metadata(self, user_id: str, file_name: str):
+    async def get_document_metadata(self, user_id: str, file_path: str):
         """Fetches file metadata from PostgreSQL using CRUD operations."""
         async with AsyncSessionLocal() as session:
             file_meta = await session.run_sync(
-                lambda s: s.query(Document).filter_by(user_id=user_id, file_name=file_name).first()
+                lambda s: s.query(Document).filter_by(user_id=int(user_id), file_path=file_path).first()
             )
             return file_meta
 

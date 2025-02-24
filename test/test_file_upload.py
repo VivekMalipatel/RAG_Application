@@ -10,8 +10,8 @@ UPLOAD_APPROVAL_URL = "http://0.0.0.0:8000//api/v1/files/upload/"
 USER_ID = 1234324
 
 # ✅ File Details
-FILE_PATH = "Temp_Files/video/RRR (2022) 4K HQ Telugu WEB-DL x265 10bit (DD.5.1 ATMOS - 448Kbps) 13.3GB ESub.mkv"
-FILE_NAME = "RRR (2022) 4K HQ Telugu WEB-DL x265 10bit (DD.5.1 ATMOS - 448Kbps) 13.3GB ESub.mkv"
+FILE_PATH = "Temp_Files/docs/ragas_papers.pdf"
+FILE_NAME = "ragas_papers.pdf"
 CHUNK_SIZE = 50 * 1024 * 1024  # 5MB per chunk
 
 def get_upload_approval(file_name, total_chunks, file_size, mime_type):
@@ -22,7 +22,7 @@ def get_upload_approval(file_name, total_chunks, file_size, mime_type):
         "user_id": USER_ID,
         "file_name": file_name,
         "local_file_path": FILE_PATH,
-        "relative_path": "uploads",
+        "relative_path": "standard/uploads",
         "mime_type": mime_type,
         "total_chunks": total_chunks,
         "file_size": file_size,
@@ -47,7 +47,7 @@ def upload_chunk(upload_id, approval_id, chunk_number, total_chunks, file_data, 
         "upload_id": upload_id,
         "chunk_number": chunk_number,
         "total_chunks": total_chunks,
-        "relative_path": "uploads",
+        "relative_path": "standard/uploads",
         "file_size": file_size,
         "mime_type": "application/pdf",
         "file_name": FILE_NAME,

@@ -2,25 +2,12 @@ from fastapi import APIRouter, HTTPException, status, Request
 import logging
 import os
 from uuid import uuid4
+from typing import List
 from app.core.queue.redis_priority_queue import RedisPriorityQueue
 from app.config import settings
+import asyncio
 
 router = APIRouter()
-
-def is_valid_minio_file(file_key: str) -> bool:
-    """Validate and extract file paths that belong to `standard/` or `chat/` folders."""
-    path_parts = file_key.split("/")  
-
-    # Ensure the object is inside `chat/` or `standard/` (at any depth)
-    if "standard" not in path_parts and "chat" not in path_parts:
-        return False
-    
-    # Ensure it's a file (not a folder)
-    filename = os.path.basename(file_key)
-    if not filename or "." not in filename:  # No extension = likely a folder
-        return False
-    
-    return True
 
 @router.post("/webhook/", status_code=status.HTTP_202_ACCEPTED)
 async def minio_webhook(request: Request):
@@ -32,6 +19,7 @@ async def minio_webhook(request: Request):
 
         # Extract file key
         file_key = event.get("Key", "")
+        path_parts = file_key.split("/")
         event_name = event.get("EventName", "")
 
         if not file_key or not event_name:
@@ -40,9 +28,12 @@ async def minio_webhook(request: Request):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing required event fields"
             )
+        
+        # Simulate processing delay
+        await asyncio.sleep(2)
 
         # Validate that the key belongs to a file inside "standard/" or "chat/"
-        if not is_valid_minio_file(file_key):
+        if "." not in path_parts[-1]:
             logging.info(f"Ignoring non-relevant object: {file_key}")
             return {"status": "ignored", "reason": "Not a file event"}
 
@@ -53,7 +44,6 @@ async def minio_webhook(request: Request):
             return {"status": "ignored", "reason": "Non-file operation event"}
 
         # Extract user ID & upload type from path
-        path_parts = file_key.split("/")
         user_id = path_parts[1]  # Assuming user_id is after bucket name
         upload_type = "chat" if "chat" in path_parts else "standard"
 
@@ -66,7 +56,6 @@ async def minio_webhook(request: Request):
             "path": file_key,
             "event_type": event_name,
             "upload_channel": upload_type,
-            "processing_profile": "fast" if upload_type == "chat" else "full",
             "timestamp": event.get("EventTime")
         }
 

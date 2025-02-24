@@ -9,6 +9,8 @@ rank_bm25
 langchain
 langchain-openai
 langchain-community
+langchain-unstructured
+unstructured[all-docs]
 transformers
 llama_index
 pypdf
@@ -27,6 +29,8 @@ openai-whisper
 torch --index-url https://download.pytorch.org/whl/cpu
 torchvision --index-url https://download.pytorch.org/whl/cpu
 torchaudio --index-url https://download.pytorch.org/whl/cpu
+timm==1.0.13
+einops
 
 fastapi
 uvicorn
@@ -55,3 +59,4 @@ asyncpg
 httpx 
 pytest 
 pytest-asyncio
+spacy 

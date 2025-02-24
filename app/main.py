@@ -3,6 +3,7 @@ from app.api.v1.endpoints import agent, documents, user, upload, minio_webhook
 from app.api.db.base import init_db, close_db
 from app.core.storage_bin.minio.session_minio import minio_session
 from app.core.cache.session_redis import redis_session
+from app.core.vector_store.qdrant.qdrant_session import qdrant_session
 from app.core.storage_bin.minio.setup_minio import MinIOSetup 
 import uvicorn
 import asyncio
@@ -19,6 +20,7 @@ async def lifespan(app: FastAPI):
         await init_db()
         await minio_session.connect()
         await redis_session.connect()
+        await qdrant_session.connect()
         minio_setup = MinIOSetup()
         asyncio.create_task(minio_setup.setup_minio())
 
@@ -37,6 +39,7 @@ async def lifespan(app: FastAPI):
     await close_db()
     await minio_session.close()
     await redis_session.close()
+    await qdrant_session.close()
     logging.info("Services shut down successfully")
 
 app = FastAPI(

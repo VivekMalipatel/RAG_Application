@@ -153,7 +153,7 @@ class MinIOHandler:
             logging.error(f"Fetching uploaded parts failed: {e}")
             raise Exception("Fetching uploaded parts failed")
     
-    async def fetch_file_from_minio(file_path: str) -> BytesIO:
+    async def fetch_file_from_minio(self,file_path: str) -> BytesIO:
         """Fetches a file from MinIO using its path."""
         try:
             client = minio_session.client
@@ -161,8 +161,17 @@ class MinIOHandler:
             object_name = '/'.join(file_path.split('/')[1:])
             
             response = await client.get_object(Bucket=bucket_name, Key=object_name)
-            file_data = BytesIO(await response['Body'].read())
-            await response['Body'].close()
+            streaming_body = response['Body']
+        
+            if streaming_body is None:
+                raise ValueError("No data received from MinIO")
+                
+            # Read the entire content into memory
+            data = await streaming_body.read()
+            streaming_body.close()
+            
+            # Create a BytesIO object with the data
+            file_data = BytesIO(data)
             return file_data
         except Exception as e:
             logging.error(f"Error fetching file from MinIO: {e}")
