@@ -2,11 +2,11 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from qdrant_client.http.models import (
-    CollectionConfig, HnswConfigDiff, OptimizersConfigDiff, 
-    PayloadSchemaType, VectorParams, PointStruct, 
-    Filter, ScoredPoint, Distance
+     VectorParams, PointStruct, 
+    Filter, ScoredPoint, Distance, SparseVectorParams, SparseIndexParams
 )
 from app.core.vector_store.qdrant.qdrant_session import qdrant_session
+import uuid
 
 class QdrantHandler:
     """Handles vector operations with Qdrant for hybrid search with dense and sparse vectors."""
@@ -15,7 +15,6 @@ class QdrantHandler:
         self,
         user_id: str,
         dense_vector_size: int = 768,
-        sparse_vector_size: int = 1024,
         distance_metric: str = "Cosine"
         ):
         """Creates a user-specific collection in Qdrant for hybrid search."""
@@ -29,24 +28,16 @@ class QdrantHandler:
                 vectors_config={
                     "dense": VectorParams(
                         size=dense_vector_size,
-                        distance=Distance[distance_metric.upper()],
-                    ),
-                    "sparse": VectorParams(
-                        size=sparse_vector_size,
-                        distance=Distance.COSINE,
+                        distance=Distance[distance_metric.upper()]
                     )
                 },
-                hnsw_config=HnswConfigDiff(
-                    m=16,
-                    ef_construct=200,
-                    full_scan_threshold=10000
-                ),
-                optimizers_config=OptimizersConfigDiff(
-                    default_segment_number=2,
-                    memmap_threshold=10000
-                ),
-                on_disk_payload=True,
-                replication_factor=1
+                sparse_vectors_config={
+                    "sparse": SparseVectorParams(
+                        index=SparseIndexParams(
+                            on_disk=False,
+                        )
+                    )
+                }
             )
             logging.info(f"Created hybrid search collection for user {user_id}")
 
@@ -75,8 +66,7 @@ class QdrantHandler:
             if user_id not in [c.name for c in collections.collections]:
                 await self.create_collection(
                     user_id=user_id,
-                    dense_vector_size=768,  # Match validation size
-                    sparse_vector_size=1024  # Match validation size
+                    dense_vector_size=768
                 )
 
             points = []
@@ -85,11 +75,9 @@ class QdrantHandler:
 
                 if len(chunk["dense_embedding"]) != 768:
                     raise ValueError(f"Dense vector dimension mismatch. Expected 768, got {len(chunk['dense_embedding'])}")
-                if len(chunk["sparse_embedding"]) != 1024:
-                    raise ValueError(f"Sparse vector dimension mismatch. Expected 1024, got {len(chunk['sparse_embedding'])}")
 
                 point = PointStruct(
-                    id=f"{metadata['document_id']}_{i}",
+                    id=str(uuid.uuid4()),
                     vector={
                         "dense": chunk["dense_embedding"],
                         "sparse": chunk["sparse_embedding"]

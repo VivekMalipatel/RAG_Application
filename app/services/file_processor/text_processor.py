@@ -38,9 +38,16 @@ class TextProcessor:
         )
 
         system_prompt = """
-        You are a highly optimized assistant for document context extraction. You will be helping in the process of contextual RAG augmentation for text documents.
-        Your goal is to provide concise and relevant context for each chunk of the document. You can use the document summary to guide your responses. Please ensure factual accuracy and relevance in your responses.
-        Ensure that your responses stay within the given max token numbers for each chunk and document context.
+        You are an advanced assistant optimized for document context extraction. Your task is to generate concise, factually accurate, and relevant contextual summaries for text chunks in a Retrieval-Augmented Generation (RAG) pipeline.
+
+        ### Instructions:
+        - Extract **key contextual details** from each document chunk.
+        - Utilize the **document summary** as guidance to maintain coherence.
+        - Ensure responses are **factually accurate** and **contextually relevant**.
+        - Adhere strictly to the **max token limit** for both chunk-based and document-level contexts.
+        - Avoid unnecessary repetition and focus on **essential information**.
+
+        Your goal is to enhance retrieval by providing **well-structured, meaningful context** for each chunk.
         """
 
         self.ollama = OllamaClient(

@@ -2,10 +2,15 @@ import logging
 import asyncio
 import torch
 from typing import List, Dict, Any, Union
+from fastembed import SparseTextEmbedding
+from qdrant_client.http.models import SparseVector
 from app.core.models.huggingface.huggingface import HuggingFaceClient
 from app.core.models.ollama.ollama import OllamaClient
 from app.core.models.openai.openai import OpenAIClient
 from app.core.cache.redis_cache import RedisCache
+import numpy as np
+import json
+from nltk.tokenize import word_tokenize
 #from app.core.models.imagebind.imagebind_handler import ImageBindClient
 
 class EmbeddingHandler:
@@ -36,6 +41,7 @@ class EmbeddingHandler:
         self.model_source = model_source
         self.model_name = model_name
         self.model_type = model_type
+        self.sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
         self.logger = logging.getLogger(__name__)
 
         # Load the appropriate model
@@ -51,7 +57,6 @@ class EmbeddingHandler:
             raise ValueError(f"Unsupported model source: {model_source}")
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self._init_sparse_model()
         self.cache = RedisCache()
     
     async def _get_cache_key(self, input_data: Union[str, List[str]], embedding_type: str) -> str:
@@ -73,86 +78,82 @@ class EmbeddingHandler:
         hash_key = await self.cache.get_hash(input_str)
         return f"embedding:{embedding_type}:{self.model_source}:{self.model_name}:{hash_key}"
 
-
-    def _init_sparse_model(self):
-        """Initialize sparse embedding model if enabled."""
-        try:
-            from rank_bm25 import BM25Okapi
-            self.bm25 = BM25Okapi
-        except ImportError:
-            self.logger.warning("BM25 dependencies not found. Sparse embeddings disabled.")
-
-    async def encode_dense(self, input_data: Union[str, List[str]]) -> List[List[float]]:
+    async def encode_dense(self, input_data: Union[str, List[str]]) -> np.ndarray:
         """
-        Generate dense embeddings with caching support.
+        Generates dense embeddings and caches them.
+        Ensures the output is in `ndarray` format.
         """
         try:
-            # Check cache first
             cache_key = await self._get_cache_key(input_data, "dense")
+            await self.cache.delete(cache_key) 
             cached_result = await self.cache.get(cache_key)
-            
             if cached_result:
                 self.logger.info("Dense embedding cache hit")
-                return cached_result
-            
-            # If not in cache, compute embeddings
+                return cached_result  # Convert back to ndarray
+
+            # Compute new embeddings
             if isinstance(input_data, str):
                 input_data = [input_data]
 
             result = None
-            if self.model_source == "huggingface":
-                if self.model_type == "text":
-                    result = self.model.encode_text(input_data)
-                elif self.model_type == "image":
-                    result = self.model.encode_image(input_data)
+            if self.model_type == "text":
+                result = self.model.encode_text(input_data)
 
-            elif self.model_source in ["openai", "ollama"]:
-                result = await self.model.embed_text(input_data)
+            if result is None:
+                raise ValueError("Invalid model source or type")
 
-            elif self.model_source == "imagebind":
-                if self.model_type == "text":
-                    result = await asyncio.gather(*[self.model.get_text_embedding(text) for text in input_data])
-                elif self.model_type == "image":
-                    result = await asyncio.gather(*[self.model.get_image_embedding(image) for image in input_data])
-                elif self.model_type == "audio":
-                    result = await asyncio.gather(*[self.model.get_audio_embedding(audio) for audio in input_data])
-
-            if result:
-                # Convert numpy arrays to lists for JSON serialization
-                result = [embedding.tolist() if hasattr(embedding, 'tolist') else embedding for embedding in result]
-                # Cache the result
-                await self.cache.set(cache_key, result)
-                return result
-            else:
-                raise ValueError("Unsupported model type for embedding.")
-        
-        except Exception as e:
-            self.logger.error(f"Dense embedding failed: {str(e)}")
-            return []
-
-    async def encode_sparse(self, text: str) -> Dict[str, float]:
-        """
-        Generate sparse embeddings using BM25 with caching support.
-        """
-        try:
-            # Check cache first
-            cache_key = await self._get_cache_key(text, "sparse")
-            cached_result = await self.cache.get(cache_key)
-            
-            if cached_result:
-                self.logger.info("Sparse embedding cache hit")
-                return cached_result
-            
-            # If not in cache, compute embeddings
-            tokenized_text = text.split()
-            bm25 = self.bm25([tokenized_text])
-            scores = bm25.get_scores(tokenized_text)
-            result = {token: float(score) for token, score in zip(tokenized_text, scores)}
+            # Convert result to a serializable format for caching
+            result_list = result.tolist() if isinstance(result, np.ndarray) else [emb.tolist() for emb in result]
             
             # Cache the result
-            await self.cache.set(cache_key, result)
-            return result
-            
+            await self.cache.set(cache_key, json.dumps(result_list[0]))  # Store as JSON
+
+            return result_list[0] # Return as ndarray
+
+        except Exception as e:
+            self.logger.error(f"Dense embedding failed: {str(e)}")
+            return np.array([])
+
+    async def encode_sparse(self, text: str) -> Dict[str, Any]:
+        """
+        Generates a sparse vector using BM25.
+        - Checks cache first and returns if available.
+        - If not cached, generates a new sparse vector.
+        - Stores the generated vector in cache (converted to JSON).
+        - Returns the original format for immediate use.
+        """
+        try:
+            cache_key = await self._get_cache_key(text, "sparse")
+            await self.cache.delete(cache_key)  # Clear cache for testing
+            cached_result = await self.cache.get(cache_key)
+
+            if cached_result:
+                self.logger.info("Sparse embedding cache hit")
+
+                # Convert JSON back to NumPy array format
+                cached_data = json.loads(cached_result)
+                embeddings = SparseVector(**cached_data)
+                
+                return cached_data
+
+            # Compute new sparse embedding
+            embeddings = list(self.sparse_model.embed([text]))[0]
+
+            # Extract indices and values
+            nonzero_indices = embeddings.indices.tolist()
+            nonzero_values = embeddings.values.tolist()
+
+            # Convert to JSON-storable format
+            sparse_vector = {
+                "indices": nonzero_indices,
+                "values": nonzero_values,
+            }
+
+            # Store in cache
+            await self.cache.set(cache_key, json.dumps(sparse_vector))
+
+            return SparseVector(**sparse_vector)
+
         except Exception as e:
             self.logger.error(f"Sparse embedding failed: {str(e)}")
-            return {}
+            return {"indices": [], "values": []}
