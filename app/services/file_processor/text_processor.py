@@ -91,6 +91,9 @@ class TextProcessor:
     async def process(self, event, file_data):
         """Main processing function for text documents."""
         try:
+
+            _ = await self.ollama.ensure_model_available()
+
             text = await self._extract_text_from_file(event, file_data)
 
             # Step 1: Hierarchical Chunking with Metadata

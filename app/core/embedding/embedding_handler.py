@@ -1,17 +1,12 @@
 import logging
-import asyncio
 import torch
 from typing import List, Dict, Any, Union
 from fastembed import SparseTextEmbedding
 from qdrant_client.http.models import SparseVector
 from app.core.models.huggingface.huggingface import HuggingFaceClient
-from app.core.models.ollama.ollama import OllamaClient
-from app.core.models.openai.openai import OpenAIClient
 from app.core.cache.redis_cache import RedisCache
 import numpy as np
 import json
-from nltk.tokenize import word_tokenize
-#from app.core.models.imagebind.imagebind_handler import ImageBindClient
 
 class EmbeddingHandler:
     """
@@ -47,12 +42,6 @@ class EmbeddingHandler:
         # Load the appropriate model
         if model_source == "huggingface":
             self.model = HuggingFaceClient(model_name=model_name, model_type=model_type)
-        elif model_source == "ollama":
-            self.model = OllamaClient(hf_repo=model_name, embedding=True)
-        elif model_source == "openai":
-            self.model = OpenAIClient(model_name=model_name, embedding=True)
-        #elif model_source == "imagebind":
-        #   self.model = ImageBindClient()
         else:
             raise ValueError(f"Unsupported model source: {model_source}")
 
