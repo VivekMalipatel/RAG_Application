@@ -160,13 +160,17 @@ class TextProcessor:
         document_chunks = self.text_splitter.create_documents([text])
         enriched_chunks = []
 
-        for chunk in document_chunks:
+        for idx, chunk in enumerate(document_chunks):
             # Extract entities using NLP
             entities = self._extract_entities(chunk.page_content)
-            
+
+            # Extract Hierarchy (Improved)
+            hierarchy = self._extract_hierarchy(chunk.page_content)
+
             # Enrich metadata
             metadata = {
-                "document_hierarchy": self._extract_hierarchy(chunk.page_content),
+                "chunk_number": idx,  # Track chunk position
+                "document_hierarchy": hierarchy,
                 "entities": entities,
                 "section_type": self._detect_section_type(chunk.page_content)
             }
@@ -200,7 +204,7 @@ class TextProcessor:
             return "Body"
 
     async def _generate_context(self, chunks, full_text):
-        """Generates context-aware snippets using full document summarization."""
+        """Generates contextual embeddings for document chunks."""
         doc_hash = await self.cache.get_hash(full_text)
         cached_context = await self.cache.get(doc_hash)
         if cached_context:
@@ -213,20 +217,35 @@ class TextProcessor:
             max_tokens=self.doc_context_size
         )
 
-        # Batch Process Context for Each Chunk
-        batch_prompts = [
-            (
-                f"Document Context (max {self.doc_context_size} tokens): {doc_summary}\n"
-                f"Chunk (max {self.chunk_context_size} tokens): {chunk['content']}\n"
-                "Explain relevance:"
-            )
-            for chunk in chunks
-        ]
+        context_chunks = []
+        total_chunks = len(chunks)
 
-        # Generate Context for Each Chunk
-        context_chunks = await asyncio.gather(
-            *[self.ollama.generate(p, max_tokens=self.chunk_context_size) for p in batch_prompts]
-        )
+        for i, chunk in enumerate(chunks):
+            # Get surrounding chunks (i-2, i-1, i+1, i+2)
+            prev_chunks = [chunks[j]["content"] for j in range(max(0, i - 2), i)]
+            next_chunks = [chunks[j]["content"] for j in range(i + 1, min(total_chunks, i + 3))]
+
+            # Generate Context-Aware Summary
+            chunk_context = await self.ollama.generate(
+                f"""
+                Here is the Document Summary from which the below data is chunked from : {doc_summary}
+                Here is the chunk : {chunk["content"]}
+                Here are the preceeding chunks : {prev_chunks}
+                Here are the following chunks : {next_chunks}
+                Now generate the Chunk Context (max {self.chunk_context_size} tokens) by exracting key contextual information for retrieval leveraging the document summary, preceeding and following chunks. 
+                """,
+                max_tokens=self.chunk_context_size
+            )
+
+            # Store final metadata + context
+            context_chunks.append({
+                "content": chunk["content"],
+                "chunk_number": chunk["metadata"]["chunk_number"],
+                "context": chunk_context,
+                "document_hierarchy": chunk["metadata"]["document_hierarchy"],
+                "entities": chunk["metadata"]["entities"],
+                "section_type": chunk["metadata"]["section_type"]
+            })
 
         return_data = {
             "doc_summary": doc_summary,
@@ -237,23 +256,43 @@ class TextProcessor:
         return return_data
 
     async def _compute_embeddings(self, context_chunks):
-        """Computes hybrid embeddings (dense + sparse) for each chunk."""
+        """Computes hybrid embeddings (dense + sparse) for each chunk, integrating multi-modal compatibility."""
         embedded_chunks = []
+
         for chunk in context_chunks:
-            dense_embedding = await self.embedding_model.encode_dense(str(chunk))
-            sparse_embedding = await self.embedding_model.encode_sparse(str(chunk))
+            # Merge all context for embedding
+            chunk_content = (
+                f"Document Summary: {chunk['doc_summary']}\n"
+                f"Chunk Context: {chunk['context']}\n"
+                f"Entities: {chunk['entities']}\n"
+                f"Document Hierarchy: {chunk['document_hierarchy']}\n"
+                f"Section Type: {chunk['section_type']}\n"
+                f"Chunk Content: {chunk['content']}"
+            )
+
+            # Compute embeddings
+            dense_embedding = await self.embedding_model.encode_dense(chunk_content)
+            sparse_embedding = await self.embedding_model.encode_sparse(chunk_content)
+
+            # Store chunk embedding with metadata
             embedded_chunks.append({
-                "content": chunk,
+                "chunk_number": chunk["chunk_number"],  # Ensure chunk indexing
                 "dense_embedding": dense_embedding,
-                "sparse_embedding": sparse_embedding
+                "sparse_embedding": sparse_embedding,
+                "document_hierarchy": chunk["document_hierarchy"],
+                "entities": chunk["entities"],
+                "section_type": chunk["section_type"],
+                "content": chunk["content"]
             })
+
         return embedded_chunks
 
     async def _store_in_qdrant(self, event, embedded_chunks):
-        """Stores processed chunks into Qdrant with metadata and versioning."""
+        """Stores processed text chunks in Qdrant with structured metadata and versioning."""
 
         context_hash = await self.cache.get_hash(str(embedded_chunks))
         context_version = context_hash[:8]
+
         metadata = {
             "document_id": event["event_id"],
             "user_id": event["user_id"],
@@ -261,4 +300,22 @@ class TextProcessor:
             "file_path": event["path"],
             "context_version": context_version
         }
-        await self.qdrant.store_vectors(embedded_chunks, metadata)
+
+        # Prepare final chunk structure
+        formatted_chunks = [
+            {
+                "chunk_number": chunk["chunk_number"],
+                "dense_embedding": chunk["dense_embedding"],
+                "sparse_embedding": chunk["sparse_embedding"],
+                "metadata": {
+                    **metadata,
+                    "document_hierarchy": chunk["document_hierarchy"],
+                    "entities": chunk["entities"],
+                    "section_type": chunk["section_type"],
+                    "content": chunk["content"]
+                }
+            }
+            for chunk in embedded_chunks
+        ]
+
+        await self.qdrant.store_vectors(formatted_chunks, metadata)

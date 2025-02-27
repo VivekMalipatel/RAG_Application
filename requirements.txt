@@ -32,6 +32,7 @@ torchvision --index-url https://download.pytorch.org/whl/cpu
 torchaudio --index-url https://download.pytorch.org/whl/cpu
 timm==1.0.13
 einops
+git+https://github.com/stanford-futuredata/ColBERT.git
 
 fastapi
 uvicorn
