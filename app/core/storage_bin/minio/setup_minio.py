@@ -9,13 +9,13 @@ class MinIOSetup:
     def __init__(self):
         self.minio_alias = "omnirag-minio"
         self.endpoint = f"http://{settings.MINIO_ENDPOINT}"
-        self.access_key = settings.MINIO_ACCESS_KEY
-        self.secret_key = settings.MINIO_SECRET_KEY
+        self.access_key = settings.MINIO_ROOT_USER
+        self.secret_key = settings.MINIO_ROOT_PASSWORD
         self.webhook_url = settings.MINIO_WEBHOOK_PATH
         self.webhook_secret = settings.MINIO_WEBHOOK_SECRET
         self.bucket_name = settings.MINIO_BUCKET_NAME
 
-    async def wait_for_minio(self, max_retries=15, delay=3):
+    async def wait_for_minio(self, max_retries=5, delay=3):
         """Waits until MinIO is fully ready to accept requests."""
         minio_health_url = f"{self.endpoint}/minio/health/live"
         async with aiohttp.ClientSession() as session:
@@ -71,25 +71,22 @@ class MinIOSetup:
         await self.run_command(["mc", "admin", "service", "restart", self.minio_alias])
         logging.info("MinIO webhook configured and service restarted")
 
-    async def event_rule_exists(self, retries=8, delay=3):
-        """Checks if the bucket event rule already exists, with improved retry logic."""
-        for attempt in range(retries):
-            existing_rules = await self.run_command([
-                "mc", "event", "list", f"{self.minio_alias}/{self.bucket_name}"
-            ], capture_output=True)
+    async def event_rule_exists(self):
+        """Checks if the bucket event rule already exists."""
+        existing_rules = await self.run_command([
+            "mc", "event", "list", f"{self.minio_alias}/{self.bucket_name}"
+        ], capture_output=True)
 
-            if existing_rules and "arn:minio:sqs::FastAPI:webhook" in existing_rules:
-                logging.info("Event notification rule already exists. Skipping rule addition.")
-                return True
-            else:
-                logging.warning(f"Attempt {attempt + 1}/{retries}: MinIO event list failed. Retrying in {delay} seconds...")
-                await asyncio.sleep(delay)
-
-        logging.error("Failed to fetch event rules after retries.")
+        if existing_rules and "arn:minio:sqs::FastAPI:webhook" in existing_rules:
+            logging.info("Event notification rule already exists. Skipping rule addition.")
+            return True
+        
         return False
 
     async def enable_bucket_notifications(self):
         """Enables event notifications for the configured MinIO bucket if not already set."""
+
+        await asyncio.sleep(0.5)
         if await self.event_rule_exists():
             return  # Skip if the rule is already in place
 
