@@ -8,6 +8,7 @@ from app.config import settings
 import asyncio
 import json
 import hashlib
+from aiohttp import ClientTimeout
 
 # Default Prompt Template (Can be Overridden)
 DEFAULT_TEMPLATE = """{{ if .System }}<|start_header_id|>system<|end_header_id|>
@@ -187,17 +188,24 @@ class OllamaClient:
                 f.write(await file_response.read())
 
             file_digest = self._calculate_file_hash(local_path)
-
+            timeout = ClientTimeout(total=3600)
             # Upload GGUF file
-            async with aiohttp.ClientSession() as upload_session:
-                async with upload_session.post(
-                    f"{self.base_url}/api/blobs/{file_digest}",
-                    data=open(local_path, "rb")
-                ) as upload_response:
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as upload_session:
+                    async with upload_session.post(
+                        f"{self.base_url}/api/blobs/{file_digest}",
+                        data=open(local_path, "rb")
+                    ) as upload_response:
 
-                    if upload_response.status not in [200, 201]:
-                        logging.error("Failed to upload GGUF file")
-                        return None
+                        if upload_response.status not in [200, 201]:
+                            logging.error("Failed to upload GGUF file")
+                            return None    
+            except asyncio.TimeoutError:
+                logging.error(f"Upload timed out after {timeout} seconds")
+                raise TimeoutError("GGUF upload timed out")
+            except aiohttp.ClientError as e:
+                logging.error(f"Upload failed with error: {str(e)}")
+                raise
 
             # Register Model
             create_payload = {

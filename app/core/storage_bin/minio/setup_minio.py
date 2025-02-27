@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import subprocess
 import aiohttp
 from app.config import settings
 
@@ -8,7 +7,7 @@ class MinIOSetup:
     """Handles MinIO initialization, webhook configuration, and bucket event notifications."""
 
     def __init__(self):
-        self.minio_alias = "myminio"
+        self.minio_alias = "omnirag-minio"
         self.endpoint = f"http://{settings.MINIO_ENDPOINT}"
         self.access_key = settings.MINIO_ACCESS_KEY
         self.secret_key = settings.MINIO_SECRET_KEY
@@ -16,68 +15,85 @@ class MinIOSetup:
         self.webhook_secret = settings.MINIO_WEBHOOK_SECRET
         self.bucket_name = settings.MINIO_BUCKET_NAME
 
-    async def wait_for_minio(self):
-        """Waits until MinIO is ready to accept requests."""
+    async def wait_for_minio(self, max_retries=15, delay=3):
+        """Waits until MinIO is fully ready to accept requests."""
         minio_health_url = f"{self.endpoint}/minio/health/live"
         async with aiohttp.ClientSession() as session:
-            for attempt in range(10):  # Retry up to 10 times
+            for attempt in range(max_retries):
                 try:
                     async with session.get(minio_health_url) as response:
                         if response.status == 200:
                             logging.info("MinIO is ready")
                             return True
                 except Exception as e:
-                    logging.warning(f"MinIO not ready yet (attempt {attempt+1}/10): {e}")
-                    await asyncio.sleep(3)
+                    logging.warning(f"MinIO not ready (attempt {attempt+1}/{max_retries}): {e}")
+                    await asyncio.sleep(delay)
+        
         logging.error("MinIO did not start in time.")
         return False
 
-    def run_command(self, command, capture_output=False):
-        """Executes a shell command and logs the result."""
+    async def run_command(self, command, capture_output=False):
+        """Executes a shell command asynchronously and logs the result."""
         try:
-            result = subprocess.run(command, check=True, text=True, capture_output=capture_output)
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE if capture_output else None,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                logging.error(f"Command failed: {' '.join(command)} - {stderr.decode().strip()}")
+                return None
+
             logging.info(f"Executed command: {' '.join(command)}")
-            return result.stdout.strip() if capture_output else None
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Command failed: {' '.join(command)} - {e}")
+            return stdout.decode().strip() if capture_output and stdout else None
+
+        except Exception as e:
+            logging.error(f"Error executing command: {' '.join(command)} - {e}")
             return None
 
-    def setup_minio_alias(self):
+    async def setup_minio_alias(self):
         """Sets up MinIO alias if not already set."""
-        self.run_command([
+        await self.run_command([
             "mc", "alias", "set", self.minio_alias, self.endpoint, self.access_key, self.secret_key
         ])
         logging.info("MinIO alias configured")
 
-    def configure_webhook(self):
+    async def configure_webhook(self):
         """Configures MinIO webhook settings."""
-        self.run_command([
+        await self.run_command([
             "mc", "admin", "config", "set", self.minio_alias, "notify_webhook:FastAPI",
             f"endpoint={self.webhook_url}",
             f"auth_token={self.webhook_secret}",
             "enable=on",
         ])
-        self.run_command(["mc", "admin", "service", "restart", self.minio_alias])
+        await self.run_command(["mc", "admin", "service", "restart", self.minio_alias])
         logging.info("MinIO webhook configured and service restarted")
 
-    def event_rule_exists(self):
-        """Checks if the bucket event rule already exists."""
-        existing_rules = self.run_command([
-            "mc", "event", "list", f"{self.minio_alias}/{self.bucket_name}"
-        ], capture_output=True)
+    async def event_rule_exists(self, retries=8, delay=3):
+        """Checks if the bucket event rule already exists, with improved retry logic."""
+        for attempt in range(retries):
+            existing_rules = await self.run_command([
+                "mc", "event", "list", f"{self.minio_alias}/{self.bucket_name}"
+            ], capture_output=True)
 
-        if existing_rules and "arn:minio:sqs::FastAPI:webhook" in existing_rules:
-            logging.info("Event notification rule already exists. Skipping rule addition.")
-            return True
-        
+            if existing_rules and "arn:minio:sqs::FastAPI:webhook" in existing_rules:
+                logging.info("Event notification rule already exists. Skipping rule addition.")
+                return True
+            else:
+                logging.warning(f"Attempt {attempt + 1}/{retries}: MinIO event list failed. Retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+
+        logging.error("Failed to fetch event rules after retries.")
         return False
 
-    def enable_bucket_notifications(self):
+    async def enable_bucket_notifications(self):
         """Enables event notifications for the configured MinIO bucket if not already set."""
-        if self.event_rule_exists():
+        if await self.event_rule_exists():
             return  # Skip if the rule is already in place
 
-        self.run_command([
+        await self.run_command([
             "mc", "event", "add", f"{self.minio_alias}/{self.bucket_name}",
             "arn:minio:sqs::FastAPI:webhook",
             "--event", "put,delete"
@@ -85,16 +101,15 @@ class MinIOSetup:
         logging.info(f"Event notifications enabled for bucket: {self.bucket_name}")
 
     async def setup_minio(self):
-        """Runs all MinIO setup steps sequentially."""
+        """Runs all MinIO setup steps sequentially in async mode."""
         if not await self.wait_for_minio():
             return
     
-        self.setup_minio_alias()
-        self.configure_webhook()
-        self.enable_bucket_notifications()
+        await self.setup_minio_alias()
+        await self.configure_webhook()
+        await self.enable_bucket_notifications()
 
 
-# Entry point to execute MinIO setup
 if __name__ == "__main__":
     minio_setup = MinIOSetup()
     asyncio.run(minio_setup.setup_minio())
