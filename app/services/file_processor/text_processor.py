@@ -230,9 +230,9 @@ class TextProcessor:
                 f"""
                 Here is the Document Summary from which the below data is chunked from : {doc_summary}
                 Here is the chunk : {chunk["content"]}
-                Here are the preceeding chunks : {prev_chunks}
-                Here are the following chunks : {next_chunks}
-                Now generate the Chunk Context (max {self.chunk_context_size} tokens) by exracting key contextual information for retrieval leveraging the document summary, preceeding and following chunks. 
+                Here are the preceeding two chunks : {prev_chunks}
+                Here are the following two chunks : {next_chunks}
+                Now generate the current chunk Context (max {self.chunk_context_size} tokens) by exracting key contextual information for retrieval leveraging the document summary, preceeding and following chunks. 
                 """,
                 max_tokens=self.chunk_context_size
             )
