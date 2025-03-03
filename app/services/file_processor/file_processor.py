@@ -38,33 +38,30 @@ class FileEventProcessor:
         """Process individual event with metadata enrichment, MIME detection, and routing."""
         try:
             # Enrich event with DB metadata
-            metadata = await self.db.get_document_metadata(event['user_id'], event['path'])
+            metadata = await self.db.get_document_metadata(event['user_id'], event['file_path'])
             if metadata:
                 # Convert SQLAlchemy model to dictionary
                 metadata_dict = {
-                    'id': metadata.id,
+                    'document_id': metadata.id,
                     'user_id': metadata.user_id,
                     'file_name': metadata.file_name,
-                    'file_path': metadata.file_path,
                     'mime_type': metadata.mime_type,
                     'file_size': metadata.file_size,
                     'file_hash': metadata.file_hash,
                     'description': metadata.description,
                     'quadrant_status': metadata.quadrant_status,
-                    'created_at': metadata.created_at,
-                    'updated_at': metadata.updated_at
                 }
                 event.update(metadata_dict)
             
             # Fetch file from MinIO
-            file_data = await self.minio.fetch_file_from_minio(event.get('path'))
+            file_data = await self.minio.fetch_file_from_minio(event.get('file_path'))
 
             # Detect MIME type after retrieval
             file_data.seek(0)
             sample_bytes = file_data.read(2048)
             file_data.seek(0)  # Reset position for subsequent reads
             detected_mime_type = self.mime_detector.from_buffer(sample_bytes)# Detect from first 2KB
-            event["detected_mime_type"] = detected_mime_type
+            event["mime_type"] = detected_mime_type
 
             logging.info(f"Detected MIME type: {detected_mime_type} for file {event.get('file_path')}")
 
@@ -72,7 +69,7 @@ class FileEventProcessor:
             await self._route_to_processor(event, file_data, detected_mime_type)
 
         except Exception as e:
-            logging.error(f"Failed processing event {event.get('event_id', 'unknown')}: {str(e)}")
+            logging.error(f"Failed processing event {event.get('file_event_id', 'unknown')}: {str(e)}")
             await self._handle_failed_event(event, e)
 
     async def _route_to_processor(self, event: dict, file_data: bytes, mime_type: str):
@@ -105,7 +102,7 @@ class FileEventProcessor:
 
         # If no processor is found, log and skip processing
         if processor_task is None:
-            logging.warning(f"Unsupported MIME type {mime_type} for {event['path']}. Skipping processing.")
+            logging.warning(f"Unsupported MIME type {mime_type} for {event['file_path']}. Skipping processing.")
             return
 
         # Wait for processing completion asynchronously
@@ -113,4 +110,4 @@ class FileEventProcessor:
 
     async def _handle_failed_event(self, event: dict, e) -> None:
         """Handle event processing failures."""
-        await self.db.update_event_status(event['event_id'], 'failed', str(e))
+        await self.db.update_event_status(event['file_event_id'], 'failed', str(e))

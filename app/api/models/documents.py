@@ -6,11 +6,13 @@ from app.api.db.base import Base
 
 
 class QuadrantStatus(str, enum.Enum):
-    Q1 = "Q1"  # Important & Urgent
-    Q2 = "Q2"  # Important & Not Urgent
-    Q3 = "Q3"  # Not Important & Urgent
-    Q4 = "Q4"  # Not Important & Not Urgent
-    UNASSIGNED = "UNASSIGNED"
+    Q1 = "Not Processed"  # Not Processed
+    Q2 = "Processing"  # Important & Not Urgent
+    Q3 = "Priority Processed"  # Not Important & Urgent
+    Q4 = "Fully Processed"  # Not Important & Not Urgent
+    Q5 = "Failed Priority Processing"  # Important & Urgent
+    Q6 = "Failed Full Processing"  # Important & Urgent
+
 
 class Document(Base):
     __tablename__ = "documents"
@@ -26,7 +28,7 @@ class Document(Base):
     quadrant_status = Column(
         Enum(QuadrantStatus), 
         nullable=False, 
-        default=QuadrantStatus.UNASSIGNED
+        default=QuadrantStatus.Q1
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

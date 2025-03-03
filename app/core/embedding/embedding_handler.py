@@ -65,7 +65,7 @@ class EmbeddingHandler:
             input_str = input_data
             
         hash_key = await self.cache.get_hash(input_str)
-        return f"embedding:{embedding_type}:{self.model_source}:{self.model_name}:{hash_key}"
+        return f"embedding:{embedding_type}:{self.model_source}:{self.model_name}:{hash_key}:{input_str[:20]}"
 
     async def encode_dense(self, input_data: Union[str, List[str]]) -> np.ndarray:
         """
@@ -74,11 +74,10 @@ class EmbeddingHandler:
         """
         try:
             cache_key = await self._get_cache_key(input_data, "dense")
-            await self.cache.delete(cache_key) 
             cached_result = await self.cache.get(cache_key)
             if cached_result:
                 self.logger.info("Dense embedding cache hit")
-                return cached_result  # Convert back to ndarray
+                return json.loads(cached_result)  # Convert back to ndarray
 
             # Compute new embeddings
             if isinstance(input_data, str):
@@ -113,7 +112,6 @@ class EmbeddingHandler:
         """
         try:
             cache_key = await self._get_cache_key(text, "sparse")
-            await self.cache.delete(cache_key)  # Clear cache for testing
             cached_result = await self.cache.get(cache_key)
 
             if cached_result:
@@ -123,7 +121,7 @@ class EmbeddingHandler:
                 cached_data = json.loads(cached_result)
                 embeddings = SparseVector(**cached_data)
                 
-                return cached_data
+                return embeddings
 
             # Compute new sparse embedding
             embeddings = list(self.sparse_model.embed([text]))[0]

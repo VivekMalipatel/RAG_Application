@@ -51,11 +51,11 @@ async def minio_webhook(request: Request):
         queue_name = settings.REDIS_CHAT_QUEUE if upload_type == "chat" else settings.REDIS_STANDARD_QUEUE
 
         task_data = {
-            "event_id": str(uuid4()),
+            "file_event_id": str(uuid4()),
             "user_id": user_id,
-            "path": file_key,
-            "event_type": event_name,
-            "upload_channel": upload_type,
+            "file_path": file_key,
+            "file_event_type": event_name,
+            "file_upload_channel": upload_type,
             "timestamp": event.get("EventTime")
         }
 

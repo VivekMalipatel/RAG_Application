@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api.v1.endpoints import agent, documents, user, upload, minio_webhook
+from app.api.v1.endpoints import agent, documents, user, upload, minio_webhook, query
 from app.api.db.base import init_db, close_db
 from app.core.storage_bin.minio.session_minio import minio_session
 from app.core.cache.session_redis import redis_session
@@ -55,6 +55,7 @@ app.include_router(agent.router, prefix="/api/v1/agents", tags=["Agents"])
 app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
 app.include_router(upload.router, prefix="/api/v1/files", tags=["File Upload"])
 app.include_router(minio_webhook.router, prefix="/api/v1/minio", tags=["MinIO Webhooks"])
+app.include_router(query.router, prefix="/api/v1/query", tags=["Query"])
 
 @app.get("/")
 async def root():

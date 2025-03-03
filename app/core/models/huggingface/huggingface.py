@@ -5,6 +5,7 @@ from PIL import Image
 from typing import List, Union, Optional, Dict
 import requests
 from app.config import settings
+import numpy as np
 
 # Default Prompt Template (Can Be Overridden)
 DEFAULT_TEMPLATE = """{{ if .System }}<|start_header_id|>system<|end_header_id|>
@@ -23,6 +24,7 @@ class HuggingFaceClient:
     - Vision embeddings (CLIP, Nomic, etc.)
     - Text generation (LLaMA, Mistral, etc.)
     - Image generation (Stable Diffusion, SDXL, etc.)
+    - **Document reranking using Jina ColBERT V2**
     """
 
     def __init__(
@@ -71,12 +73,10 @@ class HuggingFaceClient:
                 "device_map": self.device
             }
 
-            if model_type == "text":
-                self._load_text_model(**kwargs)
+            if model_type in ["text", "generation", "reranker"]:
+                self._load_text_model()
             elif model_type == "image":
                 self._load_image_model(**kwargs)
-            elif model_type == "generation":
-                self._load_text_generation_model(**kwargs)
             elif model_type == "image-generation":
                 self._load_image_generation_model()
             else:
@@ -85,14 +85,15 @@ class HuggingFaceClient:
             logging.error(f"Failed to load Hugging Face model {model_name}: {str(e)}")
             raise RuntimeError(f"Model initialization failed: {model_name}")
 
-    def _load_text_model(self, **kwargs):
-        """Loads a text embedding model (e.g., Nomic, BGE)."""
+    def _load_text_model(self):
+        """Loads a text model for embeddings, generation, or reranking."""
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.model = AutoModel.from_pretrained(self.model_name, **kwargs)
+            self.model = AutoModel.from_pretrained(self.model_name, trust_remote_code=True)
             self.model.eval()
             self.model.to(self.device)
-            logging.info(f"Loaded text embedding model: {self.model_name} on {self.device}")
+            self.max_length = min(8194, self.tokenizer.model_max_length)
+            logging.info(f"Loaded text model: {self.model_name} on {self.device}")
         except Exception as e:
             logging.error(f"Text model loading failed: {str(e)}")
             raise
@@ -109,18 +110,6 @@ class HuggingFaceClient:
             logging.error(f"Image model loading failed: {str(e)}")
             raise
 
-    def _load_text_generation_model(self, **kwargs):
-        """Loads a text generation model (e.g., LLaMA, Mistral)."""
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.model = AutoModel.from_pretrained(self.model_name, **kwargs)
-            self.model.eval()
-            self.model.to(self.device)
-            logging.info(f"Loaded text generation model: {self.model_name} on {self.device}")
-        except Exception as e:
-            logging.error(f"Text generation model loading failed: {str(e)}")
-            raise
-
     def _load_image_generation_model(self, **kwargs):
         """Loads an image generation model (e.g., Stable Diffusion)."""
         self.model = pipeline("text-to-image", model=self.model_name, device=0 if self.device == "cuda" else -1)
@@ -128,7 +117,7 @@ class HuggingFaceClient:
 
     def encode_text(self, texts: List[str]) -> torch.Tensor:
         """Encodes a list of text inputs into embeddings."""
-        inputs = self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(self.device)
+        inputs = self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt", max_length=self.max_length ).to(self.device)
         with torch.no_grad():
             embeddings = self.model(**inputs).last_hidden_state.mean(dim=1)
         return embeddings.cpu().numpy()
@@ -164,3 +153,17 @@ class HuggingFaceClient:
         formatted_prompt = formatted_prompt.replace("{{ .Prompt }}", user_prompt)
         formatted_prompt = formatted_prompt.replace("{{ .Response }}", "")  # Initial response is empty
         return formatted_prompt
+    
+
+    def rerank_documents(self, query: str, documents: List[str]) -> List[int]:
+        """Uses JinaAI ColBERT V2 for reranking."""
+        query_tokens = self.tokenizer(query, return_tensors="pt", truncation=True, padding=True, max_length=self.max_length).to(self.device)
+        doc_tokens = self.tokenizer(documents, return_tensors="pt", truncation=True, padding=True, max_length=self.max_length).to(self.device)
+
+        with torch.no_grad():
+            query_embedding = self.model(**query_tokens).last_hidden_state.mean(dim=1)
+            doc_embeddings = self.model(**doc_tokens).last_hidden_state.mean(dim=1)
+            scores = torch.matmul(query_embedding, doc_embeddings.T).squeeze().cpu().numpy()
+
+        ranked_indices = np.argsort(scores)[::-1]
+        return ranked_indices.tolist()

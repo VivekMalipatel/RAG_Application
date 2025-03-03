@@ -1,17 +1,21 @@
 import logging
 from typing import List, Dict, Any, Optional
 from qdrant_client.http.models import (
-     VectorParams, PointStruct, Filter, Distance, SparseVectorParams, SparseIndexParams, OptimizersConfigDiff, FusionQuery, Prefetch, Filter, SparseVector
+     VectorParams, PointStruct, Filter, Distance, SparseVectorParams, SparseIndexParams, OptimizersConfigDiff, FusionQuery, Prefetch, Filter, SparseVector, models
 )
 from colbert.modeling.checkpoint import Checkpoint
 from colbert.infra import ColBERTConfig
 import torch
 from app.core.vector_store.qdrant.qdrant_session import qdrant_session
+from app.core.models.huggingface.huggingface import HuggingFaceClient
 import uuid
 import numpy as np
 
 class QdrantHandler:
     """Handles vector operations with Qdrant for hybrid search with dense and sparse vectors."""
+
+    def __init__(self):
+        self.reranker = HuggingFaceClient(model_name="jinaai/jina-colbert-v2", model_type="reranker")
 
     async def create_collection(
         self,
@@ -34,11 +38,11 @@ class QdrantHandler:
                     distance=Distance.COSINE,
                     on_disk=True
                 ),
-                "image": VectorParams(
-                    size=image_vector_size,
-                    distance=Distance.DOT,
-                    on_disk=True
-                ),
+#                "image": VectorParams(
+#                    size=image_vector_size,
+#                    distance=Distance.DOT,
+#                    on_disk=True
+#                ),
                 "quantized": VectorParams(
                     size=quantized_size,
                     distance=Distance.COSINE,
@@ -58,11 +62,8 @@ class QdrantHandler:
             sparse_vectors_config = None
             if sparse_enabled:
                 sparse_vectors_config = {
-                    "sparse_text": SparseVectorParams(
+                    "sparse": SparseVectorParams(
                         index=SparseIndexParams(on_disk=False)
-                    ),
-                    "sparse_image": SparseVectorParams(
-                        index=SparseIndexParams(on_disk=True)
                     )
                 }
 
@@ -90,7 +91,7 @@ class QdrantHandler:
             raise
 
 
-    async def store_vectors(self, embedded_chunks: List[Dict[str, Any]], metadata: Dict[str, Any]):
+    async def store_vectors(self, embedded_chunks: List[Dict[str, Any]], user_id: str):
         """
         Stores document chunks with multi-stage embeddings (dense, sparse, matryoshka, image).
 
@@ -99,16 +100,14 @@ class QdrantHandler:
             metadata (dict): Document metadata including user_id.
         """
         try:
-            user_id = metadata["user_id"]
-
             # Check if collection exists, if not create it
             collections = await qdrant_session.client.get_collections()
-            if user_id not in [c.name for c in collections.collections]:
+            if str(user_id) not in [c.name for c in collections.collections]:
                 await self.create_collection(user_id=user_id)
 
             points = []
 
-            for i, chunk in enumerate(embedded_chunks):
+            for chunk in embedded_chunks:
                 # Validate Dense Embedding Dimension
                 if len(chunk["dense_embedding"]) != 768:
                     raise ValueError(f"Dense vector dimension mismatch. Expected 768, got {len(chunk['dense_embedding'])}")
@@ -124,6 +123,8 @@ class QdrantHandler:
                 matryoshka_128 = dense_embedding[:128].tolist()
                 matryoshka_256 = dense_embedding[:256].tolist()
 
+                metadata = chunk["chunk_metadata"]
+
                 # Define the point structure with all embeddings
                 point = PointStruct(
                     id=chunk_id,
@@ -133,21 +134,24 @@ class QdrantHandler:
                         "matryoshka_128": matryoshka_128,
                         "matryoshka_256": matryoshka_256,
                         "quantized": quantized_dense_embedding,
-                        "image": chunk.get("image_embedding", []),  # Image embedding if available
-                        "sparse_text": chunk["sparse_text_embedding"],
-                        "sparse_image": chunk.get("sparse_image_embedding", []),  # TBD method
+                        #"image": chunk.get("image_embedding", []),  # Image embedding if available
+                        "sparse": chunk["sparse_embedding"] # TBD method
                     },
                     payload={
+                        #TODO: DocumentID Coming as Null
                         "document_id": metadata["document_id"],
                         "user_id": metadata["user_id"],
+                        "file_name": metadata["file_name"],
+                        "mime_type": metadata["mime_type"],
+                        "file_size": metadata["file_size"],
+                        "file_description": metadata["description"],
                         "file_path": metadata["file_path"],
-                        "timestamp": metadata["timestamp"],
                         "context_version": metadata["context_version"],
-                        "chunk_number": i,  # Track chunk position
-                        "hierarchy": chunk.get("document_hierarchy", []),  # Extracted document structure
-                        "entities": chunk.get("entities", []),  # Named entities
-                        "context": chunk.get("context", ""),  # Contextual metadata
-                        "position": chunk.get("position", ""),  # Chunk position info
+                        "chunk_number": metadata['chunk_number'],  # Track chunk position
+                        "hierarchy": metadata.get("document_hierarchy"),  # Extracted document structure
+                        "entities": metadata.get("entities"),  # Named entities
+                        "context": metadata.get("context"),  # Contextual metadata
+                        "document_summary": metadata["doc_summary"],  # Chunk position info
                         "content": str(chunk["content"])
                     }
                 )
@@ -198,27 +202,35 @@ class QdrantHandler:
 
             # **Step A: Matryoshka Dimensionality Reduction Search**
             matryoshka_prefetch = Prefetch(
-                prefetch=[
-                    Prefetch(
-                        prefetch=[
-                            # First stage - 64D retrieval (high recall, low precision)
-                            Prefetch(
-                                query=dense_vector[:64],
-                                using="matryoshka_64",
-                                limit=100,
-                            ),
-                        ],
-                        # Second stage - 128D refinement
-                        query=dense_vector[:128],
-                        using="matryoshka_128",
-                        limit=50,
-                    ),
-                ],
-                # Third stage - 256D final refinement
-                query=dense_vector[:256],
-                using="matryoshka_256",
-                limit=25,
-            )
+                            prefetch=[
+                                Prefetch(
+                                    prefetch=[
+                                        Prefetch(
+                                            prefetch=[
+                                                # First stage - 64D retrieval (high recall, low precision)
+                                                Prefetch(
+                                                    query=dense_vector[:64],
+                                                    using="matryoshka_64",
+                                                    limit=30,
+                                                ),
+                                            ],
+                                            # Second stage - 128D refinement
+                                            query=dense_vector[:128],
+                                            using="matryoshka_128",
+                                            limit=20,
+                                        ),
+                                    ],
+                                    # Third stage - 256D final refinement
+                                    query=dense_vector[:256],
+                                    using="matryoshka_256",
+                                    limit=15,
+                                ),
+                            ],
+                            # Fourth stage - Full 768D precision refinement
+                            query=dense_vector,
+                            using="dense",
+                            limit=10,
+                        )
 
             # **Step B: Integer-Based Quantized Search & 768D Dense Re-ranking**
             quantized_dense_prefetch = Prefetch(
@@ -227,33 +239,33 @@ class QdrantHandler:
                     Prefetch(
                         query=quantized_query,
                         using="quantized",
-                        limit=100,
+                        limit=30,
                     )
                 ],
                 # Refine with full precision 768D float vectors
                 query=dense_vector,
                 using="dense",
-                limit=25,
+                limit=10,
             )
 
             # **Step C: Sparse Search (BM25 for text, TBD for images)**
             sparse_search_prefetch = Prefetch(
-                query=SparseVector(
+                query=sparse_vector if isinstance(sparse_vector, SparseVector) else SparseVector(
                     indices=sparse_vector["indices"],
                     values=sparse_vector["values"]
                 ),
-                using="sparse_text",
-                limit=25,
+                using="sparse",
+                limit=10,
             )
 
             # **Step D: Fusion of Quantized Dense + Sparse using RRF**
             sparse_dense_rrf = Prefetch(
                 prefetch=[quantized_dense_prefetch, sparse_search_prefetch],
-                query=FusionQuery(fusion=FusionQuery.RRF),
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
             )
 
             # **Execute Hybrid Search Pipeline**
-            results = await qdrant_session.client.query_points(
+            search_result = await qdrant_session.client.query_points(
                 collection_name=user_id,
                 prefetch=[matryoshka_prefetch, sparse_dense_rrf],
                 query=dense_vector,
@@ -264,8 +276,10 @@ class QdrantHandler:
                 query_filter=query_filter
             )
 
+            results = search_result.points
+
             # **Extract Documents for Reranking**
-            documents = [res.payload["content"] for res in results if "content" in res.payload]
+            documents = [res.payload["content"] for res in results if res.payload and "content" in res.payload]
 
             if not documents:
                 logging.warning("No documents retrieved for reranking.")
@@ -282,7 +296,7 @@ class QdrantHandler:
 
     async def rerank_with_colbert(self, query: str, documents: List[str], results: List[Dict]) -> List[Dict]:
         """
-        Uses ColBERT-V2 for late interaction reranking of retrieved documents.
+        Uses Hugging Face's JinaAI ColBERT V2 for reranking.
 
         Args:
             query (str): User query.
@@ -290,28 +304,18 @@ class QdrantHandler:
             results (List[Dict]): Initial hybrid search results.
 
         Returns:
-            List[Dict]: Reranked search results based on ColBERT scoring.
+            List[Dict]: Reranked search results.
         """
         try:
-            # Initialize ColBERT Config
-            colbert_config = ColBERTConfig(query_maxlen=32, doc_maxlen=512)
-            ckpt = Checkpoint("jinaai/jina-colbert-v1-en", colbert_config=colbert_config)
+            ranked_indices = self.reranker.rerank_documents(query, documents)
 
-            # Encode Query & Documents
-            query_vector = ckpt.queryFromText([query])
-            document_vectors = ckpt.docFromText(documents, bsize=32)
+            if not ranked_indices:
+                return results
 
-            # Compute Scores using Late Interaction
-            scores = (query_vector @ document_vectors.transpose(1, 2)).max(dim=2).values.sum(dim=1).cpu().numpy()
-
-            # Rank Documents based on ColBERT Scores
-            ranked_indices = np.argsort(scores)[::-1]
-
-            # Reorder Results Based on Ranking
+            # Reorder search results based on reranked indices
             reranked_results = [results[i] for i in ranked_indices]
 
             return reranked_results
-
         except Exception as e:
-            logging.error(f"ColBERT reranking failed: {str(e)}")
+            logging.error(f"Reranking failed: {str(e)}")
             return results

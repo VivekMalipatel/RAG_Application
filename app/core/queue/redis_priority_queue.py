@@ -22,7 +22,7 @@ class RedisPriorityQueue:
         queue_name = self.queue_map[queue_type]
         try:
             await self.redis.lpush(queue_name, json.dumps(data))
-            logging.debug(f"Event pushed to {queue_name}: {data['event_id']}")
+            logging.debug(f"Event pushed to {queue_name}: {data['file_event_id']}")
         except Exception as e:
             logging.error(f"Failed to push to {queue_name}: {str(e)}")
             raise

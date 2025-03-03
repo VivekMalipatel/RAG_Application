@@ -15,3 +15,4 @@
 .vscode/launch.json
 Temp_Files/video/
 models
+/minio_config
