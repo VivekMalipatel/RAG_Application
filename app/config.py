@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Set
+from app.core.models.model_provider import Provider
 
 class Settings(BaseSettings):
     APP_HOST: str
@@ -30,17 +30,31 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     OPENAI_API_URL: str
     HUGGINGFACE_TOKEN: str
-    TEXT_EMBEDDING_SOURCE: str
-    TEXT_EMBEDDING_MODEL: str
-    TEXT_CHUNK_SIZE: str
-    TEXT_DOC_CONTEXT_SIZE: str
-    TEXT_CHUNK_CONTEXT_SIZE: str
-    TEXT_LLM_MODEL: str
+
+    # TEXT PROCESSING CONFIGURATION
+    TEXT_EMBEDDING_PROVIDER: Provider
+    TEXT_EMBEDDING_MODEL_NAME: str
+    
+    TEXT_CHUNK_SIZE: int
+    TEXT_CHUNK_OVERLAP: int
+    
+    TEXT_DOCUMENT_CONTEXT_MAX_TOKENS: int
+    TEXT_CHUNK_CONTEXT_MAX_TOKENS: int
+    
+    TEXT_CONTEXT_LLM_PROVIDER: Provider
+    TEXT_CONTEXT_LLM_MODEL_NAME: str
+    TEXT_CONTEXT_LLM_QUANTIZATION: str
+    TEXT_CONTEXT_LLM_TEMPERATURE: float
+    TEXT_CONTEXT_LLM_TOP_P: float
+
+    # INFERENCE LLM CONFIGURATION
+    TEXT_LLM_MODEL_NAME: str
+    TEXT_LLM_TEMPERATURE: float
+    TEXT_LLM_TOP_P: float
     TEXT_LLM_QUANTIZATION: str
-    TEXT_LLM_TEMPERATURE: str
-    TEXT_LLM_TOP_P: str
-    TEXT_LLM_MAX_TOKENS: str
-    TEXT_CHUNK_OVERLAP: str
+    TEXT_LLM_PROVIDER: Provider
+
+
     PROJECT_NAME: str = "FastAPI User Management"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"

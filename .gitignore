@@ -14,5 +14,5 @@
 /tesseract_data
 .vscode/launch.json
 Temp_Files/video/
-models
+./models
 /minio_config

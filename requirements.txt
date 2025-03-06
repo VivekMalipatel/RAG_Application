@@ -5,28 +5,16 @@ requests
 redis[hiredis]
 
 numpy
-rank_bm25
 langchain
 langchain-openai
 langchain-community
 langchain-unstructured
 unstructured[all-docs]
-transformers
-llama_index
-pypdf
-llama-index-vector-stores-qdrant
-llama-index-readers-file
-llama-index-embeddings-fastembed
-pymupdf
-pdf2image
-pytesseract
-whisper-openai
-unstructured
-opencv-python
-pytesseract
-openai-whisper
-sentence-transformers
 
+transformers
+pymupdf
+sentence-transformers
+accelerate
 torch --index-url https://download.pytorch.org/whl/cpu
 torchvision --index-url https://download.pytorch.org/whl/cpu
 torchaudio --index-url https://download.pytorch.org/whl/cpu
@@ -46,11 +34,7 @@ python-multipart
 bcrypt
 
 minio
-pymupdf
 python-magic
-python-multipart
-python-magic
-watchdog
 
 aiobotocore
 aiofiles

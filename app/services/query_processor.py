@@ -3,7 +3,9 @@ import logging
 from typing import Dict, Any, List
 from app.core.embedding.embedding_handler import EmbeddingHandler
 from app.core.vector_store.qdrant.qdrant_handler import QdrantHandler
-from app.core.models.ollama.ollama import OllamaClient
+from app.core.models.model_handler import ModelRouter
+from app.core.models.model_provider import Provider
+from app.core.models.model_type import ModelType
 from app.config import settings
 
 class QueryProcessor:
@@ -12,14 +14,20 @@ class QueryProcessor:
     def __init__(self):
         """Initializes query processing components."""
         self.qdrant = QdrantHandler()
+
+        # Initialize Embedding Model using ModelRouter
         self.embedding_model = EmbeddingHandler(
-            model_source=settings.TEXT_EMBEDDING_SOURCE,
-            model_name=settings.TEXT_EMBEDDING_MODEL,
-            model_type="text"
+            provider=settings.TEXT_EMBEDDING_PROVIDER,
+            model_name=settings.TEXT_EMBEDDING_MODEL_NAME,
+            model_type=ModelType.TEXT_EMBEDDING
         )
-        self.ollama = OllamaClient(
-            hf_repo=settings.TEXT_LLM_MODEL,
-            quantization=settings.TEXT_LLM_QUANTIZATION,
+
+        # Initialize LLM for Query Answering
+        self.llm = ModelRouter(
+            provider=settings.TEXT_LLM_PROVIDER,
+            model_name=settings.TEXT_LLM_MODEL_NAME,
+            model_type=ModelType.TEXT_GENERATION,
+            model_quantization=settings.TEXT_LLM_QUANTIZATION,
             system_prompt="""
             You are an AI assistant capable of answering queries using retrieved information.
             Given relevant search results, generate a concise and factual response.
@@ -28,8 +36,7 @@ class QueryProcessor:
             - If uncertain, say "Not enough information available."
             """,
             temperature=float(settings.TEXT_LLM_TEMPERATURE),
-            top_p=float(settings.TEXT_LLM_TOP_P),
-            max_tokens=int(settings.TEXT_LLM_MAX_TOKENS),
+            top_p=float(settings.TEXT_LLM_TOP_P)
         )
 
     async def process_query(self, user_id: str, query: str, top_k: int = 10) -> Dict[str, Any]:
@@ -83,7 +90,7 @@ class QueryProcessor:
             """
 
             # Step 4: Generate Answer using LLM
-            answer = await self.ollama.generate(prompt)
+            answer = await self.llm.generate_text(prompt)
 
             # Step 5: Format and Return Response
             return {

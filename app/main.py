@@ -1,17 +1,15 @@
 from fastapi import FastAPI
-from app.api.v1.endpoints import agent, documents, user, upload, minio_webhook, query
-from app.api.db.base import init_db, close_db
-from app.core.storage_bin.minio.session_minio import minio_session
-from app.core.cache.session_redis import redis_session
-from app.core.vector_store.qdrant.qdrant_session import qdrant_session
-from app.core.storage_bin.minio.setup_minio import MinIOSetup 
 import uvicorn
 import asyncio
 import logging
-from app.services.file_processor.file_processor import FileEventProcessor
 from app.config import settings
-
-
+from app.core.storage_bin.minio.session_minio import minio_session
+from app.core.cache.session_redis import redis_session
+from app.core.vector_store.qdrant.qdrant_session import qdrant_session
+from app.api.v1.endpoints import agent, documents, user, upload, minio_webhook, query
+from app.api.db.base import init_db, close_db
+from app.core.storage_bin.minio.setup_minio import MinIOSetup
+from app.services.file_processor.file_processor import FileEventProcessor 
 
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""

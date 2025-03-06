@@ -1,21 +1,22 @@
 import asyncio
 import logging
-from datetime import datetime
-from typing import List, Dict, Any, Optional
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from app.core.models.model_handler import ModelRouter
+from app.core.models.model_provider import Provider
+from app.core.models.model_type import ModelType
 from langchain_unstructured import UnstructuredLoader
 import spacy
 from app.core.embedding.embedding_handler import EmbeddingHandler
 from app.core.db_handler.document_handler import DocumentHandler
 from app.core.storage_bin.minio.minio_handler import MinIOHandler
 from app.core.vector_store.qdrant.qdrant_handler import QdrantHandler
-from app.core.models.ollama.ollama import OllamaClient
 from app.core.cache.redis_cache import RedisCache
 from app.config import settings
 from spacy.cli import download
+import asyncio
+import concurrent.futures
 import os
 import tempfile
-import concurrent.futures
 import aiofiles
 
 
@@ -30,15 +31,17 @@ class TextProcessor:
         self.cache = RedisCache()
 
         # Fetch values from environment variables
-        self.embedding_source = settings.TEXT_EMBEDDING_SOURCE
-        self.embedding_model = settings.TEXT_EMBEDDING_MODEL
-        self.chunk_size = int(settings.TEXT_CHUNK_SIZE)
-        self.chunk_overlap = int(settings.TEXT_CHUNK_OVERLAP)
-        self.doc_context_size = int(settings.TEXT_DOC_CONTEXT_SIZE)
-        self.chunk_context_size = int(settings.TEXT_CHUNK_CONTEXT_SIZE)
+        self.embedding_source = settings.TEXT_EMBEDDING_PROVIDER
+        self.embedding_model = settings.TEXT_EMBEDDING_MODEL_NAME
+        self.chunk_size = settings.TEXT_CHUNK_SIZE
+        self.chunk_overlap = settings.TEXT_CHUNK_OVERLAP
+        self.doc_context_size = settings.TEXT_DOCUMENT_CONTEXT_MAX_TOKENS
+        self.chunk_context_size = settings.TEXT_CHUNK_CONTEXT_MAX_TOKENS
 
         self.embedding_model = EmbeddingHandler(
-            model_source=self.embedding_source, model_name=self.embedding_model, model_type="text"
+            provider=Provider(settings.TEXT_EMBEDDING_PROVIDER), 
+            model_name=settings.TEXT_EMBEDDING_MODEL_NAME,  
+            model_type=ModelType.TEXT_EMBEDDING
         )
 
         document_context_system_prompt = """
@@ -46,8 +49,8 @@ class TextProcessor:
         
         1. Identifying key topics, themes, and structure of the document
         2. Mentioning important entities without summarizing specific data points
-        3. Providing essential context for understanding the document's purpose
-        4. Excluding direct quotes or paraphrases of document content
+        3. Providing essential context for understanding the document
+        4. Donot provide/rewrite document content or specific details
         5. Focusing only on factual information present in the document
         
         Output format: Clear, concise paragraph without headings or formatting
@@ -61,27 +64,32 @@ class TextProcessor:
         3. Consider neighboring chunks for context but focus on the current chunk
         4. Include only factual information present in the text
         5. Avoid formatting, headings, or introductory phrases
+        6. Donot provide/rewrite chunk content or specific details
         
         Output format: Single factual paragraph with no extraneous text
         """
 
         try:
-            self.chunk_context_model = OllamaClient(
-                hf_repo=settings.TEXT_LLM_MODEL,
-                quantization=settings.TEXT_LLM_QUANTIZATION,
+            self.chunk_context_model = ModelRouter(
+                provider=Provider(settings.TEXT_CONTEXT_LLM_PROVIDER),
+                model_name=settings.TEXT_CONTEXT_LLM_MODEL_NAME,
+                model_quantization=settings.TEXT_CONTEXT_LLM_QUANTIZATION,
+                model_type=ModelType.TEXT_GENERATION,
                 system_prompt=chunk_context_system_prompt,
-                temperature=float(settings.TEXT_LLM_TEMPERATURE),
-                top_p=float(settings.TEXT_LLM_TOP_P),
-                max_tokens=int(settings.TEXT_LLM_MAX_TOKENS),
+                temperature=settings.TEXT_CONTEXT_LLM_TEMPERATURE,
+                top_p=settings.TEXT_CONTEXT_LLM_TOP_P,
+                max_tokens=settings.TEXT_DOCUMENT_CONTEXT_MAX_TOKENS,
             )
 
-            self.document_context_model = OllamaClient(
-                hf_repo=settings.TEXT_LLM_MODEL,
-                quantization=settings.TEXT_LLM_QUANTIZATION,
+            self.document_context_model = ModelRouter(
+                provider=Provider(settings.TEXT_CONTEXT_LLM_PROVIDER),  
+                model_name=settings.TEXT_CONTEXT_LLM_MODEL_NAME,
+                model_quantization=settings.TEXT_CONTEXT_LLM_QUANTIZATION,
+                model_type=ModelType.TEXT_GENERATION,
                 system_prompt=document_context_system_prompt,
-                temperature=float(settings.TEXT_LLM_TEMPERATURE),
-                top_p=float(settings.TEXT_LLM_TOP_P),
-                max_tokens=int(settings.TEXT_LLM_MAX_TOKENS),
+                temperature=settings.TEXT_CONTEXT_LLM_TEMPERATURE,
+                top_p=settings.TEXT_CONTEXT_LLM_TOP_P,
+                max_tokens=settings.TEXT_CHUNK_CONTEXT_MAX_TOKENS,
             )
         except (ValueError, TypeError) as e:
             logging.error(f"Error initializing Ollama client: {str(e)}")
@@ -119,23 +127,22 @@ class TextProcessor:
     async def process(self, event, file_data):
         """Main processing function for text documents."""
         try:
-            _ = await self.document_context_model.ensure_model_available()
-            _ = await self.chunk_context_model.ensure_model_available()
 
             text = await self._extract_text_from_file(event, file_data)
             
             #TODO: Remove Document Artifacts (preprocessing the extracted text)
 
             chunks = await self._structured_chunking(text)
-
+            
             for chunk in chunks:
                 chunk['chunk_metadata'].update({key: event.get(key) for key in ['file_name', 'file_path', 'user_id', 'mime_type', 'file_size', 'description', 'document_id']})
             
-            context_chunks = await self._generate_context(chunks, text)
 
-            embedded_chunks = await self._compute_embeddings(context_chunks)
+            chunks = await self._generate_context(chunks, text)
 
-            await self._store_in_qdrant(embedded_chunks)
+            chunks = await self._compute_embeddings(chunks)
+
+            await self._store_in_qdrant(chunks)
 
             logging.info(f"Successfully processed text document: {event['file_path']}")
 
@@ -240,18 +247,8 @@ class TextProcessor:
             return cached_context
 
         # Generate Document Summary (Only One API Call)
-        doc_summary = await self.document_context_model.generate(
-            f""" Focus on:
-        1. Main topics and key themes
-        2. Important entities and relationships
-        3. Document structure and organization
-        4. Essential context for retrieval
-        5. Only include factual information from the text
-        
-        Analyze this document and create a concise summary in {self.doc_context_size} tokens:
-        {full_text}
-
-        """,
+        doc_summary = await self.document_context_model.generate_text(
+            prompt=f"Max {self.doc_context_size} tokens\n document: {full_text}",
             max_tokens=self.doc_context_size
         )
 
@@ -263,21 +260,12 @@ class TextProcessor:
             prev_chunks = [chunks[j]["content"] for j in range(max(0, i - 2), i)]
             next_chunks = [chunks[j]["content"] for j in range(i + 1, min(total_chunks, i + 3))]
 
-            chunk_context = await self.chunk_context_model.generate(
-                f"""
-                Create a contextual summary (max {self.chunk_context_size} tokens) that:
-                1. Extracts key facts and entities from this chunk
-                2. Connects to document summary for coherence
-                3. Focuses on information relevant for search/retrieval
-                4. Provides only factual information from the text
-                5. Uses simple, clear language without formatting
-
-                Document Summary: {doc_summary}
-                Current Chunk ({i}/{total_chunks}): {chunk["content"]}
-                Previous Context: {prev_chunks}
-                Next Context: {next_chunks}
-            
-                """,
+            chunk_context = await self.chunk_context_model.generate_text(
+                prompt=f"Max {self.chunk_context_size} tokens\n"
+                    f"Document Summary: {doc_summary}\n"
+                    f"Current Chunk ({i}/{total_chunks}): {chunk['content']}\n"
+                    f"Previous Context: {prev_chunks}\n"
+                    f"Next Context: {next_chunks}\n",
                 max_tokens=self.chunk_context_size
             )
             chunk["chunk_metadata"]["context"] = chunk_context

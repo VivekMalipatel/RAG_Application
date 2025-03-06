@@ -1,13 +1,12 @@
 import logging
 from typing import List, Dict, Any, Optional
 from qdrant_client.http.models import (
-     VectorParams, PointStruct, Filter, Distance, SparseVectorParams, SparseIndexParams, OptimizersConfigDiff, FusionQuery, Prefetch, Filter, SparseVector, models
+     VectorParams, PointStruct, Filter, Distance, SparseVectorParams, SparseIndexParams, OptimizersConfigDiff, Prefetch, Filter, SparseVector, models
 )
-from colbert.modeling.checkpoint import Checkpoint
-from colbert.infra import ColBERTConfig
-import torch
 from app.core.vector_store.qdrant.qdrant_session import qdrant_session
-from app.core.models.huggingface.huggingface import HuggingFaceClient
+from app.core.models.model_handler import ModelRouter
+from app.core.models.model_type import ModelType
+from app.core.models.model_provider import Provider
 import uuid
 import numpy as np
 
@@ -15,13 +14,16 @@ class QdrantHandler:
     """Handles vector operations with Qdrant for hybrid search with dense and sparse vectors."""
 
     def __init__(self):
-        self.reranker = HuggingFaceClient(model_name="jinaai/jina-colbert-v2", model_type="reranker")
+        self.reranker = ModelRouter(
+            provider=Provider.HUGGINGFACE,
+            model_name="jinaai/jina-colbert-v2",
+            model_type=ModelType.RERANKER
+        )
 
     async def create_collection(
         self,
         user_id: str,
         dense_vector_size: int = 768,
-        image_vector_size: int = 512,
         matryoshka_sizes: list = [64, 128, 256],
         quantized_size: int = 768,
         sparse_enabled: bool = True
@@ -38,11 +40,6 @@ class QdrantHandler:
                     distance=Distance.COSINE,
                     on_disk=True
                 ),
-#                "image": VectorParams(
-#                    size=image_vector_size,
-#                    distance=Distance.DOT,
-#                    on_disk=True
-#                ),
                 "quantized": VectorParams(
                     size=quantized_size,
                     distance=Distance.COSINE,
@@ -134,11 +131,9 @@ class QdrantHandler:
                         "matryoshka_128": matryoshka_128,
                         "matryoshka_256": matryoshka_256,
                         "quantized": quantized_dense_embedding,
-                        #"image": chunk.get("image_embedding", []),  # Image embedding if available
-                        "sparse": chunk["sparse_embedding"] # TBD method
+                        "sparse": chunk["sparse_embedding"]
                     },
                     payload={
-                        #TODO: DocumentID Coming as Null
                         "document_id": metadata["document_id"],
                         "user_id": metadata["user_id"],
                         "file_name": metadata["file_name"],
@@ -147,11 +142,11 @@ class QdrantHandler:
                         "file_description": metadata["description"],
                         "file_path": metadata["file_path"],
                         "context_version": metadata["context_version"],
-                        "chunk_number": metadata['chunk_number'],  # Track chunk position
-                        "hierarchy": metadata.get("document_hierarchy"),  # Extracted document structure
-                        "entities": metadata.get("entities"),  # Named entities
-                        "context": metadata.get("context"),  # Contextual metadata
-                        "document_summary": metadata["doc_summary"],  # Chunk position info
+                        "chunk_number": metadata['chunk_number'],
+                        "hierarchy": metadata.get("document_hierarchy"),
+                        "entities": metadata.get("entities"),
+                        "context": metadata.get("context"), 
+                        "document_summary": metadata["doc_summary"],
                         "content": str(chunk["content"])
                     }
                 )
@@ -307,7 +302,7 @@ class QdrantHandler:
             List[Dict]: Reranked search results.
         """
         try:
-            ranked_indices = self.reranker.rerank_documents(query, documents)
+            ranked_indices = self.reranker.client.rerank_documents(query, documents)
 
             if not ranked_indices:
                 return results
