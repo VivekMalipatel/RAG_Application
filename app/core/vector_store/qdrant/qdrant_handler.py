@@ -206,19 +206,19 @@ class QdrantHandler:
                                                 Prefetch(
                                                     query=dense_vector[:64],
                                                     using="matryoshka_64",
-                                                    limit=30,
+                                                    limit=400,
                                                 ),
                                             ],
                                             # Second stage - 128D refinement
                                             query=dense_vector[:128],
                                             using="matryoshka_128",
-                                            limit=20,
+                                            limit=300,
                                         ),
                                     ],
                                     # Third stage - 256D final refinement
                                     query=dense_vector[:256],
                                     using="matryoshka_256",
-                                    limit=15,
+                                    limit=200,
                                 ),
                             ],
                             # Fourth stage - Full 768D precision refinement
@@ -265,8 +265,8 @@ class QdrantHandler:
                 prefetch=[matryoshka_prefetch, sparse_dense_rrf],
                 query=dense_vector,
                 using="dense",
-                limit=top_k,
-                search_params={"hnsw_ef": 128, "exact": False},
+                limit=10,
+                search_params={"hnsw_ef": 128, "exact": True},
                 with_payload=True,
                 query_filter=query_filter
             )
@@ -283,7 +283,7 @@ class QdrantHandler:
             # **Step E: Apply Late Interaction Reranking (ColBERT-V2)**
             reranked_results = await self.rerank_with_colbert(query_text, documents, results)
 
-            return reranked_results
+            return reranked_results[:top_k]
 
         except Exception as e:
             logging.error(f"Hybrid search failed for user {user_id}: {str(e)}")

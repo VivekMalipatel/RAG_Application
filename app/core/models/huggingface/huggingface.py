@@ -164,7 +164,7 @@ class HuggingFaceClient:
     
     def embed_text(self, texts: List[str]) -> List[List[float]]:
         """Generates text embeddings."""
-        inputs = self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(self.device)
+        inputs = self.tokenizer(texts, padding=True, return_tensors="pt").to(self.device)
         with torch.no_grad():
             embeddings = self.model(**inputs).last_hidden_state.mean(dim=1)
         return embeddings.cpu().numpy().tolist()
@@ -172,7 +172,7 @@ class HuggingFaceClient:
     def rerank_documents(self, query: str, documents: List[str]) -> List[int]:
         """Uses JinaAI ColBERT v2 for document reranking."""
         query_tokens = self.tokenizer(query, return_tensors="pt").to(self.device)
-        doc_tokens = self.tokenizer(documents, return_tensors="pt", padding=True, truncation=True).to(self.device)
+        doc_tokens = self.tokenizer(documents, return_tensors="pt", padding=True).to(self.device)
 
         with torch.no_grad():
             query_embedding = self.model(**query_tokens).last_hidden_state.mean(dim=1)

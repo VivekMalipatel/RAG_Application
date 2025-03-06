@@ -45,29 +45,28 @@ class TextProcessor:
         )
 
         document_context_system_prompt = """
-        Generate a concise document context within {self.doc_context_size} tokens by:
-        
-        1. Identifying key topics, themes, and structure of the document
-        2. Mentioning important entities without summarizing specific data points
-        3. Providing essential context for understanding the document
-        4. Donot provide/rewrite document content or specific details
-        5. Focusing only on factual information present in the document
-        
-        Output format: Clear, concise paragraph without headings or formatting
-        """
+                Generate a concise document context within {self.doc_context_size} tokens by:
+                
+                1. Identifying key topics, themes, and structure of the document
+                2. Mentioning important entities without summarizing specific data points
+                3. Providing essential context for understanding the document
+                4. Donot provide/rewrite document content or specific details
+                5. Focusing only on factual information present in the document
+                
+                Output format: Clear, concise paragraph without headings or formatting
+                """
 
         chunk_context_system_prompt = """
-        Extract key contextual information from this document chunk in {self.chunk_context_size} tokens:
-        
-        1. Focus on essential facts, concepts, and entities in the current chunk
-        2. Use the document summary as reference to maintain coherence
-        3. Consider neighboring chunks for context but focus on the current chunk
-        4. Include only factual information present in the text
-        5. Avoid formatting, headings, or introductory phrases
-        6. Donot provide/rewrite chunk content or specific details
-        
-        Output format: Single factual paragraph with no extraneous text
-        """
+                Explain this chunk's role within the document in {self.chunk_context_size} tokens by answering:
+                
+                1. What specific purpose does this chunk serve?
+                2. Why does this information appear at this point?
+                3. How does this chunk connect to previous content?
+                4. How does this chunk lead into subsequent content?
+                5. How does this chunk support the document's main themes?
+                
+                Format: Single paragraph focused on context, not content repetition
+                """
 
         try:
             self.chunk_context_model = ModelRouter(

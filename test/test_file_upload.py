@@ -10,8 +10,8 @@ UPLOAD_APPROVAL_URL = "http://0.0.0.0:8000//api/v1/files/upload/"
 USER_ID = 1234324
 
 # ✅ File Details
-FILE_PATH = "Temp_Files/docs/ragas_papers.pdf"
-FILE_NAME = "ragas_papers.pdf"
+FILE_PATH = "Temp_Files/docs/Resume.pdf"
+FILE_NAME = "Resume.pdf"
 CHUNK_SIZE = 50 * 1024 * 1024  # 5MB per chunk
 
 def get_upload_approval(file_name, total_chunks, file_size, mime_type):

@@ -124,6 +124,8 @@ class OpenAIClient:
         """
         Checks if the requested model is available in OpenAI.
         """
+        import nest_asyncio
+        nest_asyncio.apply()
         available_models = asyncio.run(self.get_model_list())
         return self.model_name in available_models
 
