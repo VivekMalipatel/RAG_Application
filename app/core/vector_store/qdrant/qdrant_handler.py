@@ -143,11 +143,15 @@ class QdrantHandler:
                         "file_path": metadata["file_path"],
                         "context_version": metadata["context_version"],
                         "chunk_number": metadata['chunk_number'],
-                        "hierarchy": metadata.get("document_hierarchy"),
                         "entities": metadata.get("entities"),
                         "context": metadata.get("context"), 
                         "document_summary": metadata["doc_summary"],
-                        "content": str(chunk["content"])
+                        "content": str(chunk["content"]),
+                        "page_number": metadata.get("page_number"),
+                        "languages": metadata.get("languages"),
+                        "element_id": metadata.get("element_id"),
+                        "is_continuation": metadata.get("is_continuation"),
+                        "category": metadata.get("category"),
                     }
                 )
                 points.append(point)

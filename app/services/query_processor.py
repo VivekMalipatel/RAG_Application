@@ -78,13 +78,8 @@ class QueryProcessor:
             prompt = f"""
             **User Query:** {query}
 
-            **Retrieved Context:**
+            **Relevant information::**
             {context_text}
-
-            **Instructions:**
-            - Answer based strictly on the retrieved content.
-            - If the context is insufficient, state: "Not enough information available."
-            - Ensure factual accuracy and avoid speculation.
 
             **Response:**
             """

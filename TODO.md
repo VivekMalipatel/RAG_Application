@@ -9,6 +9,7 @@
 7. Extend support for multiple model sources
 8. Implement proper logging
 9. Properly store hugging face models (As of now storing in system cache)
+10. Dynamically Adjust Hybrid Search Parameter
 
 ### Bugs : 
 

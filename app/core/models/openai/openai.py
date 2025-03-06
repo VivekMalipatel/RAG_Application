@@ -1,5 +1,7 @@
 import logging
-from typing import Optional, List, Union, AsyncGenerator
+import json
+import os
+from typing import Optional, List, Union, AsyncGenerator, Dict, Any
 from openai import AsyncOpenAI, APIError
 from app.config import settings
 import asyncio
@@ -133,3 +135,183 @@ class OpenAIClient:
         """Updates the system prompt dynamically."""
         self.system_prompt = system_prompt
         logging.info(f"System prompt updated for OpenAI model {self.model_name}: {system_prompt}")
+
+    async def generate_text_batch(self, prompts: List[Dict[str, Any]], model_name: Optional[str] = None, 
+                                 system_prompt: Optional[str] = None, max_tokens: Optional[int] = None) -> str:
+        """
+        Prepares and submits a batch of text generation requests for processing.
+        
+        Args:
+            prompts: List of dictionaries with 'custom_id' and 'content' keys
+            model_name: Optional model name to override the default
+            system_prompt: Optional system prompt to override the default
+            max_tokens: Optional max tokens to override the default
+            
+        Returns:
+            Batch ID for tracking the batch job
+        """
+        current_model = model_name or self.model_name
+        current_system = system_prompt or self.system_prompt
+        current_max_tokens = max_tokens or self.max_tokens
+        
+        # Create batch input file
+        batch_file_path = await self._create_batch_input_file(prompts, current_model, current_system, current_max_tokens)
+        
+        try:
+            # Upload batch file
+            file_id = await self._upload_batch_file(batch_file_path)
+            
+            # Create batch job
+            batch = await self._create_batch(file_id)
+            
+            # Clean up temporary file
+            if os.path.exists(batch_file_path):
+                os.remove(batch_file_path)
+                
+            return batch.id
+        except Exception as e:
+            logging.error(f"Batch processing error: {str(e)}")
+            # Clean up temporary file on error
+            if os.path.exists(batch_file_path):
+                os.remove(batch_file_path)
+            raise
+
+    async def _create_batch_input_file(self, prompts: List[Dict[str, Any]], model_name: str, 
+                                     system_prompt: str, max_tokens: int) -> str:
+        """Creates a JSONL file for batch processing with OpenAI."""
+        temp_file_path = f"batch_input_{id(prompts)}.jsonl"
+        
+        with open(temp_file_path, "w") as f:
+            for prompt_data in prompts:
+                if "custom_id" not in prompt_data or "content" not in prompt_data:
+                    raise ValueError("Each prompt must have 'custom_id' and 'content' keys")
+                    
+                batch_item = {
+                    "custom_id": prompt_data["custom_id"],
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": {
+                        "model": model_name,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt_data["content"]}
+                        ],
+                        "max_tokens": max_tokens,
+                        "temperature": self.temperature,
+                        "top_p": self.top_p
+                    }
+                }
+                f.write(json.dumps(batch_item) + "\n")
+                
+        return temp_file_path
+
+    async def _upload_batch_file(self, file_path: str) -> str:
+        """Uploads the batch input file using the Files API."""
+        try:
+            with open(file_path, "rb") as file:
+                response = await self.client.files.create(
+                    file=file,
+                    purpose="batch"
+                )
+            return response.id
+        except Exception as e:
+            logging.error(f"Error uploading batch file: {str(e)}")
+            raise
+
+    async def _create_batch(self, file_id: str, metadata: Dict[str, str] = None) -> Any:
+        """Creates a batch processing job."""
+        try:
+            batch = await self.client.batches.create(
+                input_file_id=file_id,
+                endpoint="/v1/chat/completions",
+                completion_window="24h",
+                metadata=metadata
+            )
+            return batch
+        except Exception as e:
+            logging.error(f"Error creating batch: {str(e)}")
+            raise
+
+    async def get_batch_status(self, batch_id: str) -> Dict[str, Any]:
+        """Checks the status of a specific batch job."""
+        try:
+            batch = await self.client.batches.retrieve(batch_id)
+            return {
+                "id": batch.id,
+                "status": batch.status,
+                "progress": batch.request_counts,
+                "created_at": batch.created_at,
+                "output_file_id": batch.output_file_id,
+                "error_file_id": batch.error_file_id
+            }
+        except Exception as e:
+            logging.error(f"Error checking batch status: {str(e)}")
+            raise
+
+    async def get_batch_results(self, batch_id: str) -> Dict[str, Any]:
+        """
+        Retrieves the results of a completed batch.
+        Returns both the output and any errors that occurred.
+        """
+        try:
+            # Get batch status first
+            batch = await self.client.batches.retrieve(batch_id)
+            
+            if batch.status != "completed":
+                return {
+                    "status": batch.status,
+                    "message": f"Batch is not completed yet. Current status: {batch.status}"
+                }
+            
+            results = {}
+            
+            # Get output file if available
+            if batch.output_file_id:
+                output_response = await self.client.files.content(batch.output_file_id)
+                output_content = output_response.text
+                results["output"] = [json.loads(line) for line in output_content.strip().split("\n")]
+            
+            # Get error file if available
+            if batch.error_file_id:
+                error_response = await self.client.files.content(batch.error_file_id)
+                error_content = error_response.text
+                results["errors"] = [json.loads(line) for line in error_content.strip().split("\n")]
+            
+            return results
+        except Exception as e:
+            logging.error(f"Error retrieving batch results: {str(e)}")
+            raise
+
+    async def cancel_batch(self, batch_id: str) -> Dict[str, Any]:
+        """Cancels an ongoing batch job."""
+        try:
+            batch = await self.client.batches.cancel(batch_id)
+            return {
+                "id": batch.id,
+                "status": batch.status,
+                "message": "Batch cancellation initiated"
+            }
+        except Exception as e:
+            logging.error(f"Error cancelling batch: {str(e)}")
+            raise
+
+    async def list_batches(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Lists all batch jobs."""
+        try:
+            batches = await self.client.batches.list(limit=limit)
+            batch_list = []
+            
+            for batch in batches:
+                batch_list.append({
+                    "id": batch.id,
+                    "status": batch.status, 
+                    "created_at": batch.created_at,
+                    "completed_at": batch.completed_at,
+                    "endpoint": batch.endpoint,
+                    "metadata": batch.metadata
+                })
+                
+            return batch_list
+        except Exception as e:
+            logging.error(f"Error listing batches: {str(e)}")
+            raise

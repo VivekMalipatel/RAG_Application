@@ -14,10 +14,7 @@ from app.core.cache.redis_cache import RedisCache
 from app.config import settings
 from spacy.cli import download
 import asyncio
-import concurrent.futures
-import os
-import tempfile
-import aiofiles
+import json
 
 
 class TextProcessor:
@@ -44,30 +41,32 @@ class TextProcessor:
             model_type=ModelType.TEXT_EMBEDDING
         )
 
-        document_context_system_prompt = """
-                Generate a concise document context within {self.doc_context_size} tokens by:
-                
-                1. Identifying key topics, themes, and structure of the document
-                2. Mentioning important entities without summarizing specific data points
-                3. Providing essential context for understanding the document
-                4. Donot provide/rewrite document content or specific details
-                5. Focusing only on factual information present in the document
-                
-                Output format: Clear, concise paragraph without headings or formatting
-                """
+        document_context_system_prompt = f"""
+        You are an AI document analyst generating concise context and summary (within {self.doc_context_size} tokens) for documents to improve contextual search retrieval.
+        Analyze the provided document to extract critical information:
+        - Key topics, themes, and organizational structure
+        - Important entities, concepts, and terminology
+        - Document purpose, audience, and domain context
+        - Document's scope, time frame, and contextual setting
+        - Document type and format information
 
-        chunk_context_system_prompt = """
-                Explain this chunk's role within the document in {self.chunk_context_size} tokens by answering:
-                
-                1. What specific purpose does this chunk serve?
-                2. Why does this information appear at this point?
-                3. How does this chunk connect to previous content?
-                4. How does this chunk lead into subsequent content?
-                5. How does this chunk support the document's main themes?
-                
-                Format: Single paragraph focused on context, not content repetition
-                """
+        Focus only on factual, search-enhancing information. Ignore file artifacts (newlines, etc.) and avoid phrases like "This document discusses."
+        Respond with a single, concise paragraph that would help retrieve this document during semantic search.
+        """
 
+        chunk_context_system_prompt = f"""
+        You are an AI document analyst generating concise context (within {self.chunk_context_size} tokens) for text chunks to improve search retrieval.
+        Analyze the provided chunk within its document context to identify:
+        - Core topic/concept and its significance
+        - Connection to surrounding content
+        - Relationship to main document themes
+        - Key entities and concepts
+        - Position in document structure
+        - Technical terminology introduced
+        - Contribution to overall document purpose
+
+        Respond with a single, concise paragraph of contextual information that would help retrieve this chunk during semantic search.
+        """
         try:
             self.chunk_context_model = ModelRouter(
                 provider=Provider(settings.TEXT_CONTEXT_LLM_PROVIDER),
@@ -79,7 +78,7 @@ class TextProcessor:
                 top_p=settings.TEXT_CONTEXT_LLM_TOP_P,
                 max_tokens=settings.TEXT_DOCUMENT_CONTEXT_MAX_TOKENS,
             )
-
+            
             self.document_context_model = ModelRouter(
                 provider=Provider(settings.TEXT_CONTEXT_LLM_PROVIDER),  
                 model_name=settings.TEXT_CONTEXT_LLM_MODEL_NAME,
@@ -90,18 +89,21 @@ class TextProcessor:
                 top_p=settings.TEXT_CONTEXT_LLM_TOP_P,
                 max_tokens=settings.TEXT_CHUNK_CONTEXT_MAX_TOKENS,
             )
+            """
+            self.document_context_model = ModelRouter(
+                provider=Provider("openai"),  
+                model_name="deepseek-chat",
+                model_quantization=settings.TEXT_CONTEXT_LLM_QUANTIZATION,
+                model_type=ModelType.TEXT_GENERATION,
+                system_prompt=document_context_system_prompt,
+                temperature=settings.TEXT_CONTEXT_LLM_TEMPERATURE,
+                top_p=settings.TEXT_CONTEXT_LLM_TOP_P,
+                max_tokens=settings.TEXT_CHUNK_CONTEXT_MAX_TOKENS,
+            )
+            """
         except (ValueError, TypeError) as e:
             logging.error(f"Error initializing Ollama client: {str(e)}")
             raise
-
-        # LangChain RecursiveCharacterTextSplitter with hierarchy handling
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
-            separators=[
-                "\n\n", "\nChapter", "\n##", "\n###", "\n- ", "\n* ", "\n"
-            ]
-        )
 
         # Load SpaCy NLP for Named Entity Recognition
         self.ner_model = self._initialize_spacy_model('en_core_web_sm')
@@ -127,17 +129,9 @@ class TextProcessor:
         """Main processing function for text documents."""
         try:
 
-            text = await self._extract_text_from_file(event, file_data)
-            
-            #TODO: Remove Document Artifacts (preprocessing the extracted text)
+            chunks, document_text = await self._extract_text_from_file(event, file_data)
 
-            chunks = await self._structured_chunking(text)
-            
-            for chunk in chunks:
-                chunk['chunk_metadata'].update({key: event.get(key) for key in ['file_name', 'file_path', 'user_id', 'mime_type', 'file_size', 'description', 'document_id']})
-            
-
-            chunks = await self._generate_context(chunks, text)
+            chunks = await self._generate_context(chunks, document_text)
 
             chunks = await self._compute_embeddings(chunks)
 
@@ -150,91 +144,78 @@ class TextProcessor:
             await self.db.update_event_status(event['file_event_id'], 'failed', str(e))
     
     async def _extract_text_from_file(self, event, file_data):
-        """Automatically detects file type and extracts text using UnstructuredLoader."""
-        file_data.seek(0)
-        file_content = file_data.read()
-
-        temp_suffix = os.path.splitext(event["file_path"])[-1]
-        fd, tmp_file_path = tempfile.mkstemp(suffix=temp_suffix)
+        """Extracts text chunks from a file using UnstructuredLoader and maps to our chunk schema."""
         try:
-            async with aiofiles.open(tmp_file_path, 'wb') as tmp_file:
-                await tmp_file.write(file_content)
-            
-            loop = asyncio.get_event_loop()
-            docs = await loop.run_in_executor(
-                None, 
-                lambda: UnstructuredLoader(file_path=tmp_file_path).load()
+            file_data.seek(0)
+
+            # Load document and extract structured chunks with metadata
+            loader = UnstructuredLoader(
+                file=file_data,
+                metadata_filename=event['file_name'],
+                strategy='hi_res',
+                chunking_strategy="by_title",
+                max_characters=int(self.chunk_size * 75 / 100),
+                overlap = self.chunk_overlap,
+                include_orig_elements=False,
             )
 
-            # Combine extracted text
-            text = "\n\n".join([doc.page_content for doc in docs])
+            docs = await loader.aload()
 
-            if not text.strip():
-                raise ValueError("Extracted text is empty")
+            if not docs:
+                raise ValueError("No extracted content from the document")
 
-            return text
+            # Convert extracted documents into our chunk format
+            chunks,document_text = self._convert_unstructured_chunks(docs, event)
 
-        finally:
-            if os.path.exists(tmp_file_path):
-                os.unlink(tmp_file_path)
-            os.close(fd)
+            logging.info(f"Successfully extracted and structured {len(chunks)} chunks from {event['file_name']}")
+            return chunks, document_text
 
-    async def _structured_chunking(self, text):
-        """Uses LangChain's RecursiveCharacterTextSplitter with enhanced metadata extraction."""
-        document_chunks = self.text_splitter.create_documents([text])
-        
-        # Use a ThreadPoolExecutor for CPU-bound operations
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            # Process each chunk in parallel using threads
-            futures = []
-            for idx, chunk in enumerate(document_chunks):
-                future = executor.submit(self._process_chunk, idx, chunk)
-                futures.append(future)
-            
-            # Collect results
-            enriched_chunks = [future.result() for future in futures]
-        
-        return enriched_chunks
+        except Exception as e:
+            logging.error(f"Error extracting text from {event['file_name']}: {str(e)}")
+            raise
 
-    def _process_chunk(self, idx, chunk):
-        """Process a single chunk with all metadata extraction."""
-        entities = self._extract_entities(chunk.page_content)
-        hierarchy = self._extract_hierarchy(chunk.page_content)
-        section_type = self._detect_section_type(chunk.page_content)
-        
-        chunk_metadata = {
-            "chunk_number": idx,
-            "document_hierarchy": hierarchy,
-            "entities": entities,
-            "section_type": section_type
-        }
-        
-        return {"content": chunk.page_content, "chunk_metadata": chunk_metadata}
+    def _convert_unstructured_chunks(self, docs, event):
+        """Converts UnstructuredLoader output into our structured chunk format with additional metadata."""
+        structured_chunks = []
+        document_text = ""
 
-    def _extract_hierarchy(self, text):
-        """Extracts and preserves document hierarchy based on headers."""
-        lines = text.split("\n")
-        hierarchy = []
-        for line in lines:
-            if line.strip().startswith(("Chapter", "##", "###")):
-                hierarchy.append(line.strip())
-        return hierarchy[-3:]  # Retain last 3 levels
+        for idx, doc in enumerate(docs):
+
+            entities = self._extract_entities(doc.page_content)
+            document_text += doc.page_content
+
+            chunk_metadata = {
+                "chunk_number": idx,
+                "document_id": event["document_id"],
+                "user_id": event["user_id"],
+                "file_name": event["file_name"],
+                "file_path": event["file_path"],
+                "file_size": event["file_size"],
+                "description": event["description"],
+                "page_number": doc.metadata.get("page_number", None),
+                "mime_type": doc.metadata.get("filetype", None),
+                "languages": doc.metadata.get("languages", None),
+                "category": doc.metadata.get("category", None),
+                "element_id": doc.metadata.get("element_id", None),
+                "parent_id": doc.metadata.get("parent_id", None),
+                "is_continuation": doc.metadata.get("is_continuation", False),
+                "entities": entities,
+            }
+
+            if chunk_metadata["parent_id"] is not None:
+                print(f"Parent ID: {chunk_metadata['parent_id']}")
+
+            structured_chunks.append({
+                "content": doc.page_content,
+                "chunk_metadata": chunk_metadata
+            })
+
+        return structured_chunks, document_text
 
     def _extract_entities(self, text):
         """Extracts Named Entities for Light RAG Readiness."""
         doc = self.ner_model(text)
         return [{"text": ent.text, "label": ent.label_} for ent in doc.ents]
-
-    def _detect_section_type(self, text):
-        """Classifies section type for metadata tagging."""
-        if "Table of Contents" in text:
-            return "TOC"
-        elif "References" in text:
-            return "References"
-        elif "Appendix" in text:
-            return "Appendix"
-        else:
-            return "Body"
 
     async def _generate_context(self, chunks, full_text):
         """Generates contextual embeddings for document chunks asynchronously."""
@@ -247,7 +228,11 @@ class TextProcessor:
 
         # Generate Document Summary (Only One API Call)
         doc_summary = await self.document_context_model.generate_text(
-            prompt=f"Max {self.doc_context_size} tokens\n document: {full_text}",
+            prompt=f"""
+                Document (Extracted from a RAW Byte Data of a file):
+                {full_text} 
+                Context:
+                """,
             max_tokens=self.doc_context_size
         )
 
@@ -256,17 +241,43 @@ class TextProcessor:
         # Define async task for each chunk
         async def generate_chunk_context(i, chunk):
             """Generates chunk-specific context using its neighboring chunks."""
-            prev_chunks = [chunks[j]["content"] for j in range(max(0, i - 2), i)]
-            next_chunks = [chunks[j]["content"] for j in range(i + 1, min(total_chunks, i + 3))]
+            if settings.TEXT_CONTEXT_LLM_PROVIDER == Provider.OPENAI:
+                chunk_context = await self.chunk_context_model.generate_text(
+                    prompt=f"""
+                        Document: 
+                        {full_text}
+                        
+                        Current Chunk ({i}/{total_chunks}): 
+                        
+                        {chunk}
+                        
+                        Context:
+                        """,
+                    max_tokens=self.chunk_context_size
+                )
+            else:
+                prev_chunks = [chunks[j]["content"] for j in range(max(0, i - 2), i)]
+                next_chunks = [chunks[j]["content"] for j in range(i + 1, min(total_chunks, i + 3))]
 
-            chunk_context = await self.chunk_context_model.generate_text(
-                prompt=f"Max {self.chunk_context_size} tokens\n"
-                    f"Document Summary: {doc_summary}\n"
-                    f"Current Chunk ({i}/{total_chunks}): {chunk['content']}\n"
-                    f"Previous Context: {prev_chunks}\n"
-                    f"Next Context: {next_chunks}\n",
-                max_tokens=self.chunk_context_size
-            )
+                chunk_context = await self.chunk_context_model.generate_text(
+                    prompt=f"""
+                        Document: 
+                        {doc_summary}
+                        
+                        Current Chunk ({i}/{total_chunks}): 
+                        
+                        {chunk}
+                        
+                        Previous Two Chunks: 
+                        {prev_chunks}
+                        
+                        Next Two Chunks: 
+                        {next_chunks}
+                        
+                        Context:
+                        """,
+                    max_tokens=self.chunk_context_size
+                )
             chunk["chunk_metadata"]["context"] = chunk_context
             chunk["chunk_metadata"]["doc_summary"] = doc_summary
             return chunk
