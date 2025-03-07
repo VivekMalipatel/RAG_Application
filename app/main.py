@@ -6,6 +6,7 @@ from app.config import settings
 from app.core.storage_bin.minio.session_minio import minio_session
 from app.core.cache.session_redis import redis_session
 from app.core.vector_store.qdrant.qdrant_session import qdrant_session
+from app.core.graph_db.neo4j.neo4j_session import neo4j_session
 from app.api.v1.endpoints import agent, documents, user, upload, minio_webhook, query
 from app.api.db.base import init_db, close_db
 from app.core.storage_bin.minio.setup_minio import MinIOSetup
@@ -19,6 +20,7 @@ async def lifespan(app: FastAPI):
         await minio_session.connect()
         await redis_session.connect()
         await qdrant_session.connect()
+        await neo4j_session.connect()
         minio_setup = MinIOSetup()
         asyncio.create_task(minio_setup.setup_minio())
 
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI):
     await minio_session.close()
     await redis_session.close()
     await qdrant_session.close()
+    await neo4j_session.close()
     logging.info("Services shut down successfully")
 
 app = FastAPI(

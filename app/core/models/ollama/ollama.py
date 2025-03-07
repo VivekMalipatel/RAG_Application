@@ -4,9 +4,10 @@ import os
 import json
 import asyncio
 import hashlib
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from app.config import settings
 from aiohttp import ClientTimeout
+from pydantic import BaseModel
 import requests
 
 class OllamaClient:
@@ -97,6 +98,55 @@ class OllamaClient:
                 logging.error(f"Streaming decode error: {str(e)}")
                 break
         return final_response
+    
+    async def generate_structured_output(
+        self, prompt: str, schema: BaseModel, max_tokens: int = None, stream: bool = None
+    ) -> Dict[str, Any]:
+        """
+        Generates a structured response from Ollama using a provided JSON schema.
+
+        Args:
+            prompt (str): User input prompt.
+            schema (BaseModel): Pydantic model defining expected JSON structure.
+            max_tokens (int, optional): Maximum tokens in response.
+            stream (bool, optional): Enable/disable streaming.
+
+        Returns:
+            Dict[str, Any]: Structured response parsed as per schema.
+        """
+
+        url = f"{self.base_url}/api/chat"
+        stream = stream if stream is not None else self.stream
+
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "format": schema.model_json_schema(),  # Pass structured JSON format
+            "options": {
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "num_predict": max_tokens if max_tokens else self.max_tokens
+            },
+            "stream": stream,
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=self.headers) as response:
+                    if response.status != 200:
+                        error_msg = await response.text()
+                        logging.error(f"Ollama API Error: {error_msg}")
+                        return {"error": error_msg}
+
+                    data = await response.json()
+                    return schema.model_validate_json(data["message"]["content"])
+
+        except Exception as e:
+            logging.error(f"Error communicating with Ollama API: {str(e)}")
+            return {"error": str(e)}
 
     def is_model_available(self) -> bool:
         """

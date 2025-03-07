@@ -9,7 +9,7 @@ WEBHOOK_URL = "http://0.0.0.0:8000/api/v1/minio/webhook/"
 def test_minio_webhook_event():
     payload = {
         "EventName": "s3:ObjectCreated:CompleteMultipartUpload",
-        "Key": "userbucket/1234324/standard/uploads/Resume.pdf",
+        "Key": "userbucket/1234324/standard/uploads/ragas_papers.pdf",
         "EventTime": "2023-01-01T00:00:00Z"
     }
     response = requests.post(

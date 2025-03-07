@@ -228,7 +228,7 @@ class QdrantHandler:
                             # Fourth stage - Full 768D precision refinement
                             query=dense_vector,
                             using="dense",
-                            limit=10,
+                            limit=100,
                         )
 
             # **Step B: Integer-Based Quantized Search & 768D Dense Re-ranking**
@@ -238,13 +238,13 @@ class QdrantHandler:
                     Prefetch(
                         query=quantized_query,
                         using="quantized",
-                        limit=30,
+                        limit=300,
                     )
                 ],
                 # Refine with full precision 768D float vectors
                 query=dense_vector,
                 using="dense",
-                limit=10,
+                limit=100,
             )
 
             # **Step C: Sparse Search (BM25 for text, TBD for images)**
@@ -254,7 +254,7 @@ class QdrantHandler:
                     values=sparse_vector["values"]
                 ),
                 using="sparse",
-                limit=10,
+                limit=50,
             )
 
             # **Step D: Fusion of Quantized Dense + Sparse using RRF**

@@ -1,20 +1,18 @@
 import asyncio
 import logging
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from app.services.file_processor.entity_relation_extractor import EntityRelationExtractor
 from app.core.models.model_handler import ModelRouter
 from app.core.models.model_provider import Provider
 from app.core.models.model_type import ModelType
 from langchain_unstructured import UnstructuredLoader
-import spacy
 from app.core.embedding.embedding_handler import EmbeddingHandler
 from app.core.db_handler.document_handler import DocumentHandler
 from app.core.storage_bin.minio.minio_handler import MinIOHandler
 from app.core.vector_store.qdrant.qdrant_handler import QdrantHandler
 from app.core.cache.redis_cache import RedisCache
 from app.config import settings
-from spacy.cli import download
 import asyncio
-import json
+
 
 
 class TextProcessor:
@@ -105,25 +103,7 @@ class TextProcessor:
             logging.error(f"Error initializing Ollama client: {str(e)}")
             raise
 
-        # Load SpaCy NLP for Named Entity Recognition
-        self.ner_model = self._initialize_spacy_model('en_core_web_sm')
-    
-    def _initialize_spacy_model(self, model_name, max_retries=3):
-        """Initialize spaCy model with download handling and retries."""
-        for attempt in range(max_retries):
-            try:
-                return spacy.load(model_name)
-            except OSError:
-                logging.info(f"Downloading spaCy model: {model_name}")
-                try:
-                    download(model_name)
-                    return spacy.load(model_name)
-                except Exception as e:
-                    if attempt == max_retries - 1:
-                        logging.error(f"Failed to download spaCy model after {max_retries} attempts: {str(e)}")
-                        raise RuntimeError(f"Could not initialize NER model: {str(e)}")
-                    logging.warning(f"Attempt {attempt + 1} failed, retrying...")
-                    continue
+        self.entity_relation_extractor = EntityRelationExtractor()
 
     async def process(self, event, file_data):
         """Main processing function for text documents."""
@@ -132,6 +112,8 @@ class TextProcessor:
             chunks, document_text = await self._extract_text_from_file(event, file_data)
 
             chunks = await self._generate_context(chunks, document_text)
+
+            chunks = await self.entity_relation_extractor.extract_entities_and_relationships(chunks)
 
             chunks = await self._compute_embeddings(chunks)
 
@@ -180,8 +162,6 @@ class TextProcessor:
         document_text = ""
 
         for idx, doc in enumerate(docs):
-
-            entities = self._extract_entities(doc.page_content)
             document_text += doc.page_content
 
             chunk_metadata = {
@@ -199,7 +179,6 @@ class TextProcessor:
                 "element_id": doc.metadata.get("element_id", None),
                 "parent_id": doc.metadata.get("parent_id", None),
                 "is_continuation": doc.metadata.get("is_continuation", False),
-                "entities": entities,
             }
 
             if chunk_metadata["parent_id"] is not None:
@@ -212,15 +191,10 @@ class TextProcessor:
 
         return structured_chunks, document_text
 
-    def _extract_entities(self, text):
-        """Extracts Named Entities for Light RAG Readiness."""
-        doc = self.ner_model(text)
-        return [{"text": ent.text, "label": ent.label_} for ent in doc.ents]
-
     async def _generate_context(self, chunks, full_text):
         """Generates contextual embeddings for document chunks asynchronously."""
         doc_hash = await self.cache.get_hash(full_text)
-        await self.cache.purge_cache()
+        #await self.cache.purge_cache()
         cached_context = await self.cache.get(doc_hash)
         if cached_context:
             logging.info("Loaded context from cache for document")

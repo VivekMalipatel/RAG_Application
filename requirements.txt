@@ -8,6 +8,7 @@ numpy
 langchain
 langchain-openai
 langchain-community
+langchain-experimental
 langchain-unstructured[local]
 unstructured[all-docs]
 
@@ -31,6 +32,7 @@ python-jose
 passlib
 python-multipart
 bcrypt
+neo4j
 
 minio
 python-magic
