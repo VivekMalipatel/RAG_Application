@@ -9,6 +9,7 @@ from app.core.models.model_type import ModelType
 from app.core.models.model_provider import Provider
 import uuid
 import numpy as np
+import asyncio
 
 class QdrantHandler:
     """Handles vector operations with Qdrant for hybrid search with dense and sparse vectors."""
@@ -26,66 +27,94 @@ class QdrantHandler:
         dense_vector_size: int = 768,
         matryoshka_sizes: list = [64, 128, 256],
         quantized_size: int = 768,
-        sparse_enabled: bool = True
+        sparse_enabled: bool = True,
+        force_recreate: bool = False
     ):
-        """Creates a user-specific collection in Qdrant for hybrid search."""
-        try:
-            if not user_id:
-                raise ValueError("user_id cannot be empty")
+        """Creates a user-specific collection in Qdrant with a retry mechanism."""
+        max_retries = 5  # Maximum number of retry attempts
+        retry_delay = 2  # Initial delay in seconds (exponential backoff)
 
-            # Define vector configurations
-            vectors_config = {
-                "dense": VectorParams(
-                    size=dense_vector_size,
-                    distance=Distance.COSINE,
-                    on_disk=True
-                ),
-                "quantized": VectorParams(
-                    size=quantized_size,
-                    distance=Distance.COSINE,
-                    on_disk=True
-                )
-            }
+        for attempt in range(max_retries):
+            try:
+                if not user_id:
+                    raise ValueError("user_id cannot be empty")
+                
+                user_id = str(user_id)
+                # Check if collection already exists
+                collections = await qdrant_session.client.get_collections()
+                collection_exists = user_id in [c.name for c in collections.collections]
 
-            # Add Matryoshka embeddings
-            for dim in matryoshka_sizes:
-                vectors_config[f"matryoshka_{dim}"] = VectorParams(
-                    size=dim,
-                    distance=Distance.COSINE,
-                    on_disk=False
-                )
+                # If collection exists and force_recreate is False, skip creation
+                if collection_exists and not force_recreate:
+                    logging.info(f"Collection for user {user_id} already exists, skipping creation")
+                    return
 
-            # Add Sparse embeddings (BM25 for text, TBD for image)
-            sparse_vectors_config = None
-            if sparse_enabled:
-                sparse_vectors_config = {
-                    "sparse": SparseVectorParams(
-                        index=SparseIndexParams(on_disk=False)
+                # Delete collection if it exists and we're forcing recreation
+                if collection_exists and force_recreate:
+                    logging.info(f"Force recreating collection for user {user_id}")
+                    await qdrant_session.client.delete_collection(collection_name=user_id)
+
+                # Define vector configurations
+                vectors_config = {
+                    "dense": VectorParams(
+                        size=dense_vector_size,
+                        distance=models.Distance.COSINE,
+                        on_disk=True
+                    ),
+                    "quantized": VectorParams(
+                        size=quantized_size,
+                        distance=models.Distance.COSINE,
+                        on_disk=True
                     )
                 }
 
-            # Optimize memory & indexing
-            optimizers_config = OptimizersConfigDiff(
-                memmap_threshold=20000
-            )
+                # Add Matryoshka embeddings
+                for dim in matryoshka_sizes:
+                    vectors_config[f"matryoshka_{dim}"] = VectorParams(
+                        size=dim,
+                        distance=models.Distance.COSINE,
+                        on_disk=False
+                    )
 
-            # Create collection
-            await qdrant_session.client.recreate_collection(
-                collection_name=user_id,
-                vectors_config=vectors_config,
-                sparse_vectors_config=sparse_vectors_config,
-                optimizers_config=optimizers_config,
-                on_disk_payload=True
-            )
+                # Add Sparse embeddings (BM25 for text)
+                sparse_vectors_config = None
+                if sparse_enabled:
+                    sparse_vectors_config = {
+                        "sparse": SparseVectorParams(
+                            index=SparseIndexParams(on_disk=False)
+                        )
+                    }
 
-            logging.info(f"Created hybrid search collection for user {user_id}")
+                # Optimize memory & indexing
+                optimizers_config = OptimizersConfigDiff(
+                    memmap_threshold=20000
+                )
 
-        except ValueError as ve:
-            logging.error(f"Validation error creating collection for user {user_id}: {str(ve)}")
-            raise
-        except Exception as e:
-            logging.error(f"Failed to create collection for user {user_id}: {str(e)}")
-            raise
+                # Create collection
+                await qdrant_session.client.create_collection(
+                    collection_name=user_id,
+                    vectors_config=vectors_config,
+                    sparse_vectors_config=sparse_vectors_config,
+                    optimizers_config=optimizers_config,
+                    on_disk_payload=True
+                )
+
+                logging.info(f"Created hybrid search collection for user {user_id}")
+                return  # Success, exit the retry loop
+
+            except ValueError as ve:
+                logging.error(f"Validation error creating collection for user {user_id}: {str(ve)}")
+                raise
+            except Exception as e:
+                logging.error(f"Failed to create collection for user {user_id} (Attempt {attempt+1}): {str(e)}")
+                
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    logging.info(f"Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logging.critical("Max retries reached. Collection creation failed.")
+                    raise  # Raise the exception after max retries
 
 
     async def store_vectors(self, embedded_chunks: List[Dict[str, Any]], user_id: str):

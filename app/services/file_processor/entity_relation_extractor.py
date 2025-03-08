@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from app.core.graph_db.neo4j.neo4j_handler import Neo4jHandler
 from app.core.embedding.embedding_handler import EmbeddingHandler
 from app.core.models.model_handler import ModelRouter
@@ -127,8 +127,9 @@ class EntityRelationExtractor:
         - Ensure **consistent labeling** (e.g., "Person", "Company", "Product").
         - **Entity IDs must be unique and human-readable** to prevent duplication.
         - Generate entity IDs using the following format:
-          - **Format:** `"<entity_text_lowercase>_<entity_type>"`
-          - **Example:** `"adam_person"`, `"microsoft_company"`, `"best_talent_award"`
+          - convert the entity text to lowercase and add and underscore if there are spaces.
+          - **Format:** `"<entity_text_lowercase>"`
+          - **Example:** `"adam"`, `"microsoft_corporation"`, `"best_buy"`
           - **If the same entity appears multiple times, use the first mention as the canonical ID.**
         - Avoid using **numeric or system-generated UUIDs** unless necessary.
 
@@ -187,7 +188,7 @@ class EntityRelationExtractor:
         merged_chunks = self._merge_chunks(chunks)
         processed_chunks = []
 
-        async def process_chunk(merged_text, chunk_ids):
+        async def process_chunk(merged_text, chunk_ids, merged_context):
             chunk_metadata = chunks[chunk_ids[0]]["chunk_metadata"]
             user_id = chunk_metadata["user_id"]
             document_id = chunk_metadata["document_id"]
@@ -199,11 +200,18 @@ class EntityRelationExtractor:
             - Each entity and relationship has a **profile description** explaining its significance.
 
             Extract structured knowledge graph entities & relationships from the following text:
-
+            
+            <START TEXT>
             {merged_text}
+            <END TEXT>
 
-            For your context regarding the document this text is extracted from, please refer to the below document summary:
-            {chunk_metadata["document_summary"]}
+            Additional text context for referenc (You may use the entities in this context for extraction, if required):
+            <START CONTEXT>
+            {merged_context}
+            <END CONTEXT>
+
+            For your context regarding the document this text is extracted from, please refer to the below document summary (Just for your context, donot extract entities from this summary until and unless you are not able to get a meaningful entities and realtions from the text and its context):
+            {chunk_metadata["doc_summary"]}
 
             """
 
@@ -304,32 +312,39 @@ class EntityRelationExtractor:
                 processed_chunks.append(chunks[chunk_id])
 
         # Run all chunk processing in parallel
-        await asyncio.gather(*[process_chunk(merged_text, chunk_ids) for merged_text, chunk_ids in merged_chunks])
+        await asyncio.gather(*[process_chunk(merged_text, chunk_ids, merged_context) for merged_text, chunk_ids, merged_context in merged_chunks])
 
         return processed_chunks
 
-    def _merge_chunks(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _merge_chunks(self, chunks: List[Dict[str, Any]]) -> List[Tuple[str, List[int], str]]:
         """
-        Merges continuation chunks for improved entity extraction.
+        Merges continuation chunks while preserving their context.
+        
+        Returns:
+            List of tuples -> (merged_text, chunk_ids, merged_context)
         """
         merged_chunks = []
         buffer_text = ""
+        buffer_context = ""
         buffer_chunk_ids = []
 
         for chunk in chunks:
             chunk_text = chunk["content"]
+            chunk_context = chunk["chunk_metadata"].get("context", "")  # Extract chunk context
             chunk_id = chunk["chunk_metadata"]["chunk_number"]
 
             if chunk["chunk_metadata"].get("is_continuation") and buffer_text:
                 buffer_text += " " + chunk_text
+                buffer_context += " " + chunk_context if chunk_context else ""
                 buffer_chunk_ids.append(chunk_id)
             else:
                 if buffer_text:
-                    merged_chunks.append((buffer_text, buffer_chunk_ids))
+                    merged_chunks.append((buffer_text, buffer_chunk_ids, buffer_context))
                 buffer_text = chunk_text
+                buffer_context = chunk_context if chunk_context else ""
                 buffer_chunk_ids = [chunk_id]
 
         if buffer_text:
-            merged_chunks.append((buffer_text, buffer_chunk_ids))
+            merged_chunks.append((buffer_text, buffer_chunk_ids, buffer_context))
 
         return merged_chunks

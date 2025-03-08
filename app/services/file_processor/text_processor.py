@@ -10,9 +10,15 @@ from app.core.db_handler.document_handler import DocumentHandler
 from app.core.storage_bin.minio.minio_handler import MinIOHandler
 from app.core.vector_store.qdrant.qdrant_handler import QdrantHandler
 from app.core.cache.redis_cache import RedisCache
+from pydantic import BaseModel
 from app.config import settings
 import asyncio
 
+class ChunkContextSchema(BaseModel):
+    context: str
+
+class DocumentContextSchema(BaseModel):
+    context: str
 
 
 class TextProcessor:
@@ -50,6 +56,14 @@ class TextProcessor:
 
         Focus only on factual, search-enhancing information. Ignore file artifacts (newlines, etc.) and avoid phrases like "This document discusses."
         Respond with a single, concise paragraph that would help retrieve this document during semantic search.
+
+        Expected JSON Format:
+        ```
+        {{
+            "context": "<strict summary text>"
+        }}
+        ```
+        
         """
 
         chunk_context_system_prompt = f"""
@@ -64,6 +78,12 @@ class TextProcessor:
         - Contribution to overall document purpose
 
         Respond with a single, concise paragraph of contextual information that would help retrieve this chunk during semantic search.
+        Expected JSON Format:
+        ```
+        {{
+            "context": "<strict chunk context text>"
+        }}
+        ```
         """
         try:
             self.chunk_context_model = ModelRouter(
@@ -78,8 +98,8 @@ class TextProcessor:
             )
             
             self.document_context_model = ModelRouter(
-                provider=Provider(settings.TEXT_CONTEXT_LLM_PROVIDER),  
-                model_name=settings.TEXT_CONTEXT_LLM_MODEL_NAME,
+                provider=Provider("openai"),  
+                model_name="gpt-4o-mini",
                 model_quantization=settings.TEXT_CONTEXT_LLM_QUANTIZATION,
                 model_type=ModelType.TEXT_GENERATION,
                 system_prompt=document_context_system_prompt,
@@ -201,14 +221,20 @@ class TextProcessor:
             return cached_context
 
         # Generate Document Summary (Only One API Call)
-        doc_summary = await self.document_context_model.generate_text(
+        doc_summary:DocumentContextSchema = await self.document_context_model.client.generate_structured_output(
             prompt=f"""
                 Document (Extracted from a RAW Byte Data of a file):
-                {full_text} 
-                Context:
+
+                <START TEXT>
+                {full_text}
+                <END TEXT>
+
                 """,
+            schema=DocumentContextSchema,
             max_tokens=self.doc_context_size
         )
+
+        doc_summary = doc_summary.context
 
         total_chunks = len(chunks)
 
@@ -216,43 +242,59 @@ class TextProcessor:
         async def generate_chunk_context(i, chunk):
             """Generates chunk-specific context using its neighboring chunks."""
             if settings.TEXT_CONTEXT_LLM_PROVIDER == Provider.OPENAI:
-                chunk_context = await self.chunk_context_model.generate_text(
+                chunk_context:ChunkContextSchema = await self.chunk_context_model.client.generate_structured_output(
                     prompt=f"""
                         Document: 
+
+                        <START TEXT>
                         {full_text}
-                        
+                        <END TEXT>
+
                         Current Chunk ({i}/{total_chunks}): 
                         
+                        <START TEXT>
                         {chunk}
-                        
-                        Context:
+                        <END TEXT>
+
                         """,
+                    schema=ChunkContextSchema,
                     max_tokens=self.chunk_context_size
                 )
             else:
                 prev_chunks = [chunks[j]["content"] for j in range(max(0, i - 2), i)]
                 next_chunks = [chunks[j]["content"] for j in range(i + 1, min(total_chunks, i + 3))]
 
-                chunk_context = await self.chunk_context_model.generate_text(
+                chunk_context:ChunkContextSchema = await self.chunk_context_model.client.generate_structured_output(
                     prompt=f"""
                         Document: 
+
+                        <START TEXT>
                         {doc_summary}
+                        <END TEXT>
                         
                         Current Chunk ({i}/{total_chunks}): 
                         
+                        <START TEXT>
                         {chunk}
+                        <END TEXT>
                         
                         Previous Two Chunks: 
+
+                        <START TEXT>
                         {prev_chunks}
+                        <END TEXT>
                         
                         Next Two Chunks: 
+
+                        <START TEXT>
                         {next_chunks}
-                        
-                        Context:
+                        <END TEXT>
+
                         """,
+                    schema=ChunkContextSchema,
                     max_tokens=self.chunk_context_size
                 )
-            chunk["chunk_metadata"]["context"] = chunk_context
+            chunk["chunk_metadata"]["context"] = chunk_context.context
             chunk["chunk_metadata"]["doc_summary"] = doc_summary
             return chunk
 

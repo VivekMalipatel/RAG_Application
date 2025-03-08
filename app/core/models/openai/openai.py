@@ -18,7 +18,7 @@ class OpenAIClient:
 
     def __init__(
         self,
-        model_name: str = "gpt-4-turbo",
+        model_name: str = "gpt-4o-mini",
         system_prompt: Optional[str] = "You are a helpful AI assistant.",
         temperature: float = 0.7,
         top_p: float = 0.9,
