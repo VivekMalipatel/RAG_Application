@@ -68,7 +68,7 @@ class EmbeddingHandler:
         hash_key = await self.cache.get_hash(input_str)
         return f"embedding:{embedding_type}:{self.provider}:{self.model_name}:{hash_key}"
 
-    async def encode_dense(self, input_data: Union[str, List[str]]) -> np.ndarray:
+    async def encode_dense(self, input_data: Union[str, List[str]]) -> List :
         """
         Generates dense embeddings and caches them.
         """
@@ -89,14 +89,15 @@ class EmbeddingHandler:
                 raise ValueError("Embedding model returned empty result.")
             
             # Cache the result
-            await self.cache.set(cache_key, json.dumps(result[0]))
+            await self.cache.set(cache_key, json.dumps(result))
 
-            return result[0]
+            return result
 
         except Exception as e:
             self.logger.error(f"Dense embedding failed: {str(e)}")
             return np.array([])
 
+    #TODO : Add Support for Batches (same as dense)
     async def encode_sparse(self, text: str) -> Dict[str, Any]:
         """
         Generates a sparse vector using BM25.

@@ -99,9 +99,7 @@ class OllamaClient:
                 break
         return final_response
     
-    async def generate_structured_output(
-        self, prompt: str, schema: BaseModel, max_tokens: int = None, stream: bool = None
-    ) -> Dict[str, Any]:
+    async def generate_structured_output(self, prompt: str, schema: BaseModel, max_tokens: int = None, stream: bool = False) -> Dict[str, Any]:
         """
         Generates a structured response from Ollama using a provided JSON schema.
 
@@ -124,11 +122,10 @@ class OllamaClient:
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "format": schema.model_json_schema(),  # Pass structured JSON format
+            "format": schema.model_json_schema(),
             "options": {
                 "temperature": self.temperature,
                 "top_p": self.top_p,
-                "num_predict": max_tokens if max_tokens else self.max_tokens
             },
             "stream": stream,
         }

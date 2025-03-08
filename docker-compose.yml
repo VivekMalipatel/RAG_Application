@@ -86,7 +86,6 @@ services:
       timeout: 20s
       retries: 3
       start_period: 20s
-
   neo4j:
     image: neo4j:latest
     container_name: omnirag_neo4j
@@ -96,11 +95,11 @@ services:
       - "7574:7474"  # HTTP
       - "7687:7687"  # Original port kept internal for compatibility
     environment:
-      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
-      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
-      NEO4J_dbms_memory_pagecache_size: 1G
-      NEO4J_dbms_memory_heap_initial__size: 1G
-      NEO4J_dbms_memory_heap_max__size: 2G
+      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT="yes"
+      - SERVER_MEMORY_PAGECACHE_SIZE=4G
+      - SERVER_MEMORY_HEAP_INITIAL_SIZE=4G
+      - SERVER_MEMORY_HEAP_MAX_SIZE=8G
     volumes:
       - ./neo4j/data:/data
       - ./neo4j/logs:/logs

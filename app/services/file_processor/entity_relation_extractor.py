@@ -1,30 +1,31 @@
 import logging
-import json
 from typing import List, Dict, Any
 from app.core.graph_db.neo4j.neo4j_handler import Neo4jHandler
-from langchain_experimental.graph_transformers import LLMGraphTransformer
-from app.core.cache.redis_cache import RedisCache
+from app.core.embedding.embedding_handler import EmbeddingHandler
 from app.core.models.model_handler import ModelRouter
 from app.core.models.model_provider import Provider
 from app.core.models.model_type import ModelType
 from app.config import settings
 from pydantic import BaseModel
+import asyncio
 
 
 class EntitySchema(BaseModel):
     id: str
-    text: str
-    label: str
+    text: str 
+    entity_type: str
+    entity_profile: str
 
-class RelationshipSchema(BaseModel):
-    source: str
-    target: str
-    type: str
+class RelationSchema(BaseModel):
+    source: str 
+    target: str 
+    relation_type: str
     confidence: float
+    relation_profile: str 
 
 class EntityRelationSchema(BaseModel):
     entities: List[EntitySchema]
-    relationships: List[RelationshipSchema]
+    relationships: List[RelationSchema]
 
 
 class EntityRelationExtractor:
@@ -37,6 +38,12 @@ class EntityRelationExtractor:
         logging.info("Initializing EntityRelationExtractor...")
 
         self.graph = Neo4jHandler()
+
+        self.embedding_handler = EmbeddingHandler(
+            provider=Provider.HUGGINGFACE,
+            model_name=settings.TEXT_EMBEDDING_MODEL_NAME,
+            model_type=ModelType.TEXT_EMBEDDING
+        )
 
         self.system_prompt = self._build_system_prompt()
 
@@ -53,43 +60,56 @@ class EntityRelationExtractor:
         examples = [
             {
                 "text": "Adam is a software engineer at Microsoft since 2009.",
-                "head": "Adam",
-                "head_type": "Person",
+                "entity_1": "Adam",
+                "entity_1_type": "Person",
+                "entity_1_profile": "Adam is a software engineer specializing in cloud computing and AI.",
                 "relation": "WORKS_FOR",
-                "tail": "Microsoft",
-                "tail_type": "Company",
+                "relation_profile": "The WORKS_FOR relationship indicates employment at a company.",
+                "entity_2": "Microsoft",
+                "entity_2_type": "Company",
+                "entity_2_profile": "Microsoft is a technology company known for software and cloud services."
             },
             {
                 "text": "Adam won the Best Talent award last year.",
-                "head": "Adam",
-                "head_type": "Person",
+                "entity_1": "Adam",
+                "entity_1_type": "Person",
+                "entity_1_profile": "Adam is a recognized individual in his field, awarded for excellence in his work.",
                 "relation": "HAS_AWARD",
-                "tail": "Best Talent",
-                "tail_type": "Award",
+                "relation_profile": "HAS_AWARD signifies a person receiving recognition for achievements.",
+                "entity_2": "Best Talent",
+                "entity_2_type": "Award",
+                "entity_2_profile": "Best Talent is an annual award given to outstanding professionals."
             },
             {
                 "text": "Microsoft produces Microsoft Word.",
-                "head": "Microsoft Word",
-                "head_type": "Product",
+                "entity_1": "Microsoft Word",
+                "entity_1_type": "Product",
+                "entity_1_profile": "Microsoft Word is a widely used document editing software.",
                 "relation": "PRODUCED_BY",
-                "tail": "Microsoft",
-                "tail_type": "Company",
+                "relation_profile": "PRODUCED_BY signifies the creation or ownership of a product by a company.",
+                "entity_2": "Microsoft",
+                "entity_2_type": "Company",
+                "entity_2_profile": "Microsoft is a multinational technology company producing software and hardware."
             },
             {
                 "text": "Microsoft Word is a lightweight app that is accessible offline.",
-                "head": "Microsoft Word",
-                "head_type": "Product",
+                "entity_1": "Microsoft Word",
+                "entity_1_type": "Product",
+                "entity_1_profile": "Microsoft Word is a widely used document editing software with offline capabilities.",
                 "relation": "HAS_CHARACTERISTIC",
-                "tail": "lightweight app",
-                "tail_type": "Characteristic",
+                "relation_profile": "HAS_CHARACTERISTIC represents an attribute or feature associated with an entity.",
+                "entity_2": "lightweight app",
+                "entity_2_type": "Characteristic",
+                "entity_2_profile": "A lightweight app is a software application optimized for performance and low resource usage."
             }
         ]
-
         examples_str = "\n".join(
             [
                 f'Text: "{ex["text"]}"\n'
-                f'Entities: [{ex["head"]} ({ex["head_type"]}), {ex["tail"]} ({ex["tail_type"]})]\n'
-                f'Relationship: {ex["head"]} -[{ex["relation"]}]-> {ex["tail"]}\n'
+                f'Entities: [{ex["entity_1"]} ({ex["entity_1_type"]}) - Profile: "{ex["entity_1_profile"]}", '
+                f'{ex["entity_2"]} ({ex["entity_2_type"]}) - Profile: "{ex["entity_2_profile"]}"]\n'
+                f'Relationship: {ex["entity_1"]} -[{ex["relation"]}]-> {ex["entity_2"]} '
+                f'(Profile: "{ex["relation_profile"]}")\n'
                 for ex in examples
             ]
         )
@@ -105,7 +125,12 @@ class EntityRelationExtractor:
         ## 2. Entity Guidelines
         - Extract named entities such as **Persons, Organizations, Locations, Products, etc.**.
         - Ensure **consistent labeling** (e.g., "Person", "Company", "Product").
-        - Node IDs should be **human-readable** and not integers.
+        - **Entity IDs must be unique and human-readable** to prevent duplication.
+        - Generate entity IDs using the following format:
+          - **Format:** `"<entity_text_lowercase>_<entity_type>"`
+          - **Example:** `"adam_person"`, `"microsoft_company"`, `"best_talent_award"`
+          - **If the same entity appears multiple times, use the first mention as the canonical ID.**
+        - Avoid using **numeric or system-generated UUIDs** unless necessary.
 
         ## 3. Relationship Guidelines
         - Use **generalized relationship types** instead of overly specific ones:
@@ -118,7 +143,12 @@ class EntityRelationExtractor:
         - **Medium confidence (0.5 - 0.8)**: Inferred relationships with indirect wording
         - **Low confidence (0.0 - 0.4)**: Highly uncertain relationships
 
-        ## 4. Coreference Resolution
+        ## 4. Profiling Guidelines
+        - Each entity-relation pair must include a **profile description** that provides:
+        - **Entity Profile**: Describes the entity’s role and importance.
+        - **Relation Profile**: Explains the meaning and relevance of the relationship.
+
+        ## 5. Coreference Resolution
         - If an entity has multiple references (e.g., "Elon Musk", "Musk", "he"),
           always **use the most complete identifier** found in the text.
 
@@ -129,28 +159,36 @@ class EntityRelationExtractor:
         ```
         {{
             "entities": [
-                {{"id": "unique_id", "text": "entity text", "label": "PERSON/ORG/LOCATION/etc."}}
+                {{
+                    "id": "unique_id",
+                    "text": "entity text",
+                    "entity_type": "PERSON/ORG/LOCATION/etc.",
+                    "entity_profile": "Entity profile describing its role and importance."
+                }}
             ],
             "relationships": [
-                {{"source": "entity1_id", "target": "entity2_id", "type": "RELATIONSHIP_TYPE"}}
+                {{
+                    "source": "entity1_id",
+                    "target": "entity2_id",
+                    "relation_type": "RELATIONSHIP_TYPE",
+                    "confidence": 0.9,
+                    "relation_profile": "Relationship profile explaining its significance."
+                }}
             ]
         }}
         ```
         """
-
+    
     async def extract_entities_and_relationships(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Extracts structured knowledge graph entities & relationships from document chunks,
-        ensures entity resolution, and stores them in Neo4j.
+        Extracts structured knowledge graph entities & relationships from document chunks asynchronously,
+        ensuring entity resolution and storing them in Neo4j.
         """
-
         merged_chunks = self._merge_chunks(chunks)
         processed_chunks = []
 
-        for merged_text, chunk_ids in merged_chunks:
+        async def process_chunk(merged_text, chunk_ids):
             chunk_metadata = chunks[chunk_ids[0]]["chunk_metadata"]
-
-            # Extract user & document metadata
             user_id = chunk_metadata["user_id"]
             document_id = chunk_metadata["document_id"]
 
@@ -158,49 +196,115 @@ class EntityRelationExtractor:
             extraction_prompt = f"""
             Ensure that:
             - Entities are **correctly labeled** (PERSON, ORG, LOCATION, PRODUCT, etc.).
-            - Relationships follow the **standardized types** as outlined in the guidelines.
+            - Each entity and relationship has a **profile description** explaining its significance.
 
             Extract structured knowledge graph entities & relationships from the following text:
 
             {merged_text}
+
+            For your context regarding the document this text is extracted from, please refer to the below document summary:
+            {chunk_metadata["document_summary"]}
+
             """
 
             # Run structured extraction through LLM
-            extracted_data = await self.llm.client.generate_structured_output(extraction_prompt, schema=EntityRelationSchema)
+            extracted_data: EntityRelationSchema = await self.llm.client.generate_structured_output(
+                extraction_prompt, schema=EntityRelationSchema
+            )
             if "error" in extracted_data:
                 logging.error(f"LLM Extraction Error: {extracted_data['error']}")
-                continue
+                return None
 
             # Extract entities & relationships
             entities = extracted_data.entities
             relationships = extracted_data.relationships
 
-            if len(entities) > 0:
+            # Process entities first
+            if entities:
+                chunk_entities_data, entities_data, entity_texts = [], [], []
+                for e in entities:
+                    entity_text = f"{e.text} {e.entity_type} {e.entity_profile}"
+                    entities_data.append({
+                        "id": e.id,
+                        "text": e.text,
+                        "entity_type": e.entity_type,
+                        "entity_profile": e.entity_profile
+                    })
+                    chunk_entities_data.append({
+                        "id": e.id,
+                        "text": e.text,
+                        "entity_type": e.entity_type,
+                        "entity_profile": e.entity_profile
+                    })
+                    entity_texts.append(entity_text)
 
-                # Convert Entity Objects to List of Dictionaries
-                entities_data: List[Dict[str, Any]] = [
-                    {"id": entity.id, "text": entity.text, "label": entity.label} for entity in entities
-                ]
+                # Generate embeddings for entities
+                entity_embeddings = await self.embedding_handler.encode_dense(entity_texts)
+                entity_embeddings = [emb[:256] if len(emb) >= 256 else emb for emb in entity_embeddings]
 
-                # Convert Relationship Objects to List of Dictionaries
-                relationships_data: List[Dict[str, Any]] = [
-                    {
-                        "source": relationship.source,
-                        "target": relationship.target,
-                        "type": relationship.type,
-                        "confidence": relationship.confidence,
-                    }
-                    for relationship in relationships
-                ]
+                # Attach embeddings to entities
+                for i, entity in enumerate(entities_data):
+                    entity["embedding"] = entity_embeddings[i]
 
-                await self.graph.store_entities(entities_data, user_id, document_id)
-                await self.graph.store_relationships(relationships_data, user_id)
+                # Store entities in Neo4j
+                neo4j_entity_ids = await self.graph.store_entities(entities_data, user_id, document_id)
+
+                # Assign Neo4j IDs to chunk metadata
+                if len(neo4j_entity_ids) == len(chunk_entities_data):
+                    for i, entity in enumerate(chunk_entities_data):
+                        entity["neo4j_id"] = neo4j_entity_ids[i]
+
+            else:
+                chunk_entities_data = []
+
+            # Process relationships separately
+            if relationships:
+                chunk_relationships_data, relationships_data, relation_texts = [], [], []
+                for r in relationships:
+                    relation_text = f"{r.source} {r.target} {r.relation_type} {r.relation_profile}"
+                    relationships_data.append({
+                        "source": r.source,
+                        "target": r.target,
+                        "relation_type": r.relation_type,
+                        "confidence": r.confidence,
+                        "relation_profile": r.relation_profile
+                    })
+                    chunk_relationships_data.append({
+                        "source": r.source,
+                        "target": r.target,
+                        "relation_type": r.relation_type,
+                        "confidence": r.confidence,
+                        "relation_profile": r.relation_profile
+                    })
+                    relation_texts.append(relation_text)
+
+                # Generate embeddings for relationships
+                relation_embeddings = await self.embedding_handler.encode_dense(relation_texts)
+                relation_embeddings = [emb[:256] if len(emb) >= 256 else emb for emb in relation_embeddings]
+
+                # Attach embeddings to relationships
+                for i, relation in enumerate(relationships_data):
+                    relation["embedding"] = relation_embeddings[i]
+
+                # Store relationships in Neo4j
+                neo4j_relationship_ids = await self.graph.store_relationships(relationships_data, user_id)
+
+                # Assign Neo4j IDs to chunk metadata
+                if len(neo4j_relationship_ids) == len(chunk_relationships_data):
+                    for i, relation in enumerate(chunk_relationships_data):
+                        relation["neo4j_id"] = neo4j_relationship_ids[i]
+
+            else:
+                chunk_relationships_data = []
 
             # Assign extracted data to all related chunks
             for chunk_id in chunk_ids:
-                chunks[chunk_id]["chunk_metadata"]["entities"] = entities
-                chunks[chunk_id]["chunk_metadata"]["relationships"] = relationships
+                chunks[chunk_id]["chunk_metadata"]["entities"] = chunk_entities_data
+                chunks[chunk_id]["chunk_metadata"]["relationships"] = chunk_relationships_data
                 processed_chunks.append(chunks[chunk_id])
+
+        # Run all chunk processing in parallel
+        await asyncio.gather(*[process_chunk(merged_text, chunk_ids) for merged_text, chunk_ids in merged_chunks])
 
         return processed_chunks
 

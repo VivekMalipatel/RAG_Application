@@ -144,6 +144,7 @@ class QdrantHandler:
                         "context_version": metadata["context_version"],
                         "chunk_number": metadata['chunk_number'],
                         "entities": metadata.get("entities"),
+                        "relationships": metadata.get("relationships"),
                         "context": metadata.get("context"), 
                         "document_summary": metadata["doc_summary"],
                         "content": str(chunk["content"]),

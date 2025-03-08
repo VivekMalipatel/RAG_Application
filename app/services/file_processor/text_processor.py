@@ -271,7 +271,9 @@ class TextProcessor:
         if not chunks:
             logging.warning("No chunks provided for embedding generation")
             return []
-            
+        
+        #TODO: Implement batching for large number of chunks
+
         tasks = [
             asyncio.gather(
                 self.embedding_model.encode_dense(str(chunk["content"])),
@@ -283,7 +285,7 @@ class TextProcessor:
         embeddings = await asyncio.gather(*tasks)
         for chunk, (dense_emb, sparse_emb) in zip(chunks, embeddings):
                 
-            chunk["dense_embedding"] = dense_emb
+            chunk["dense_embedding"] = dense_emb[0]
             chunk["sparse_embedding"] = sparse_emb
 
         return chunks

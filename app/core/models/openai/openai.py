@@ -2,6 +2,7 @@ import logging
 import json
 import os
 from typing import Optional, List, Union, AsyncGenerator, Dict, Any
+from pydantic import BaseModel
 from openai import AsyncOpenAI, APIError
 from app.config import settings
 import asyncio
@@ -110,6 +111,59 @@ class OpenAIClient:
         except Exception as e:
             logging.error(f"Unexpected Error: {str(e)}")
             return "Error processing request"
+    
+    async def generate_structured_output(
+    self, prompt: str, schema: BaseModel, max_tokens: Optional[int] = None, stream: bool = None
+) -> Dict[str, Any]:
+        """
+        Generates a structured response from OpenAI using a provided JSON schema.
+
+        Args:
+            prompt (str): User input prompt.
+            schema (BaseModel): Pydantic model defining expected JSON structure.
+            max_tokens (int, optional): Maximum tokens in response.
+            stream (bool, optional): Enable/disable streaming.
+
+        Returns:
+            Dict[str, Any]: Structured response parsed as per schema.
+        """
+        # Don't use streaming for structured outputs as it complicates parsing
+        if stream:
+            logging.warning("Streaming not supported for structured outputs, falling back to non-streaming")
+        
+        try:
+            payload = {
+                "model": self.model_name,
+                "messages": [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "max_tokens": max_tokens if max_tokens else self.max_tokens,
+                "response_format": schema
+            }
+            
+            response = await self.client.chat.completions.create(**payload)
+            response_content = response.choices[0].message.content
+            
+            # Parse and validate response against schema
+            try:
+                parsed_json = json.loads(response_content)
+                return schema.model_validate(parsed_json)
+            except json.JSONDecodeError as e:
+                logging.error(f"Failed to parse response as JSON: {e}")
+                return {"error": "Invalid JSON response"}
+            except Exception as e:
+                logging.error(f"Schema validation error: {e}")
+                return {"error": str(e)}
+                
+        except APIError as e:
+            logging.error(f"OpenAI API Error: {str(e)}")
+            return {"error": str(e)}
+        except Exception as e:
+            logging.error(f"Unexpected Error: {str(e)}")
+            return {"error": str(e)}
 
     async def get_model_list(self) -> List[str]:
         """

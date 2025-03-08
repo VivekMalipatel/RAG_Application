@@ -1,72 +1,92 @@
 import logging
-from app.core.graph_db.neo4j.neo4j_session import Neo4jSession
 from typing import List, Dict, Any
+from app.core.graph_db.neo4j.neo4j_session import neo4j_session
 
 
 class Neo4jHandler:
     """
-    Handles interactions with Neo4j for entity and relationship management.
+    Handles interactions with Neo4j for entity and relationship management,
+    including storing and indexing embeddings for similarity search.
     """
 
-    def __init__(self):
-        """Initializes Neo4j session."""
-        self.neo4j_session = Neo4jSession()
-    
     async def _get_session(self):
         """Helper to retrieve an active Neo4j session."""
-        return await self.neo4j_session.get_session()
+        return await neo4j_session.get_session()
 
-    async def create_entity(self, entity: Dict[str, Any]):
+    async def setup_indexes(self):
         """
-        Creates an entity node in Neo4j if it doesn't exist.
+        Creates vector indexes for entity and relationship embeddings in Neo4j.
+        This ensures optimized similarity search.
+        """
+        create_entity_index_query = """
+        CREATE VECTOR INDEX entity_embedding_index 
+        FOR (e:Entity) ON (e.embedding)
+        OPTIONS {indexProvider: 'hnsw', similarityFunction: 'cosine', dimensions: 256};
+        """
+
+        create_relation_index_query = """
+        CREATE VECTOR INDEX relation_embedding_index 
+        FOR ()-[r:RELATION]->() ON (r.embedding)
+        OPTIONS {indexProvider: 'hnsw', similarityFunction: 'cosine', dimensions: 256};
+        """
+
+        async with await self._get_session() as session:
+            await session.run(create_entity_index_query)
+            await session.run(create_relation_index_query)
+            logging.info("Vector indexes for entity and relationship embeddings created in Neo4j.")
+
+    async def store_entities(self, entities: List[Dict[str, Any]], user_id: str, document_id: str):
+        """
+        Stores structured entities in Neo4j, ensuring consistency in entity linking.
+        Now also stores entity embeddings and indexes them.
         """
         query = """
-        MERGE (e:Entity {id: $entity_id})
-        ON CREATE SET e.type = $entity_type, e += $properties
-        RETURN e
+        UNWIND $entities AS entity
+        MERGE (e:Entity {id: entity.id})
+        ON CREATE SET 
+            e.text = entity.text, 
+            e.type = entity.entity_type, 
+            e.profile = entity.entity_profile, 
+            e.embedding = entity.embedding,
+            e.user_id = $user_id, 
+            e.document_id = $document_id
+        RETURN elementId(e) AS neo4j_id
         """
         async with await self._get_session() as session:
-            await session.run(
-                query,
-                entity_id=entity.get("id"),
-                entity_type=entity.get("label"),
-                properties=entity
-            )
-            logging.info(f"Created or updated entity {entity.get('id')} in Neo4j.")
+            result = await session.run(query, entities=entities, user_id=user_id, document_id=document_id)
+            neo4j_entities = await result.data()
+            logging.info(f"Stored {len(entities)} entities with embeddings in Neo4j for user {user_id}.")
+        return neo4j_entities
 
-    async def create_relationship(self, relationship: Dict[str, Any], user_id: str):
+    async def store_relationships(self, relationships: List[Dict[str, Any]], user_id: str):
         """
-        Creates a relationship between two entities in Neo4j.
+        Stores structured relationships in Neo4j, ensuring relation consistency.
+        Now also stores relationship embeddings and indexes them.
         """
         query = """
-        MATCH (a:Entity {id: $source_id}), (b:Entity {id: $target_id})
-        MERGE (a)-[r:RELATION {type: $relation, user_id: $user_id}]->(b)
-        ON CREATE SET r.confidence = $confidence
-        RETURN r
+        UNWIND $relationships AS rel
+        MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target})
+        MERGE (a)-[r:RELATION {type: rel.relation_type, user_id: $user_id}]->(b)
+        ON CREATE SET 
+            r.confidence = coalesce(rel.confidence, 1.0),
+            r.profile = rel.relation_profile,
+            r.embedding = rel.embedding
+        RETURN elementId(r) AS neo4j_id
         """
         async with await self._get_session() as session:
-            await session.run(
-                query,
-                source_id=relationship.get("source"),
-                target_id=relationship.get("target"),
-                relation=relationship.get("type"),
-                confidence=relationship.get("confidence", 1.0),  # Default confidence to 1.0 if missing
-                user_id=user_id
-            )
-            logging.info(
-                f"Created relationship {relationship.get('type')} "
-                f"between {relationship.get('source')} and {relationship.get('target')} in Neo4j."
-            )
+            result = await session.run(query, relationships=relationships, user_id=user_id)
+            neo4j_relationships = await result.data()
+            logging.info(f"Stored {len(relationships)} relationships with embeddings in Neo4j for user {user_id}.")
+        return neo4j_relationships
 
     async def query_entities(self, entity_type: str, limit: int = 10):
         """
-        Retrieves entities of a specific type from Neo4j.
-        Ensures the type property exists before querying.
+        Retrieves entities of a specific type with their profile and embeddings.
         """
         query = """
         MATCH (e:Entity)
-        WHERE e.type IS NOT NULL AND e.type = $entity_type
-        RETURN coalesce(e.id, "") AS id, coalesce(e.text, "") AS text, coalesce(e.type, "") AS type
+        WHERE e.type = $entity_type
+        RETURN e.id AS id, e.text AS text, e.type AS type, e.profile AS profile, e.embedding AS embedding
         LIMIT $limit
         """
         async with await self._get_session() as session:
@@ -75,108 +95,52 @@ class Neo4jHandler:
 
     async def query_relationships(self, source_id: str, relation: str, limit: int = 10):
         """
-        Retrieves relationships of a specific type from Neo4j.
+        Retrieves relationships of a specific type along with relation profiles and embeddings.
         """
         query = """
         MATCH (a:Entity {id: $source_id})-[r:RELATION]->(b:Entity)
-        WHERE r.type IS NOT NULL AND r.type = $relation
-        RETURN b.id AS id, coalesce(b.text, "") AS text, coalesce(b.type, "") AS type
+        WHERE r.type = $relation
+        RETURN b.id AS id, b.text AS text, b.type AS type, r.profile AS relation_profile, 
+               r.confidence AS confidence, r.embedding AS embedding
         LIMIT $limit
         """
         async with await self._get_session() as session:
             result = await session.run(query, source_id=source_id, relation=relation, limit=limit)
             return [record for record in await result.data()]
 
-    async def store_entities(self, entities: List[Dict[str, Any]], user_id: str, document_id: str):
+    async def find_similar_entities(self, embedding: List[float], limit: int = 5):
         """
-        Stores extracted entities in Neo4j.
-        """
-        query = """
-        UNWIND $entities AS entity
-        MERGE (e:Entity {id: entity.id})
-        ON CREATE SET 
-            e.text = entity.text, 
-            e.type = entity.label, 
-            e.user_id = $user_id, 
-            e.document_id = $document_id
-        RETURN e
-        """
-        async with await self._get_session() as session:
-            await session.run(query, entities=entities, user_id=user_id, document_id=document_id)
-            logging.info(f"Stored {len(entities)} entities in Neo4j for user {user_id}.")
-
-    async def store_relationships(self, relationships: List[Dict[str, Any]], user_id: str):
-        """
-        Stores extracted relationships in Neo4j.
+        Finds similar entities based on embedding similarity.
         """
         query = """
-        UNWIND $relationships AS rel
-        MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target})
-        MERGE (a)-[r:RELATION {type: rel.type, user_id: $user_id}]->(b)
-        ON CREATE SET r.confidence = coalesce(rel.confidence, 1.0)
-        RETURN r
+        CALL db.index.vector.queryNodes('entity_embedding_index', $limit, $embedding)
+        YIELD node, score
+        RETURN node.id AS id, node.text AS text, node.type AS type, node.profile AS profile, score
+        ORDER BY score DESC
+        LIMIT $limit
         """
         async with await self._get_session() as session:
-            await session.run(query, relationships=relationships, user_id=user_id)
-            logging.info(f"Stored {len(relationships)} relationships in Neo4j for user {user_id}.")
+            result = await session.run(query, embedding=embedding, limit=limit)
+            return [record for record in await result.data()]
 
-    async def get_user_entities(self, user_id: str):
+    async def find_similar_relationships(self, embedding: List[float], limit: int = 5):
         """
-        Retrieves stored entities for a user from Neo4j.
-        Ensures that only entities with a `user_id` property are returned.
+        Finds similar relationships based on embedding similarity.
         """
         query = """
-        MATCH (e:Entity)
-        WHERE e.user_id IS NOT NULL AND e.user_id = $user_id
-        RETURN coalesce(e.id, "") AS id, coalesce(e.text, "") AS text, coalesce(e.type, "") AS label
+        CALL db.index.vector.queryRelationships('relation_embedding_index', $limit, $embedding)
+        YIELD relationship, score
+        RETURN relationship.type AS relation_type, relationship.profile AS relation_profile, score
+        ORDER BY score DESC
+        LIMIT $limit
         """
         async with await self._get_session() as session:
-            result = await session.run(query, user_id=user_id)
-            records = await result.data()
-
-            if not records:
-                logging.info(f"No entities found for user: {user_id}")
-                return []
-
-            return records
-
-    async def find_similar_entities(self, entity: Dict[str, Any], user_id: str):
-        """
-        Finds entities in Neo4j that share similar relationships & properties.
-        Uses relationship-based similarity scoring.
-        """
-        query = """
-        MATCH (e:Entity)-[r]-(related)
-        WHERE e.text IS NOT NULL AND (e.text = $text OR e.type = $label)
-        RETURN coalesce(e.id, "") AS id, coalesce(e.text, "") AS text, coalesce(e.type, "") AS label, COUNT(r) AS similarity_score
-        ORDER BY similarity_score DESC
-        LIMIT 5
-        """
-        async with await self._get_session() as session:
-            result = await session.run(
-                query,
-                text=entity.get("text", ""),
-                label=entity.get("label", "")
-            )
-            records = await result.data()
-
-            if not records:
-                return []
-
-            return [
-                {
-                    "id": record["id"],
-                    "text": record["text"],
-                    "label": record["label"],
-                    "similarity_score": record["similarity_score"]
-                }
-                for record in records
-            ]
+            result = await session.run(query, embedding=embedding, limit=limit)
+            return [record for record in await result.data()]
 
     async def update_entity_occurrences(self, entity_id: str, user_id: str):
         """
         Increments the occurrence count for an entity.
-        If the entity doesn't exist, it does nothing.
         """
         query = """
         MATCH (e:Entity {id: $entity_id, user_id: $user_id})
@@ -191,6 +155,33 @@ class Neo4jHandler:
             else:
                 logging.warning(f"Entity {entity_id} not found for user {user_id}.")
 
+    async def clear_user_data(self, user_id: str) -> Dict[str, int]:
+        """
+        Deletes all entities and relationships associated with a user.
+        """
+        count_entity_query = "MATCH (e:Entity) WHERE e.user_id = $user_id RETURN count(e) AS entity_count"
+        count_rel_query = "MATCH ()-[r:RELATION]->() WHERE r.user_id = $user_id RETURN count(r) AS rel_count"
+        delete_entity_query = "MATCH (e:Entity) WHERE e.user_id = $user_id DETACH DELETE e"
+        delete_rel_query = "MATCH ()-[r:RELATION]->() WHERE r.user_id = $user_id DELETE r"
+
+        async with await self._get_session() as session:
+            entity_result = await session.run(count_entity_query, user_id=user_id)
+            entity_record = await entity_result.single()
+            entities_count = entity_record["entity_count"] if entity_record else 0
+
+            rel_result = await session.run(count_rel_query, user_id=user_id)
+            rel_record = await rel_result.single()
+            relationships_count = rel_record["rel_count"] if rel_record else 0
+
+            await session.run(delete_entity_query, user_id=user_id)
+            await session.run(delete_rel_query, user_id=user_id)
+
+            logging.info(f"Deleted {entities_count} entities and {relationships_count} relationships for user {user_id}.")
+
+            return {
+                "entities_deleted": entities_count,
+                "relationships_deleted": relationships_count
+            }
 
 # Instantiate a global Neo4j handler
 neo4j_handler = Neo4jHandler()
