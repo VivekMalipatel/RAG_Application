@@ -1,4 +1,5 @@
 from app.api.db import Base, AsyncSessionLocal, engine
+from sqlalchemy.future import select
 from app.api.models import Document
 from app.api.core.crud import CRUDBase
 from app.api.core.security import create_access_token
@@ -27,9 +28,10 @@ class DocumentHandler:
     async def get_document_metadata(self, user_id: str, file_path: str):
         """Fetches file metadata from PostgreSQL using CRUD operations."""
         async with AsyncSessionLocal() as session:
-            file_meta = await session.run_sync(
-                lambda s: s.query(Document).filter_by(user_id=int(user_id), file_path=file_path).first()
+            result = await session.execute(
+                select(Document).filter_by(user_id=int(user_id), file_path=file_path)
             )
+            file_meta = result.scalar_one_or_none()
             return file_meta
 
     def generate_file_token(self, file_data: dict) -> str:

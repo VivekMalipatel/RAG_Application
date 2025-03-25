@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     NEO4J_USER: str
     NEO4J_PASSWORD: str
     NEO4J_DATABASE: str
+    NEO4J_DEDUPLICATION_INTERVAL: int
 
     #GGUF_CONVERTER
     GGUF_CONVERTER_URL: str

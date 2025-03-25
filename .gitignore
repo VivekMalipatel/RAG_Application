@@ -17,3 +17,4 @@ Temp_Files/video/
 ./models
 /minio_config
 /neo4j
+.vscode/launch.json

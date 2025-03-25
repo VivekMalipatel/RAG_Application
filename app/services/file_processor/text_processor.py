@@ -354,7 +354,7 @@ class TextProcessor:
                 logging.error("Missing user_id in chunk metadata")
                 user_id = "default_user"  # Fallback value
                 
-            asyncio.create_task(self.qdrant.store_vectors(embedded_chunks, user_id))
+            asyncio.create_task(self.qdrant.store_document_vectors(embedded_chunks, user_id))
             logging.info(f"Successfully stored {len(embedded_chunks)} vectors in Qdrant for user {user_id}")
             
         except Exception as e:

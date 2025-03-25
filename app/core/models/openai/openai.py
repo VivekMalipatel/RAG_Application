@@ -144,7 +144,7 @@ class OpenAIClient:
                 "response_format": schema
             }
             
-            response = await self.client.chat.completions.create(**payload)
+            response = await self.client.beta.chat.completions.parse(**payload)
             response_content = response.choices[0].message.content
             
             # Parse and validate response against schema

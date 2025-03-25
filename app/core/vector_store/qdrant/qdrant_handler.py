@@ -117,7 +117,7 @@ class QdrantHandler:
                     raise  # Raise the exception after max retries
 
 
-    async def store_vectors(self, embedded_chunks: List[Dict[str, Any]], user_id: str):
+    async def store_document_vectors(self, embedded_chunks: List[Dict[str, Any]], user_id: str):
         """
         Stores document chunks with multi-stage embeddings (dense, sparse, matryoshka, image).
 
@@ -197,6 +197,75 @@ class QdrantHandler:
             logging.error(f"Failed to store vectors: {str(e)}")
             raise
 
+    async def store_chat_vectors(self, embedded_payload: List[Dict[str, Any]], user_id: str):
+        """
+        Stores chat message vectors with their embeddings.
+
+        Args:
+            embedded_payload (list): List of chat messages with embeddings.
+            user_id (str): User ID for the collection.
+        """
+        try:
+            # Check if collection exists, if not create it
+            collections = await qdrant_session.client.get_collections()
+            if str(user_id) not in [c.name for c in collections.collections]:
+                await self.create_collection(user_id=user_id)
+
+            points = []
+
+            for chat in embedded_payload:
+                # Validate Dense Embedding Dimension
+                if len(chat["dense_embedding"]) != 768:
+                    raise ValueError(f"Dense vector dimension mismatch. Expected 768, got {len(chat['dense_embedding'])}")
+
+                # Generate a unique identifier for the chat message
+                chat_id = str(uuid.uuid4())
+
+                # Create quantized and matryoshka embeddings
+                dense_embedding = np.array(chat["dense_embedding"])
+                quantized_dense_embedding = np.clip(
+                    (dense_embedding * 127).astype(np.int8), -128, 127
+                ).tolist()
+                matryoshka_64 = dense_embedding[:64].tolist()
+                matryoshka_128 = dense_embedding[:128].tolist()
+                matryoshka_256 = dense_embedding[:256].tolist()
+
+                # Define the point structure with all embeddings
+                point = PointStruct(
+                    id=chat_id,
+                    vector={
+                        "dense": chat["dense_embedding"],
+                        "matryoshka_64": matryoshka_64,
+                        "matryoshka_128": matryoshka_128,
+                        "matryoshka_256": matryoshka_256,
+                        "quantized": quantized_dense_embedding,
+                        "sparse": chat["sparse_embedding"]
+                    },
+                    payload={
+                        "chat_id": chat["chat_id"],
+                        "user_id": user_id,
+                        "message_type": chat["message_type"],
+                        "timestamp": chat["timestamp"].isoformat() if hasattr(chat["timestamp"], "isoformat") else chat["timestamp"],
+                        "entities": chat["entities"],
+                        "relationships": chat["relationships"],
+                        "chat_summary": chat["chat_summary"],
+                        "content": chat["message"],  # Duplicate for consistency with document vectors
+                        "is_chat": True  # Flag to distinguish from document vectors
+                    }
+                )
+                points.append(point)
+
+            # Upsert the processed chunks into Qdrant
+            await qdrant_session.client.upsert(
+                collection_name=user_id,
+                points=points
+            )
+            logging.info(f"Stored {len(points)} chat messages with embeddings for user {user_id}")
+
+        except Exception as e:
+            logging.error(f"Failed to store chat vectors: {str(e)}")
+            raise
+
     async def hybrid_search(
         self,
         user_id: str,
@@ -205,10 +274,11 @@ class QdrantHandler:
         sparse_vector: Dict[str, List[float]],
         image_embedding: Optional[List[float]] = None,
         top_k: int = 10,
+        search_params: Optional[Dict[str, Any]] = None,
         filters: Optional[Dict] = None
     ) -> List[Dict]:
         """
-        Performs multi-stage hybrid search using Matryoshka embeddings, quantized dense search, sparse search, and late interaction reranking.
+        Performs dynamic hybrid search using Matryoshka embeddings, quantized dense search, sparse search, and late interaction reranking.
 
         Args:
             user_id (str): Collection name.
@@ -217,6 +287,7 @@ class QdrantHandler:
             sparse_vector (Dict[str, List[float]]): Sparse vector representation (BM25 for text).
             image_embedding (Optional[List[float]]): Optional image embedding for multimodal search.
             top_k (int): Number of results to return.
+            search_params (Optional[Dict]): Dynamic search parameters.
             filters (Optional[Dict]): Additional search filters.
 
         Returns:
@@ -225,69 +296,64 @@ class QdrantHandler:
         try:
             query_filter = Filter(**filters) if filters else None
 
+            # Quantized vector for integer-based search
             quantized_query = np.clip(
                 (np.array(dense_vector) * 127).astype(np.int8), -128, 127
             ).tolist()
 
-            # **Step A: Matryoshka Dimensionality Reduction Search**
+            # **Matryoshka Dimensionality Reduction Search (Adjustable Limits)**
             matryoshka_prefetch = Prefetch(
-                            prefetch=[
-                                Prefetch(
-                                    prefetch=[
-                                        Prefetch(
-                                            prefetch=[
-                                                # First stage - 64D retrieval (high recall, low precision)
-                                                Prefetch(
-                                                    query=dense_vector[:64],
-                                                    using="matryoshka_64",
-                                                    limit=400,
-                                                ),
-                                            ],
-                                            # Second stage - 128D refinement
-                                            query=dense_vector[:128],
-                                            using="matryoshka_128",
-                                            limit=300,
-                                        ),
-                                    ],
-                                    # Third stage - 256D final refinement
-                                    query=dense_vector[:256],
-                                    using="matryoshka_256",
-                                    limit=200,
-                                ),
-                            ],
-                            # Fourth stage - Full 768D precision refinement
-                            query=dense_vector,
-                            using="dense",
-                            limit=100,
-                        )
+                prefetch=[
+                    Prefetch(
+                        prefetch=[
+                            Prefetch(
+                                prefetch=[
+                                    Prefetch(
+                                        query=dense_vector[:64],
+                                        using="matryoshka_64",
+                                        limit=search_params["matryoshka_64_limit"],
+                                    ),
+                                ],
+                                query=dense_vector[:128],
+                                using="matryoshka_128",
+                                limit=search_params["matryoshka_128_limit"],
+                            ),
+                        ],
+                        query=dense_vector[:256],
+                        using="matryoshka_256",
+                        limit=search_params["matryoshka_256_limit"],
+                    ),
+                ],
+                query=dense_vector,
+                using="dense",
+                limit=search_params["dense_limit"],
+            )
 
-            # **Step B: Integer-Based Quantized Search & 768D Dense Re-ranking**
+            # **Quantized Search & 768D Dense Refinement**
             quantized_dense_prefetch = Prefetch(
                 prefetch=[
-                    # Integer-based search for speed
                     Prefetch(
                         query=quantized_query,
                         using="quantized",
-                        limit=300,
+                        limit=search_params["quantized_limit"],
                     )
                 ],
-                # Refine with full precision 768D float vectors
                 query=dense_vector,
                 using="dense",
-                limit=100,
+                limit=search_params["dense_limit"],
             )
 
-            # **Step C: Sparse Search (BM25 for text, TBD for images)**
+            # **Sparse Search (BM25)**
             sparse_search_prefetch = Prefetch(
                 query=sparse_vector if isinstance(sparse_vector, SparseVector) else SparseVector(
                     indices=sparse_vector["indices"],
                     values=sparse_vector["values"]
                 ),
                 using="sparse",
-                limit=50,
+                limit=search_params["sparse_limit"],
             )
 
-            # **Step D: Fusion of Quantized Dense + Sparse using RRF**
+            # **Fusion of Quantized Dense + Sparse using RRF**
             sparse_dense_rrf = Prefetch(
                 prefetch=[quantized_dense_prefetch, sparse_search_prefetch],
                 query=models.FusionQuery(fusion=models.Fusion.RRF),
@@ -295,26 +361,21 @@ class QdrantHandler:
 
             # **Execute Hybrid Search Pipeline**
             search_result = await qdrant_session.client.query_points(
-                collection_name=user_id,
+                collection_name=str(user_id),
                 prefetch=[matryoshka_prefetch, sparse_dense_rrf],
                 query=dense_vector,
                 using="dense",
-                limit=10,
-                search_params={"hnsw_ef": 128, "exact": True},
+                limit=search_params["final_limit"],
+                search_params={"hnsw_ef": search_params["hnsw_ef"], "exact": True},
                 with_payload=True,
                 query_filter=query_filter
             )
 
             results = search_result.points
 
-            # **Extract Documents for Reranking**
-            documents = [res.payload["content"] for res in results if res.payload and "content" in res.payload]
+            documents = [res.payload["content"] for res in results if hasattr(res, "payload") and res.payload and "content" in res.payload]
 
-            if not documents:
-                logging.warning("No documents retrieved for reranking.")
-                return results  # Return original results if no content found
-
-            # **Step E: Apply Late Interaction Reranking (ColBERT-V2)**
+            # **Apply Late Interaction Reranking (ColBERT-V2)**
             reranked_results = await self.rerank_with_colbert(query_text, documents, results)
 
             return reranked_results[:top_k]
@@ -348,3 +409,72 @@ class QdrantHandler:
         except Exception as e:
             logging.error(f"Reranking failed: {str(e)}")
             return results
+    
+    async def get_all_containers(self) -> List[str]:
+        """
+        Retrieves all user collections in Qdrant.
+        
+        Returns:
+            List[str]: A list of collection names representing users.
+        """
+        try:
+            collections = await qdrant_session.client.get_collections()
+            user_collections = [c.name for c in collections.collections]
+            logging.info(f"Retrieved {len(user_collections)} user collections from Qdrant.")
+            return user_collections
+        except Exception as e:
+            logging.error(f"Failed to fetch user collections from Qdrant: {str(e)}")
+            return []
+    
+    async def delete_collection(self, user_id: str):
+        """
+        Deletes a user-specific collection in Qdrant."
+        """
+        try:
+            await qdrant_session.client.delete_collection(collection_name=user_id)
+            logging.info(f"Deleted collection for user {user_id}")
+        except Exception as e:
+            logging.error(f"Failed to delete collection for user {user_id}: {str(e)}")
+            raise
+    
+    async def get_collection_chunk_count(
+        self, 
+        user_id: str, 
+        filters: Optional[Dict] = None
+    ) -> int:
+        """
+        Retrieves the number of chunks stored in a user's collection,
+        optionally filtered by specific criteria.
+        
+        Args:
+            user_id (str): The user ID / collection name.
+            filters (Optional[Dict]): Optional filters to count only specific chunks.
+            
+        Returns:
+            int: The number of chunks/points in the collection.
+        """
+        try:
+            # Check if collection exists
+            collections = await qdrant_session.client.get_collections()
+            if str(user_id) not in [c.name for c in collections.collections]:
+                logging.warning(f"Collection for user {user_id} does not exist.")
+                return 0
+            
+            if filters:
+                # If filters are provided, we need to count using search with filter
+                query_filter = Filter(**filters)
+                count_result = await qdrant_session.client.count(
+                    collection_name=str(user_id),
+                    count_filter=query_filter
+                )
+                count = count_result.count
+            else:
+                # Get collection information which includes total count
+                collection_info = await qdrant_session.client.get_collection(collection_name=str(user_id))
+                count = collection_info.points_count
+            
+            logging.info(f"Retrieved chunk count for user {user_id}: {count}")
+            return count
+        except Exception as e:
+            logging.error(f"Failed to get chunk count for user {user_id}: {str(e)}")
+            return 0

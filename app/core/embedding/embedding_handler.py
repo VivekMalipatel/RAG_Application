@@ -95,7 +95,7 @@ class EmbeddingHandler:
 
         except Exception as e:
             self.logger.error(f"Dense embedding failed: {str(e)}")
-            return np.array([])
+            return []
 
     #TODO : Add Support for Batches (same as dense)
     async def encode_sparse(self, text: str) -> Dict[str, Any]:

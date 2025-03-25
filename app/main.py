@@ -10,7 +10,8 @@ from app.core.graph_db.neo4j.neo4j_session import neo4j_session
 from app.api.v1.endpoints import agent, documents, user, upload, minio_webhook, query
 from app.api.db.base import init_db, close_db
 from app.core.storage_bin.minio.setup_minio import MinIOSetup
-from app.services.file_processor.file_processor import FileEventProcessor 
+from app.services.file_processor.file_processor import FileEventProcessor
+from app.core.graph_db.neo4j.deduplicator import Neo4jDeduplicator
 
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
@@ -23,6 +24,8 @@ async def lifespan(app: FastAPI):
         await neo4j_session.connect()
         minio_setup = MinIOSetup()
         asyncio.create_task(minio_setup.setup_minio())
+        deduplicator = Neo4jDeduplicator()
+        asyncio.create_task(deduplicator.start_deduplication())
 
         # Start file processors
         processor = FileEventProcessor()

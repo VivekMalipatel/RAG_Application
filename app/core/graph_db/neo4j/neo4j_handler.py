@@ -13,42 +13,64 @@ class Neo4jHandler:
         """Helper to retrieve an active Neo4j session."""
         return await neo4j_session.get_session()
 
-    async def setup_indexes(self):
+    async def _ensure_index_exists(self):
         """
-        Creates vector indexes for entity and relationship embeddings in Neo4j.
-        This ensures optimized similarity search.
+        Ensures vector indexes exist in Neo4j. Creates them if missing.
         """
-        create_entity_index_query = """
-        CREATE VECTOR INDEX entity_embedding_index 
-        FOR (e:Entity) ON (e.embedding)
-        OPTIONS {indexProvider: 'hnsw', similarityFunction: 'cosine', dimensions: 256};
-        """
-
-        create_relation_index_query = """
-        CREATE VECTOR INDEX relation_embedding_index 
-        FOR ()-[r:RELATION]->() ON (r.embedding)
-        OPTIONS {indexProvider: 'hnsw', similarityFunction: 'cosine', dimensions: 256};
-        """
-
         async with await self._get_session() as session:
-            await session.run(create_entity_index_query)
-            await session.run(create_relation_index_query)
-            logging.info("Vector indexes for entity and relationship embeddings created in Neo4j.")
+            # Check existing indexes
+            check_query = """
+            SHOW INDEXES YIELD name
+            RETURN collect(name) AS indexes
+            """
+            result = await session.run(check_query)
+            index_status = await result.single()
+            existing_indexes = index_status["indexes"] if index_status else []
+
+            entity_index_exists = "entity_embedding_index" in existing_indexes
+            relation_index_exists = "relation_embedding_index" in existing_indexes
+
+            # Create indexes if they don't exist
+            if not entity_index_exists:
+                logging.info("Creating entity embedding index in Neo4j...")
+                await session.run("""
+                CREATE VECTOR INDEX entity_embedding_index 
+                FOR (e:Entity) ON (e.embedding)
+                OPTIONS {
+                    indexConfig: {
+                        `vector.dimensions`: 256,
+                        `vector.similarity_function`: 'cosine'
+                    }
+                };
+                """)
+
+            if not relation_index_exists:
+                logging.info("Creating relationship embedding index in Neo4j...")
+                await session.run("""
+                CREATE VECTOR INDEX relation_embedding_index 
+                FOR ()-[r:RELATION]->() ON (r.embedding)
+                OPTIONS {
+                    indexConfig: {
+                        `vector.dimensions`: 256,
+                        `vector.similarity_function`: 'cosine'
+                    }
+                };
+                """)
 
     async def store_entities(self, entities: List[Dict[str, Any]], user_id: str, document_id: str):
         """
-        Stores structured entities in Neo4j, ensuring consistency in entity linking.
-        Now also stores entity embeddings and indexes them.
+        Stores structured entities in Neo4j with automatic indexing.
         """
+        await self._ensure_index_exists()  # Ensure indexes exist before insert
+
         query = """
         UNWIND $entities AS entity
-        MERGE (e:Entity {id: entity.id})
+        MERGE (e:Entity {id: entity.id, user_id: $user_id})
         ON CREATE SET 
             e.text = entity.text, 
             e.type = entity.entity_type, 
             e.profile = entity.entity_profile, 
             e.embedding = entity.embedding,
-            e.user_id = $user_id, 
             e.document_id = $document_id
         RETURN elementId(e) AS neo4j_id
         """
@@ -60,9 +82,10 @@ class Neo4jHandler:
 
     async def store_relationships(self, relationships: List[Dict[str, Any]], user_id: str):
         """
-        Stores structured relationships in Neo4j, ensuring relation consistency.
-        Now also stores relationship embeddings and indexes them.
+        Stores structured relationships in Neo4j with automatic indexing.
         """
+        await self._ensure_index_exists()  # Ensure indexes exist before insert
+
         query = """
         UNWIND $relationships AS rel
         MATCH (a:Entity {id: rel.source}), (b:Entity {id: rel.target})

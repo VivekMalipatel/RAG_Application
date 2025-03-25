@@ -100,6 +100,9 @@ services:
       - SERVER_MEMORY_PAGECACHE_SIZE=4G
       - SERVER_MEMORY_HEAP_INITIAL_SIZE=4G
       - SERVER_MEMORY_HEAP_MAX_SIZE=8G
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
+      - NEO4JLABS_PLUGINS=["apoc", "graph-data-science"]
     volumes:
       - ./neo4j/data:/data
       - ./neo4j/logs:/logs

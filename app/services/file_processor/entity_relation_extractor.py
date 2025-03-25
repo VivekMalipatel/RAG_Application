@@ -257,11 +257,6 @@ class EntityRelationExtractor:
                 # Store entities in Neo4j
                 neo4j_entity_ids = await self.graph.store_entities(entities_data, user_id, document_id)
 
-                # Assign Neo4j IDs to chunk metadata
-                if len(neo4j_entity_ids) == len(chunk_entities_data):
-                    for i, entity in enumerate(chunk_entities_data):
-                        entity["neo4j_id"] = neo4j_entity_ids[i]
-
             else:
                 chunk_entities_data = []
 
@@ -296,11 +291,6 @@ class EntityRelationExtractor:
 
                 # Store relationships in Neo4j
                 neo4j_relationship_ids = await self.graph.store_relationships(relationships_data, user_id)
-
-                # Assign Neo4j IDs to chunk metadata
-                if len(neo4j_relationship_ids) == len(chunk_relationships_data):
-                    for i, relation in enumerate(chunk_relationships_data):
-                        relation["neo4j_id"] = neo4j_relationship_ids[i]
 
             else:
                 chunk_relationships_data = []

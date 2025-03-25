@@ -10,6 +10,7 @@
 8. Implement proper logging
 9. Properly store hugging face models (As of now storing in system cache)
 10. Dynamically Adjust Hybrid Search Parameter
+11. While Merging Nodes append profiles (Knowledge Graphs)
 
 ### Bugs : 
 
