@@ -35,7 +35,7 @@ class Neo4jSearchHandler:
                 YIELD node, score
                 WHERE node.user_id = $user_id
                 AND ($entity_type IS NULL OR node.type = $entity_type)
-                RETURN node.id AS id, node.text AS text, node.type AS type, node.metadata AS metadata, score
+                RETURN node.id AS id, node.text AS text, node.type AS type, node.profile AS profile, score
                 ORDER BY score DESC
                 LIMIT $limit
                 """
@@ -77,7 +77,7 @@ class Neo4jSearchHandler:
                 RETURN startNode(relationship).id AS source, 
                        endNode(relationship).id AS target, 
                        relationship.type AS relation_type,
-                       relationship.metadata AS relation_metadata,
+                       relationship.profile AS relation_profile,
                        score
                 ORDER BY score DESC
                 LIMIT $limit
@@ -112,7 +112,19 @@ class Neo4jSearchHandler:
             async with await self._get_session() as session:
                 query = f"""
                 MATCH path = (start:Entity {{id: $entity_id, user_id: $user_id}})-[*1..{max_depth}]-(end:Entity)
-                RETURN path
+                WITH path, relationships(path) AS rels, nodes(path) AS nodes
+                RETURN path,
+                       [n IN nodes | {{
+                           id: n.id, 
+                           text: n.text, 
+                           type: n.type, 
+                           profile: n.profile
+                       }}] AS entities,
+                       [r IN rels | {{
+                           type: type(r),
+                           relation_type: r.type,
+                           profile: r.profile
+                       }}] AS relations
                 LIMIT $limit
                 """
                 result = await session.run(query, user_id=user_id, entity_id=entity_id, limit=limit)

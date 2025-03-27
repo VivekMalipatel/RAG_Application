@@ -74,7 +74,7 @@ class GraphSearchAgent(BaseAgent):
             Ensure:
             - Entities are labeled correctly (Person, Organization, Location, Product, etc.).
             - Relationships describe the connection between entities.
-            - Each entity & relationship has a profile describing its significance.
+            - Each entity & relationship has a profile describing what might the eventity. As you donot have any context to generate a profile for this entity just generate a ground truth pofile like a PERSON, NAME, PLACE, ANIMAL, THING, etc. Donot go for factual search while doing this, as we at this point doesn't have any context to generate a profile.
         """
         extracted_data = await self.er_model.client.generate_structured_output(prompt, schema=EntityRelationSchema)
 

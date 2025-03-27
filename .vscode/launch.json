@@ -18,6 +18,12 @@
             ],
             "jinja": true,
             //"justMyCode": false 
+        },
+        {
+            "name": "Debug HybridSearchAgent",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "test/test_hybrid_search_agent.py",
         }
     ]
 }

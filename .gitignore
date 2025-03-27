@@ -18,3 +18,4 @@ Temp_Files/video/
 /minio_config
 /neo4j
 .vscode/launch.json
+.env

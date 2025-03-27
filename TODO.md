@@ -11,6 +11,7 @@
 9. Properly store hugging face models (As of now storing in system cache)
 10. Dynamically Adjust Hybrid Search Parameter
 11. While Merging Nodes append profiles (Knowledge Graphs)
+12. ColBert Reranker -  See what happens if the Numbe of tokens exceed and handle it
 
 ### Bugs : 
 

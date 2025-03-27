@@ -169,10 +169,17 @@ class HuggingFaceClient:
             embeddings = self.model(**inputs).last_hidden_state.mean(dim=1)
         return embeddings.cpu().numpy().tolist()
 
-    def rerank_documents(self, query: str, documents: List[str]) -> List[int]:
+    def rerank_documents(self, query: str, documents: List[str], max_tokens: int) -> List[int]:
         """Uses JinaAI ColBERT v2 for document reranking."""
         query_tokens = self.tokenizer(query, return_tensors="pt").to(self.device)
         doc_tokens = self.tokenizer(documents, return_tensors="pt", padding=True).to(self.device)
+
+        if len(doc_tokens)>8000:
+            truncated_documents = []
+            for doc in documents:
+                truncated_documents.append(doc[:max_tokens-5]+".....")
+            documents = truncated_documents
+            doc_tokens = self.tokenizer(documents, return_tensors="pt", padding=True).to(self.device)
 
         with torch.no_grad():
             query_embedding = self.model(**query_tokens).last_hidden_state.mean(dim=1)

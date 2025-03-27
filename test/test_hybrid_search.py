@@ -34,7 +34,7 @@ def test_hybrid_search():
 
     print("✅ Hybrid search test passed!")
     print("🔹 Answer:", response_data["answer"])
-    print("🔹 Sources:", response_data["sources"])
+    #print("🔹 Sources:", response_data["sources"])
 
 # Run the test
 if __name__ == "__main__":

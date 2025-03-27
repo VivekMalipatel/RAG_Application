@@ -372,11 +372,12 @@ class QdrantHandler:
             )
 
             results = search_result.points
+            max_tokens_per_doc = 8000 // top_k
 
             documents = [res.payload["content"] for res in results if hasattr(res, "payload") and res.payload and "content" in res.payload]
 
             # **Apply Late Interaction Reranking (ColBERT-V2)**
-            reranked_results = await self.rerank_with_colbert(query_text, documents, results)
+            reranked_results = await self.rerank_with_colbert(query_text, documents, results, max_tokens_per_doc)
 
             return reranked_results[:top_k]
 
@@ -384,7 +385,7 @@ class QdrantHandler:
             logging.error(f"Hybrid search failed for user {user_id}: {str(e)}")
             return []
 
-    async def rerank_with_colbert(self, query: str, documents: List[str], results: List[Dict]) -> List[Dict]:
+    async def rerank_with_colbert(self, query: str, documents: List[str], results: List[Dict], max_tokens:int) -> List[Dict]:
         """
         Uses Hugging Face's JinaAI ColBERT V2 for reranking.
 
@@ -397,7 +398,7 @@ class QdrantHandler:
             List[Dict]: Reranked search results.
         """
         try:
-            ranked_indices = self.reranker.client.rerank_documents(query, documents)
+            ranked_indices = self.reranker.client.rerank_documents(query, documents, max_tokens)
 
             if not ranked_indices:
                 return results
