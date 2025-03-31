@@ -7,7 +7,7 @@ from app.core.storage_bin.minio.session_minio import minio_session
 from app.core.cache.session_redis import redis_session
 from app.core.vector_store.qdrant.qdrant_session import qdrant_session
 from app.core.graph_db.neo4j.neo4j_session import neo4j_session
-from app.api.v1.endpoints import agent, documents, user, upload, minio_webhook, query
+from app.api.v1.endpoints import agent, documents, user, upload, minio_webhook, query, qdrant_search_mcp_endpoint
 from app.api.db.base import init_db, close_db
 from app.core.storage_bin.minio.setup_minio import MinIOSetup
 from app.services.file_processor.file_processor import FileEventProcessor
@@ -60,6 +60,7 @@ app.include_router(documents.router, prefix="/api/v1/documents", tags=["Document
 app.include_router(upload.router, prefix="/api/v1/files", tags=["File Upload"])
 app.include_router(minio_webhook.router, prefix="/api/v1/minio", tags=["MinIO Webhooks"])
 app.include_router(query.router, prefix="/api/v1/query", tags=["Query"])
+app.include_router(qdrant_search_mcp_endpoint.router, prefix="/api/v1/mcp", tags=["mcp"])
 
 @app.get("/")
 async def root():

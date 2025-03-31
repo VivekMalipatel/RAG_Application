@@ -47,3 +47,5 @@ httpx
 pytest 
 pytest-asyncio
 spacy 
+
+mcp[cli]
