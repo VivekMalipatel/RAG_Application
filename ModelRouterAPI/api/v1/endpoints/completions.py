@@ -18,7 +18,6 @@ from schemas.chat import UsageInfo
 
 # Import our model handlers
 from model_handler import ModelRouter
-from model_provider import Provider
 from model_type import ModelType
 
 router = APIRouter()
@@ -42,6 +41,7 @@ async def create_completion(
 ):
     """
     Creates a completion for the provided prompt and parameters.
+    Uses intelligent model routing based on model name patterns.
     """
     start_time = time.time()
     request_id = str(uuid.uuid4())
@@ -54,18 +54,8 @@ async def create_completion(
         # Convert prompt to string if it's an array
         prompt = request.prompt[0] if isinstance(request.prompt, list) else request.prompt
         
-        # Parse model info to determine the provider
-        model_parts = request.model.split("/")
-        if len(model_parts) > 1 and model_parts[0] in ["mistralai", "meta-llama", "google"]:
-            provider = Provider.HUGGINGFACE
-        elif request.model.startswith(("gpt-", "text-")):
-            provider = Provider.OPENAI
-        else:
-            provider = Provider.OLLAMA
-        
-        # Initialize the appropriate model
-        model_router = ModelRouter(
-            provider=provider,
+        # Initialize the model router using the intelligent routing factory
+        model_router = ModelRouter.initialize_from_model_name(
             model_name=request.model,
             model_type=ModelType.TEXT_GENERATION,
             temperature=request.temperature,
@@ -97,7 +87,7 @@ async def create_completion(
             request_id=request_id,
             endpoint="completions",
             model=request.model,
-            provider=provider.value,
+            provider=model_router.provider.value,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
@@ -153,17 +143,8 @@ async def create_completion_stream(
             # Convert prompt to string if it's an array
             prompt = request.prompt[0] if isinstance(request.prompt, list) else request.prompt
             
-            # Similar setup as non-streaming endpoint
-            model_parts = request.model.split("/")
-            if len(model_parts) > 1 and model_parts[0] in ["mistralai", "meta-llama", "google"]:
-                provider = Provider.HUGGINGFACE
-            elif request.model.startswith(("gpt-", "text-")):
-                provider = Provider.OPENAI
-            else:
-                provider = Provider.OLLAMA
-            
-            model_router = ModelRouter(
-                provider=provider,
+            # Initialize the model router using the intelligent routing factory
+            model_router = ModelRouter.initialize_from_model_name(
                 model_name=request.model,
                 model_type=ModelType.TEXT_GENERATION,
                 temperature=request.temperature,
@@ -245,7 +226,7 @@ async def create_completion_stream(
                 request_id=request_id,
                 endpoint="completions.stream",
                 model=request.model,
-                provider=provider.value,
+                provider=model_router.provider.value,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,

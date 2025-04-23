@@ -2,25 +2,26 @@ import logging
 from typing import Optional, Dict, List, Union, AsyncGenerator
 
 # Import provider-specific clients
-from openai import OpenAIClient
+from openai_client import OpenAIClient
 from ollama import OllamaClient
 from huggingface import HuggingFaceClient
 
 from model_provider import Provider
 from model_type import ModelType
+from core.model_selector import ModelSelector
 
 class ModelRouter:
     """
     Unified model router to abstract interactions with OpenAI, Ollama, and Hugging Face.
     Supports:
     - OpenAI (GPT-4, GPT-3.5, DeepSeek)
-    - Ollama (LLaMA models)
-    - Hugging Face (Various transformer models)
+    - Ollama (LLaMA and other Hugging Face models)
+    - Hugging Face (For embeddings and rerankers)
     """
 
     def __init__(
         self,
-        provider: Provider,
+        provider: Union[Provider, str],
         model_name: str,
         model_type: ModelType,
         model_quantization: Optional[str] = None,
@@ -35,22 +36,26 @@ class ModelRouter:
         Initializes the ModelRouter with the appropriate backend.
 
         Args:
-            provider (str): One of ['openai', 'ollama', 'huggingface'].
-            model_name (str): The name of the model.
-            model_type (str): Task type (text, image, embedding, audio).
-            system_prompt (Optional[str]): System prompt for the model.
-            temperature (float): Sampling temperature.
-            top_p (float): Nucleus sampling threshold.
-            max_tokens (int): Maximum response tokens.
-            stream (bool): Whether to enable streaming responses.
-            frequency_penalty (float): Penalize repeating words.
-            presence_penalty (float): Encourage diversity.
-            repetition_penalty (float): Adjust repetition tendency.
-            top_k (int): Number of top candidates considered.
-            num_beams (int): Beam search width.
+            provider: Provider enum or string ('openai', 'ollama', 'huggingface').
+            model_name: The name of the model.
+            model_type: Task type (text generation, embedding, reranker).
+            model_quantization: Optional quantization level for Ollama models.
+            system_prompt: System prompt for the model.
+            temperature: Sampling temperature.
+            top_p: Nucleus sampling threshold.
+            max_tokens: Maximum response tokens.
+            stream: Whether to enable streaming responses.
             kwargs: Additional provider-specific parameters.
         """
-        self.provider = provider
+        # Convert string provider to Provider enum if needed
+        if isinstance(provider, str):
+            try:
+                self.provider = Provider(provider)
+            except ValueError:
+                raise ValueError(f"Unsupported provider string: {provider}")
+        else:
+            self.provider = provider
+            
         self.model_name = model_name
         self.model_type = model_type
         self.system_prompt = system_prompt
@@ -101,6 +106,33 @@ class ModelRouter:
 
         if not self.is_model_available():
             raise ValueError(f"Model {self.model_name} is not available for provider {self.provider}")
+    
+    @staticmethod
+    def initialize_from_model_name(
+        model_name: str,
+        model_type: ModelType,
+        **kwargs
+    ):
+        """
+        Factory method to initialize a ModelRouter based on model name pattern.
+        Uses the ModelSelector to determine the appropriate provider.
+        
+        Args:
+            model_name: Name of the model (e.g., "gpt-4", "mistralai/Mistral-7B")
+            model_type: Type of model (text generation, embedding)
+            **kwargs: Additional parameters to pass to the ModelRouter constructor
+            
+        Returns:
+            ModelRouter: Configured for the appropriate provider
+        """
+        selector = ModelSelector()
+        provider = selector.select_provider_for_model(model_name, model_type)
+        return ModelRouter(
+            provider=provider,
+            model_name=model_name,
+            model_type=model_type,
+            **kwargs
+        )
             
     def is_model_available(self) -> bool:
         """
@@ -109,7 +141,12 @@ class ModelRouter:
         """
         return self.client.is_model_available()
 
-    async def generate_text(self, prompt: str, max_tokens: Optional[int] = None, stream: Optional[bool] = None) -> Union[str, AsyncGenerator[str, None]]:
+    async def generate_text(
+        self, 
+        prompt: str, 
+        max_tokens: Optional[int] = None, 
+        stream: Optional[bool] = None
+    ) -> Union[str, AsyncGenerator[str, None]]:
         """
         Generates a text response.
 
@@ -141,6 +178,28 @@ class ModelRouter:
             List[List[float]]: List of text embeddings.
         """
         return await self.client.embed_text(texts)
+
+    async def rerank_documents(
+        self, 
+        query: str, 
+        documents: List[str], 
+        max_tokens: int = 512
+    ) -> List[int]:
+        """
+        Reranks documents based on their relevance to a query.
+        
+        Args:
+            query: The search query
+            documents: List of document texts to rank
+            max_tokens: Maximum tokens to consider for each document
+            
+        Returns:
+            List[int]: Document indices sorted by relevance (highest first)
+        """
+        if self.model_type != ModelType.RERANKER:
+            raise ValueError("This model is not configured for reranking")
+            
+        return await self.client.rerank_documents(query, documents, max_tokens)
 
     def set_system_prompt(self, system_prompt: str):
         """Updates the system prompt dynamically."""

@@ -4,7 +4,7 @@ from typing import List, Optional, Union
 from schemas.chat import UsageInfo
 
 class EmbeddingRequest(BaseModel):
-    model: str
+    model: Optional[str] = None  # Model is now optional since we use a hardcoded one
     input: Union[str, List[str]]
     user: Optional[str] = None
     encoding_format: Optional[str] = "float"  # Can be "float" or "base64"

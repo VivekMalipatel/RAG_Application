@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 import uvicorn
+from contextlib import asynccontextmanager
 
 # Import API routers
 from api.v1.router import api_router
@@ -16,10 +17,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for FastAPI app.
+    Handles startup and shutdown events.
+    """
+    # Startup logic
+    logger.info("Initializing database...")
+    init_db()
+    logger.info("ModelRouter API server is starting up")
+    yield
+    # Shutdown logic (if needed)
+    logger.info("ModelRouter API server is shutting down")
+
 app = FastAPI(
     title="ModelRouter API",
     description="OpenAI-compatible API for routing requests to different model providers",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -65,13 +81,6 @@ app.openapi = custom_openapi
 @app.get("/", include_in_schema=False)
 async def root():
     return {"message": "Welcome to the ModelRouter API. See /docs for API documentation"}
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize components on startup."""
-    logger.info("Initializing database...")
-    init_db()
-    logger.info("ModelRouter API server is starting up")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

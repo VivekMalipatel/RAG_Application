@@ -2,12 +2,12 @@ import asyncio
 import json
 import time
 import uuid
+import tiktoken
 from typing import List, Dict, Any, Optional, Union
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-import tiktoken
 
 from db.session import get_db
 from core.security import get_api_key
@@ -15,10 +15,11 @@ from db.models import ApiKey, Usage
 from schemas.chat import ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChoice, ChatMessage
 from schemas.chat import ChatCompletionChunkResponse, ChatCompletionChunkChoice, ChatCompletionChunkDelta, UsageInfo
 
-# Import our model handlers
+# Import our model handlers and model selector
 from model_handler import ModelRouter
-from model_provider import Provider
 from model_type import ModelType
+from core.model_selector import ModelSelector
+from config import settings
 
 router = APIRouter()
 
@@ -34,7 +35,7 @@ def count_tokens(text: str, model: str = "gpt-3.5-turbo") -> int:
 
 async def generate_chat_response(model_router: ModelRouter, messages: List[ChatMessage]):
     # Convert messages to a prompt format understood by the model
-    if model_router.provider == Provider.OPENAI:
+    if model_router.provider.value == "openai":
         # OpenAI already understands the chat format
         prompt = messages
     else:
@@ -65,41 +66,31 @@ async def create_chat_completion(
 ):
     """
     Creates a model response for the given chat conversation.
+    Uses intelligent routing based on model name patterns.
     """
     start_time = time.time()
     request_id = str(uuid.uuid4())
     
     try:
-        # Parse model info to determine the provider
-        model_parts = request.model.split("/")
-        if len(model_parts) > 1 and model_parts[0] in ["mistralai", "meta-llama", "google"]:
-            provider = Provider.HUGGINGFACE
-        elif request.model.startswith(("gpt-", "text-")):
-            provider = Provider.OPENAI
-        else:
-            provider = Provider.OLLAMA
+        # Calculate prompt tokens
+        estimated_token_count = sum(count_tokens(msg.content, request.model) for msg in request.messages)
         
-        # Initialize the appropriate model
-        model_router = ModelRouter(
-            provider=provider,
+        # Initialize the model router using the intelligent routing factory
+        model_router = ModelRouter.initialize_from_model_name(
             model_name=request.model,
             model_type=ModelType.TEXT_GENERATION,
             temperature=request.temperature,
             top_p=request.top_p,
             max_tokens=request.max_tokens,
             stream=False,
-            # Additional params could be passed here
         )
-        
-        # Calculate prompt tokens
-        prompt_tokens = sum(count_tokens(msg.content, request.model) for msg in request.messages)
         
         # Generate the response
         response_text = await generate_chat_response(model_router, request.messages)
         
         # Calculate completion tokens
         completion_tokens = count_tokens(response_text, request.model)
-        total_tokens = prompt_tokens + completion_tokens
+        total_tokens = estimated_token_count + completion_tokens
         
         # Log usage
         completion_time = time.time() - start_time
@@ -110,8 +101,8 @@ async def create_chat_completion(
             request_id=request_id,
             endpoint="chat.completions",
             model=request.model,
-            provider=provider.value,
-            prompt_tokens=prompt_tokens,
+            provider=model_router.provider.value,
+            prompt_tokens=estimated_token_count,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             processing_time=completion_time,
@@ -131,7 +122,7 @@ async def create_chat_completion(
                 )
             ],
             usage=UsageInfo(
-                prompt_tokens=prompt_tokens,
+                prompt_tokens=estimated_token_count,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens
             )
@@ -162,17 +153,11 @@ async def create_chat_completion_stream(
         created = int(time.time())
         
         try:
-            # Similar setup as non-streaming endpoint
-            model_parts = request.model.split("/")
-            if len(model_parts) > 1 and model_parts[0] in ["mistralai", "meta-llama", "google"]:
-                provider = Provider.HUGGINGFACE
-            elif request.model.startswith(("gpt-", "text-")):
-                provider = Provider.OPENAI
-            else:
-                provider = Provider.OLLAMA
+            # Calculate prompt tokens
+            estimated_token_count = sum(count_tokens(msg.content, request.model) for msg in request.messages)
             
-            model_router = ModelRouter(
-                provider=provider,
+            # Initialize model using the intelligent routing factory
+            model_router = ModelRouter.initialize_from_model_name(
                 model_name=request.model,
                 model_type=ModelType.TEXT_GENERATION,
                 temperature=request.temperature,
@@ -180,9 +165,6 @@ async def create_chat_completion_stream(
                 max_tokens=request.max_tokens,
                 stream=True,
             )
-            
-            # Calculate prompt tokens
-            prompt_tokens = sum(count_tokens(msg.content, request.model) for msg in request.messages)
             
             # Send initial chunk with role
             initial_chunk = ChatCompletionChunkResponse(
@@ -203,7 +185,7 @@ async def create_chat_completion_stream(
             accumulated_text = ""
             
             # Convert messages to prompt format
-            if model_router.provider == Provider.OPENAI:
+            if model_router.provider.value == "openai":
                 prompt = request.messages
             else:
                 # For other providers, convert to text format
@@ -255,7 +237,7 @@ async def create_chat_completion_stream(
             
             # Calculate completion tokens
             completion_tokens = count_tokens(accumulated_text, request.model)
-            total_tokens = prompt_tokens + completion_tokens
+            total_tokens = estimated_token_count + completion_tokens
             
             # Log usage
             completion_time = time.time() - start_time
@@ -266,8 +248,8 @@ async def create_chat_completion_stream(
                 request_id=request_id,
                 endpoint="chat.completions.stream",
                 model=request.model,
-                provider=provider.value,
-                prompt_tokens=prompt_tokens,
+                provider=model_router.provider.value,
+                prompt_tokens=estimated_token_count,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
                 processing_time=completion_time,

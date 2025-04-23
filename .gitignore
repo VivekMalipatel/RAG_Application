@@ -19,3 +19,4 @@ Temp_Files/video/
 /neo4j
 .vscode/launch.json
 .env
+ModelRouterAPI/.modelrouter/

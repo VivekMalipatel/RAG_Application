@@ -4,7 +4,7 @@ import os
 from typing import Optional, List, Union, AsyncGenerator, Dict, Any
 from pydantic import BaseModel
 from openai import AsyncOpenAI, APIError
-from app.config import settings
+from config import settings
 import asyncio
 
 class OpenAIClient:

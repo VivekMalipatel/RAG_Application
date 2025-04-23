@@ -1,6 +1,7 @@
 import time
 import uuid
 from typing import List, Dict, Any, Optional, Union
+import numpy as np
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 from db.session import get_db
 from core.security import get_api_key
 from db.models import ApiKey, Usage
-from schemas.embeddings import EmbeddingRequest, EmbeddingResponse, EmbeddingData
+from schemas.reranker import RerankerRequest, RerankerResponse, RerankerScoreItem
 from schemas.chat import UsageInfo
 
 # Import our model handlers
@@ -17,40 +18,57 @@ from model_type import ModelType
 
 router = APIRouter()
 
-# Hardcoded model for embeddings
-EMBEDDING_MODEL = "nomic-ai/colnomic-embed-multimodal-7b"
+# Hardcoded model for reranking
+RERANKER_MODEL = "jinaai/jina-colbert-v2"
 
-@router.post("", response_model=EmbeddingResponse)
-async def create_embeddings(
-    request: EmbeddingRequest,
+@router.post("", response_model=RerankerResponse)
+async def rerank_documents(
+    request: RerankerRequest,
     background_tasks: BackgroundTasks,
     api_key: ApiKey = Depends(get_api_key),
     db: Session = Depends(get_db),
 ):
     """
-    Creates embeddings for the provided input text.
-    Uses a hardcoded Hugging Face embedding model.
+    Reranks a list of documents based on relevance to a query.
+    Uses a hardcoded Hugging Face reranker model.
     """
     start_time = time.time()
     request_id = str(uuid.uuid4())
     
     try:
-        # Convert input to list if it's a single string
-        input_texts = request.input if isinstance(request.input, list) else [request.input]
-        
         # Use hardcoded model name instead of the one from the request
-        # This ensures we always use our preferred embedding model
         model_router = ModelRouter.initialize_from_model_name(
-            model_name=EMBEDDING_MODEL,
-            model_type=ModelType.TEXT_EMBEDDING,
+            model_name=RERANKER_MODEL,
+            model_type=ModelType.RERANKER,
         )
         
-        # Generate embeddings
-        embeddings = await model_router.embed_text(input_texts)
+        # Rerank documents
+        ranked_indices = await model_router.rerank_documents(
+            query=request.query, 
+            documents=request.documents, 
+            max_tokens=request.max_tokens
+        )
         
-        # Estimate token usage (simpler than chat, just character count / 4)
-        total_chars = sum(len(text) for text in input_texts)
-        prompt_tokens = total_chars // 4  # Rough approximation
+        # Generate scores (normalize to 0-1 range)
+        # This is a simple approximation since we don't have actual scores from the ranking
+        scores = np.linspace(1.0, 0.1, len(ranked_indices))
+        
+        # Create results with document indices and scores
+        results = []
+        for i, idx in enumerate(ranked_indices):
+            results.append(
+                RerankerScoreItem(
+                    document_index=idx,
+                    score=float(scores[i])
+                )
+            )
+        
+        # Estimate token usage (rough approximation)
+        query_chars = len(request.query)
+        docs_chars = sum(len(doc) for doc in request.documents)
+        total_chars = query_chars + docs_chars
+        # Very rough token estimation (4 chars per token is an approximation)
+        total_tokens = total_chars // 4
         
         # Log usage
         completion_time = time.time() - start_time
@@ -59,40 +77,31 @@ async def create_embeddings(
             db=db,
             api_key_id=getattr(api_key, "id", None),
             request_id=request_id,
-            endpoint="embeddings",
-            model=EMBEDDING_MODEL,
+            endpoint="reranker",
+            model=RERANKER_MODEL,
             provider="huggingface",  # We know it's always huggingface
-            prompt_tokens=prompt_tokens,
+            prompt_tokens=total_tokens,
             completion_tokens=0,
-            total_tokens=prompt_tokens,
+            total_tokens=total_tokens,
             processing_time=completion_time,
             request_data=request.json()
         )
         
         # Create response
-        embedding_data = []
-        for i, embedding in enumerate(embeddings):
-            embedding_data.append(
-                EmbeddingData(
-                    embedding=embedding,
-                    index=i
-                )
-            )
-        
-        return EmbeddingResponse(
-            data=embedding_data,
-            model=EMBEDDING_MODEL,  # Return the actual model used, not the requested one
+        return RerankerResponse(
+            model=RERANKER_MODEL,  # Return the actual model used, not the requested one
+            results=results,
             usage=UsageInfo(
-                prompt_tokens=prompt_tokens,
+                prompt_tokens=total_tokens,
                 completion_tokens=0,
-                total_tokens=prompt_tokens
+                total_tokens=total_tokens
             )
         )
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Helper function to log usage - same as in chat.py
+# Helper function to log usage - same as in other endpoint files
 def log_usage(
     db: Session, 
     api_key_id: Optional[int],
