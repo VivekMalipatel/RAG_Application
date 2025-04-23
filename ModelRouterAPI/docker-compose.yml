@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  modelrouter-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - HUGGINGFACE_API_TOKEN=${HUGGINGFACE_API_TOKEN:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - DATABASE_URL=sqlite:///./modelrouter.db
+    volumes:
+      - ./:/app
+      - model-router-data:/app/data
+    restart: unless-stopped
+    networks:
+      - model-router-network
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    networks:
+      - model-router-network
+
+volumes:
+  model-router-data:
+  ollama-data:
+
+networks:
+  model-router-network:
+    driver: bridge
