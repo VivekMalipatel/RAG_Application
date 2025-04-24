@@ -1,7 +1,7 @@
 import logging
 import json
 import os
-from typing import Optional, List, Union, AsyncGenerator, Dict, Any
+from typing import Optional, List, Union, AsyncGenerator, Dict, Any, Type
 from pydantic import BaseModel
 from openai import AsyncOpenAI, APIError
 from config import settings
@@ -113,50 +113,118 @@ class OpenAIClient:
             return "Error processing request"
     
     async def generate_structured_output(
-    self, prompt: str, schema: BaseModel, max_tokens: Optional[int] = None, stream: bool = None
-) -> Dict[str, Any]:
+        self, prompt: str, schema: Union[Dict[str, Any], Type[BaseModel]], 
+        max_tokens: Optional[int] = None, stream: bool = None
+    ) -> Dict[str, Any]:
         """
         Generates a structured response from OpenAI using a provided JSON schema.
 
         Args:
             prompt (str): User input prompt.
-            schema (BaseModel): Pydantic model defining expected JSON structure.
+            schema: Either a Pydantic model class or a JSON schema dictionary.
             max_tokens (int, optional): Maximum tokens in response.
-            stream (bool, optional): Enable/disable streaming.
+            stream (bool, optional): Enable/disable streaming (always disabled for structured outputs).
 
         Returns:
             Dict[str, Any]: Structured response parsed as per schema.
         """
-        # Don't use streaming for structured outputs as it complicates parsing
+        # Streaming not supported for structured outputs
         if stream:
             logging.warning("Streaming not supported for structured outputs, falling back to non-streaming")
         
         try:
-            payload = {
-                "model": self.model_name,
-                "messages": [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-                "max_tokens": max_tokens if max_tokens else self.max_tokens,
-                "response_format": schema
-            }
+            # Prepare the schema
+            if isinstance(schema, type) and issubclass(schema, BaseModel):
+                json_schema = schema.model_json_schema()
+            else:
+                json_schema = schema
+                
+            # Check for API version compatibility
+            if hasattr(self.client, "beta") and hasattr(self.client.beta, "chat") and hasattr(self.client.beta.chat, "completions"):
+                # Use the newer OpenAI API with beta.chat.completions.create with response_format
+                payload = {
+                    "model": self.model_name,
+                    "messages": [
+                        {"role": "system", "content": f"{self.system_prompt}\nYou must respond with a valid JSON object that conforms to the provided JSON schema."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": self.temperature,
+                    "top_p": self.top_p,
+                    "max_tokens": max_tokens if max_tokens else self.max_tokens,
+                    "response_format": {"type": "json_object", "schema": json_schema}
+                }
+                
+                response = await self.client.beta.chat.completions.create(**payload)
+                response_content = response.choices[0].message.content
+                
+            else:
+                # Fallback to regular chat completion with instructions to return JSON
+                enhanced_system_prompt = f"{self.system_prompt}\nYou must respond with a valid JSON object that conforms to this schema: {json.dumps(json_schema)}\nYour response should ONLY contain the JSON object and nothing else."
+                
+                payload = {
+                    "model": self.model_name,
+                    "messages": [
+                        {"role": "system", "content": enhanced_system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": self.temperature,
+                    "top_p": self.top_p,
+                    "max_tokens": max_tokens if max_tokens else self.max_tokens,
+                }
+                
+                response = await self.client.chat.completions.create(**payload)
+                response_content = response.choices[0].message.content
             
-            response = await self.client.beta.chat.completions.parse(**payload)
-            response_content = response.choices[0].message.content
-            
-            # Parse and validate response against schema
+            # Parse and validate JSON response
             try:
-                parsed_json = json.loads(response_content)
-                return schema.model_validate(parsed_json)
+                # Check if the response is wrapped in code blocks
+                if "```json" in response_content:
+                    parts = response_content.split("```json")
+                    if len(parts) > 1:
+                        json_part = parts[1].split("```")[0].strip()
+                        parsed_json = json.loads(json_part)
+                    else:
+                        parsed_json = json.loads(response_content)
+                elif "```" in response_content:
+                    parts = response_content.split("```")
+                    if len(parts) > 1:
+                        json_part = parts[1].strip()
+                        parsed_json = json.loads(json_part)
+                    else:
+                        parsed_json = json.loads(response_content)
+                else:
+                    parsed_json = json.loads(response_content)
+                
+                # Validate against schema if a Pydantic model was provided
+                if isinstance(schema, type) and issubclass(schema, BaseModel):
+                    try:
+                        validated_data = schema.model_validate(parsed_json)
+                        return validated_data.model_dump()
+                    except Exception as e:
+                        logging.error(f"Schema validation error: {e}")
+                        return {"error": str(e), "data": parsed_json}
+                
+                return parsed_json
+                
             except json.JSONDecodeError as e:
-                logging.error(f"Failed to parse response as JSON: {e}")
-                return {"error": "Invalid JSON response"}
-            except Exception as e:
-                logging.error(f"Schema validation error: {e}")
-                return {"error": str(e)}
+                logging.error(f"Failed to parse response as JSON: {e}\nContent: {response_content}")
+                
+                # Try a more aggressive JSON extraction if needed
+                try:
+                    import re
+                    json_pattern = r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}'
+                    matches = re.findall(json_pattern, response_content)
+                    if matches:
+                        parsed_json = json.loads(matches[0])
+                        logging.info("Successfully extracted JSON with regex")
+                        return parsed_json
+                except Exception:
+                    pass
+                
+                return {
+                    "error": f"Invalid JSON response: {e}",
+                    "raw_content": response_content
+                }
                 
         except APIError as e:
             logging.error(f"OpenAI API Error: {str(e)}")

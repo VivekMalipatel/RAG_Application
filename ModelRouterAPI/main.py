@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 # Import API routers
 from api.v1.router import api_router
 from db.init_db import init_db
+from huggingface.model_cache import ModelCache
 
 # Setup logging
 logging.basicConfig(
@@ -28,8 +29,17 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("ModelRouter API server is starting up")
     yield
-    # Shutdown logic (if needed)
+    # Shutdown logic
     logger.info("ModelRouter API server is shutting down")
+    
+    # Cleanup model cache resources
+    try:
+        logger.info("Cleaning up model cache...")
+        model_cache = ModelCache()
+        model_cache.shutdown()
+        logger.info("Model cache cleanup complete")
+    except Exception as e:
+        logger.error(f"Error during model cache cleanup: {e}")
 
 app = FastAPI(
     title="ModelRouter API",

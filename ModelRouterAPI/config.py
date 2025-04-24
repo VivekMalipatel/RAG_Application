@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     # Rate limiting
     RATE_LIMIT_ENABLED: bool = True
     REQUESTS_PER_MINUTE: int = 60
+    
+    # Device settings
+    PREFERRED_DEVICE: str = os.getenv("PREFERRED_DEVICE", "auto")  # Options: "auto", "cuda", "mps", "cpu"
+    CUDA_VISIBLE_DEVICES: str = os.getenv("CUDA_VISIBLE_DEVICES", "")
+    MPS_FALLBACK_TO_CPU: bool = True  # If MPS fails, fallback to CPU
+    DEVICE_MAP_STRATEGY: str = "auto"  # Options: "auto", "balanced", "sequential"
+    LOW_CPU_MEM_USAGE: bool = False    # For low memory systems
 
     class Config:
         env_file = ".env"

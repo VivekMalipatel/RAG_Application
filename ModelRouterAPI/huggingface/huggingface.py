@@ -9,10 +9,14 @@ import threading
 
 from config import settings
 from model_type import ModelType
+from huggingface.model_cache import ModelCache
+from core.device_utils import DeviceManager
 
 class HuggingFaceClient:
     """
     Unified client for interacting with Hugging Face models locally.
+    Uses a shared model cache to avoid loading duplicate models across requests.
+    
     Supports:
     - Text embeddings
     - Text generation
@@ -33,7 +37,7 @@ class HuggingFaceClient:
         **kwargs
     ):
         """
-        Initializes the Hugging Face client with local model loading.
+        Initializes the Hugging Face client with cached model loading.
         
         Args:
             model_name: Full model name (e.g., "mistralai/Mistral-7B-Instruct-v0.1")
@@ -60,20 +64,13 @@ class HuggingFaceClient:
         self.top_k = kwargs.get("top_k", 50)
         self.num_beams = kwargs.get("num_beams", 1)
         
-        # Determine device
-        self.device = (
-            device
-            if device
-            else ("cuda" if torch.cuda.is_available() 
-                  else "mps" if torch.backends.mps.is_available() 
-                  else "cpu")
-        )
+        # Determine device using the DeviceManager
+        self.device = device if device else DeviceManager.get_optimal_device()
         
         self.hf_token = settings.HUGGINGFACE_API_TOKEN
         
         self.model = None
         self.tokenizer = None
-        self.processor = None
         
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"Initializing Hugging Face client with model {model_name} on {self.device}")
@@ -83,48 +80,27 @@ class HuggingFaceClient:
             raise ValueError(f"Model {self.model_name} is not available on Hugging Face")
             
         try:
-            kwargs = {
-                "trust_remote_code": self.trust_remote_code,
-                "revision": "main",
-                "token": self.hf_token,
-                "device_map": self.device
-            }
-            
-            if model_type == ModelType.TEXT_GENERATION:
-                self._load_text_model(**kwargs)
-            elif model_type == ModelType.TEXT_EMBEDDING:
-                self._load_text_model(**kwargs)
-            elif model_type == ModelType.RERANKER:
-                self._load_reranker_model(**kwargs)
-            else:
-                raise ValueError(f"Unsupported model type: {model_type}")
+            # Get model and tokenizer from cache - it will load if not available
+            self._load_from_cache()
         except Exception as e:
             self.logger.error(f"Failed to load Hugging Face model {model_name}: {str(e)}")
             raise RuntimeError(f"Model initialization failed: {model_name}")
     
-    def _load_text_model(self, **kwargs):
-        """Loads a text generation or embedding model."""
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, token=self.hf_token)
-            self.model = AutoModel.from_pretrained(self.model_name, **kwargs)
-            self.model.eval()
-            self.model.to(self.device)
-            self.logger.info(f"Loaded text model: {self.model_name} on {self.device}")
-        except Exception as e:
-            self.logger.error(f"Text model loading failed: {str(e)}")
-            raise
-    
-    def _load_reranker_model(self, **kwargs):
-        """Loads a reranker model for document ranking."""
-        try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, token=self.hf_token)
-            self.model = AutoModel.from_pretrained(self.model_name, **kwargs)
-            self.model.eval()
-            self.model.to(self.device)
-            self.logger.info(f"Loaded reranker model: {self.model_name} on {self.device}")
-        except Exception as e:
-            self.logger.error(f"Reranker model loading failed: {str(e)}")
-            raise
+    def _load_from_cache(self):
+        """Load model and tokenizer from the shared model cache."""
+        # Get the model cache singleton
+        model_cache = ModelCache()
+        
+        # Load or get the model and tokenizer from cache
+        self.model, self.tokenizer = model_cache.get_model(
+            model_name=self.model_name,
+            model_type=self.model_type,
+            device=self.device,
+            token=self.hf_token,
+            trust_remote_code=self.trust_remote_code
+        )
+        
+        self.logger.info(f"Model {self.model_name} loaded from cache")
     
     def is_model_available(self) -> bool:
         """Check if the model is available on Hugging Face."""
