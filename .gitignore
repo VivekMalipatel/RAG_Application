@@ -20,3 +20,4 @@ Temp_Files/video/
 .vscode/launch.json
 .env
 ModelRouterAPI/.modelrouter/
+ModelRouterAPI/ollama/llama.cpp
