@@ -6,10 +6,16 @@ class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
     content: Optional[str] = None
     name: Optional[str] = None
+    refusal: Optional[Any] = None
+    annotations: Optional[List[Any]] = []
 
 # --- Request Body ---
 class ResponseFormat(BaseModel):
-    type: Literal["text", "json_object"] = "text"
+    type: Literal["text", "json_object", "json_schema"] = "text"
+    json_schema: Optional[Dict[str, Any]] = None
+    name: Optional[str] = None
+    strict: Optional[bool] = None
+    schema: Optional[Dict[str, Any]] = None
 
 class StreamOptions(BaseModel):
     include_usage: Optional[bool] = None
@@ -53,10 +59,22 @@ class ChatCompletionChoice(BaseModel):
     message: ChatMessage
     logprobs: Optional[Any] = None
 
+class TokenDetails(BaseModel):
+    cached_tokens: int = 0
+    audio_tokens: int = 0
+
+class CompletionTokenDetails(BaseModel):
+    reasoning_tokens: int = 0
+    audio_tokens: int = 0
+    accepted_prediction_tokens: int = 0
+    rejected_prediction_tokens: int = 0
+
 class UsageInfo(BaseModel):
     completion_tokens: int
     prompt_tokens: int
     total_tokens: int
+    prompt_tokens_details: Optional[TokenDetails] = None
+    completion_tokens_details: Optional[CompletionTokenDetails] = None
 
 class ChatCompletionResponse(BaseModel):
     id: str = Field(..., example="chatcmpl-123")
@@ -64,6 +82,7 @@ class ChatCompletionResponse(BaseModel):
     created: int = Field(..., example=1677652288) # Unix timestamp
     model: str = Field(..., example="gpt-3.5-turbo")
     system_fingerprint: Optional[str] = Field(None, example="fp_44709d6fcb")
+    service_tier: Optional[str] = Field("default", example="default")
     object: Literal["chat.completion"] = "chat.completion"
     usage: UsageInfo
 
@@ -71,6 +90,7 @@ class ChatCompletionResponse(BaseModel):
 class ChatCompletionChunkDelta(BaseModel):
     content: Optional[str] = None
     role: Optional[Literal["system", "user", "assistant"]] = None
+    refusal: Optional[Any] = None
 
 class ChatCompletionChunkChoice(BaseModel):
     delta: ChatCompletionChunkDelta
@@ -84,5 +104,6 @@ class ChatCompletionChunkResponse(BaseModel):
     created: int = Field(..., example=1677652288) # Unix timestamp
     model: str = Field(..., example="gpt-3.5-turbo")
     system_fingerprint: Optional[str] = Field(None, example="fp_44709d6fcb")
+    service_tier: Optional[str] = Field("default", example="default")
     object: Literal["chat.completion.chunk"] = "chat.completion.chunk"
     usage: Optional[UsageInfo] = None # Only in final chunk if stream_options.include_usage is True
