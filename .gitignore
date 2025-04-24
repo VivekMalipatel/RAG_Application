@@ -21,3 +21,5 @@ Temp_Files/video/
 .env
 ModelRouterAPI/.modelrouter/
 ModelRouterAPI/ollama/llama.cpp
+ModelRouterAPI/huggingface/.models
+ModelRouterAPI/tmpvpzmf1z4

@@ -137,7 +137,14 @@ class ModelRouter:
             raise UnsupportedFeatureError(f"Provider {self.provider} does not support text embedding")
             
         try:
-            return await self.client.embed_text(texts)
+            # Check if the client's embed_text method is a coroutine function
+            import inspect
+            if inspect.iscoroutinefunction(self.client.embed_text):
+                # If it's async, use await
+                return await self.client.embed_text(texts)
+            else:
+                # If it's not async, call it directly
+                return self.client.embed_text(texts)
         except Exception as e:
             self.logger.error(f"Error generating embeddings with {self.provider.value}: {str(e)}")
             raise
@@ -153,7 +160,14 @@ class ModelRouter:
             raise UnsupportedFeatureError(f"Provider {self.provider} does not support document reranking")
             
         try:
-            return await self.client.rerank_documents(query, documents, max_documents)
+            # Check if the client's rerank_documents method is a coroutine function
+            import inspect
+            if inspect.iscoroutinefunction(self.client.rerank_documents):
+                # If it's async, use await
+                return await self.client.rerank_documents(query, documents, max_documents)
+            else:
+                # If it's not async, call it directly
+                return self.client.rerank_documents(query, documents, max_documents)
         except Exception as e:
             self.logger.error(f"Error reranking documents with {self.provider.value}: {str(e)}")
             raise

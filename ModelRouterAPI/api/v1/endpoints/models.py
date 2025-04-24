@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 # Embedding and reranker models that should always be included
 CUSTOM_MODELS = {
     # Embedding model
-    "nomic-ai/colnomic-embed-multimodal-7b": {
-        "id": "nomic-ai/colnomic-embed-multimodal-7b",
+    "nomic-ai/colnomic-embed-multimodal-3b": {
+        "id": "nomic-ai/colnomic-embed-multimodal-3b",
         "created": int(time.time()) - 50000,
         "owned_by": "huggingface",
         "type": "embedding"

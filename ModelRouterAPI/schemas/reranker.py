@@ -20,11 +20,12 @@ class RerankerDocument(BaseModel):
     object: str = "reranked_document"
     document: Optional[str] = None
     index: int = Field(..., description="Original index of the document in the input array")
-    relevance_score: float = Field(..., description="Relevance score (higher is better)")
+    relevance_score: Optional[float] = None # Make score optional
     
 class RerankerResponse(BaseModel):
     """Response schema for document reranking"""
     object: str = "rerank-result"
     model: str
     data: List[RerankerDocument] = Field(..., description="Reranked documents with scores")
+    order: List[int] = Field(..., description="List of original document indices sorted by relevance")
     usage: UsageInfo

@@ -15,7 +15,8 @@ class EmbeddingRequest(BaseModel):
 
 class EmbeddingData(BaseModel):
     object: str = "embedding"
-    embedding: List[float]
+    # Allow for both flat embeddings and nested embeddings from Nomic multimodal models
+    embedding: Union[List[float], List[List[float]]]
     index: int
 
 class EmbeddingResponse(BaseModel):

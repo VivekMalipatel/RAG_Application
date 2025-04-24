@@ -139,7 +139,7 @@ class ModelSelector:
         """
         # For embedding and reranker types, we use hardcoded Hugging Face models
         if model_type == ModelType.TEXT_EMBEDDING:
-            return Provider.HUGGINGFACE, "nomic-ai/colnomic-embed-multimodal-7b"
+            return Provider.HUGGINGFACE, "nomic-ai/colnomic-embed-multimodal-3b"
         
         if model_type == ModelType.RERANKER:
             return Provider.HUGGINGFACE, "jinaai/jina-colbert-v2"

@@ -49,30 +49,27 @@ async def rerank_documents(
             model_type=ModelType.RERANKER
         )
         
-        # Rerank documents
-        reranking_results = await model_router.rerank_documents(
+        # Rerank documents - this now returns a list of sorted indices
+        sorted_indices = await model_router.rerank_documents(
             query=request.query,
             documents=request.documents,
             max_documents=request.max_chunks
         )
         
-        # Prepare response data
+        # Prepare response data using the sorted indices
         data = []
-        for result in reranking_results:
-            doc_index = next((i for i, doc in enumerate(request.documents) 
-                           if doc == result["document"]), 0)
-                           
+        for rank, original_index in enumerate(sorted_indices):
             # Create reranker document with or without original text
             if request.return_documents:
                 data.append(RerankerDocument(
-                    document=result["document"],
-                    index=doc_index,
-                    relevance_score=result["relevance_score"]
+                    document=request.documents[original_index], # Get doc using original index
+                    index=original_index,
+                    # relevance_score is omitted as it's not provided by the client
                 ))
             else:
                 data.append(RerankerDocument(
-                    index=doc_index,
-                    relevance_score=result["relevance_score"]
+                    index=original_index
+                    # relevance_score is omitted
                 ))
         
         # Calculate token usage (rough estimation)
@@ -102,6 +99,7 @@ async def rerank_documents(
         return RerankerResponse(
             model=request.model,
             data=data,
+            order=sorted_indices, # Add the sorted indices list
             usage=UsageInfo(
                 prompt_tokens=total_tokens,
                 completion_tokens=0,
@@ -127,9 +125,11 @@ def log_usage(
 ):
     """Log API usage to database"""
     try:
+        # Use datetime object for timestamp
+        import datetime
         usage_record = Usage(
             api_key_id=api_key_id,
-            timestamp=time.time(),
+            timestamp=datetime.datetime.utcnow(), # Use datetime object
             endpoint=endpoint,
             model=model,
             provider=provider,
@@ -144,3 +144,6 @@ def log_usage(
         db.commit()
     except Exception as e:
         db.rollback()
+        # Log the error properly
+        import logging
+        logging.error(f"Failed to log usage: {str(e)}")
