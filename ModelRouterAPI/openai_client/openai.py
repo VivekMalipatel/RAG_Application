@@ -133,16 +133,27 @@ class OpenAIClient:
             json_schema = schema
             
         try:
-            # Use response_format if available (newer OpenAI API)
+            # Create system prompt with schema information
+            system_prompt = f"{self.system_prompt}\nYou must respond with valid JSON conforming to the provided schema."
+            
+            # Format the response_format parameter according to OpenAI API requirements
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "response_schema",
+                    "schema": json_schema
+                }
+            }
+            
             params = {
                 "model": self.model_name,
                 "messages": [
-                    {"role": "system", "content": f"{self.system_prompt}\nYou must respond with valid JSON conforming to the provided schema."},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": self.temperature,
                 "top_p": self.top_p,
-                "response_format": {"type": "json_object"}
+                "response_format": response_format
             }
             
             if max_tokens:
@@ -153,7 +164,7 @@ class OpenAIClient:
             
             # Parse JSON response
             try:
-                # Extract JSON from code blocks if needed
+                # Extract JSON from code blocks if needed (should be less common with response_format)
                 if "```json" in content:
                     content = content.split("```json")[1].split("```")[0].strip()
                 elif "```" in content:

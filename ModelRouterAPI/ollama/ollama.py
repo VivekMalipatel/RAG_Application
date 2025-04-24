@@ -57,9 +57,9 @@ class OllamaClient:
         
         # Connection settings - increased for more reliable connections
         self.api_base_url = settings.OLLAMA_BASE_URL
-        self.max_retries = kwargs.get("max_retries", 4)  # Increased from 3 to 4
-        self.retry_delay = kwargs.get("retry_delay", 2.0)  # Increased from 1.0 to 2.0 seconds
-        self.connection_timeout = kwargs.get("connection_timeout", 30.0)  # Increased from 10.0 to 30.0 seconds
+        self.max_retries = kwargs.get("max_retries", 4) 
+        self.retry_delay = kwargs.get("retry_delay", 2.0) 
+        self.connection_timeout = kwargs.get("connection_timeout", 30.0)
         
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"Initialized Ollama client with model {hf_repo} at {self.api_base_url}")
@@ -477,180 +477,167 @@ class OllamaClient:
         prompt: str, 
         schema: Union[Dict[str, Any], Type[BaseModel]], 
         max_tokens: Optional[int] = None,
-        stream: bool = False
+        stream: bool = False # Note: stream is effectively ignored for structured output
     ) -> Dict[str, Any]:
         """
-        Generate a structured JSON response using Ollama's API.
+        Generate a structured JSON response using Ollama's /api/generate endpoint,
+        passing the schema directly in the format parameter. Parses the response and
+        optionally validates against a Pydantic schema.
         
         Args:
             prompt: Text prompt to generate structured response for
-            schema: Either a Pydantic model class or a JSON schema dictionary
+            schema: Either a Pydantic model class or a JSON schema dictionary.
             max_tokens: Maximum number of tokens to generate
             stream: Whether to enable streaming (forced to False for structured outputs)
             
         Returns:
-            Structured data according to the provided schema
+            A dictionary containing the parsed (and potentially validated) JSON data, 
+            or an error dictionary on failure.
         """
-        # Structured output doesn't support streaming
         if stream:
-            self.logger.warning("Streaming not supported for structured outputs, falling back to non-streaming")
+            self.logger.warning("Streaming is not supported for structured JSON output with Ollama, using non-streaming.")
         
-        # Extract schema from Pydantic model if provided
-        if isinstance(schema, type) and issubclass(schema, BaseModel):
-            json_schema = schema.model_json_schema()
+        is_pydantic_schema = isinstance(schema, type) and issubclass(schema, BaseModel)
+        # Extract schema definition
+        if is_pydantic_schema:
+            json_schema_def = schema.model_json_schema()
         else:
-            json_schema = schema
+            json_schema_def = schema # Assume it's already a dict
             
-        # Build instruction and system prompt
-        schema_instruction = f"You must respond with a valid JSON object that conforms to this JSON schema: {json.dumps(json_schema)}"
-        enhanced_system_prompt = f"{self.system_prompt or 'You are a helpful AI assistant.'}\n\n{schema_instruction}\n\nYour response should ONLY contain the JSON object and nothing else."
-        
-        # Build request payload for /api/chat endpoint
-        # Ollama newer versions have more support for structured generation via chat
-        payload = {
-            "model": self.model_name,
-            "messages": [
-                {"role": "system", "content": enhanced_system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            "options": {
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-                "top_k": self.top_k,
-                "repeat_penalty": self.repeat_penalty
-            },
-            "format": "json"  # Request JSON format if supported by the model
+        # Common options
+        options = {
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "top_k": self.top_k,
+            "repeat_penalty": self.repeat_penalty
         }
-        
         if max_tokens or self.max_tokens:
-            payload["options"]["num_predict"] = max_tokens if max_tokens else self.max_tokens
+            options["num_predict"] = max_tokens if max_tokens else self.max_tokens
             
-        # Try up to max_retries times
+        # Construct prompt suitable for generate endpoint with schema in format
+        generate_prompt = f"{self.system_prompt or 'You are a helpful AI assistant.'}\n\nUser: {prompt}\n\nAssistant (Respond using JSON conforming to the provided schema):"
+        
+        # Construct payload for /api/generate
+        generate_payload = {
+            "model": self.model_name,
+            "prompt": generate_prompt,
+            "options": options,
+            "format": json_schema_def, # Pass the schema dictionary directly
+            "stream": False
+        }
+
+        last_error = None
+        last_response = None
+
+        # Try up to max_retries times for the API call
         for attempt in range(self.max_retries):
+            response = None
+            response_data = None
             try:
                 async with httpx.AsyncClient(timeout=60.0) as client:
-                    # Try the chat endpoint first (newer Ollama versions)
+                    self.logger.debug(f"Attempting structured output via /api/generate (attempt {attempt+1}/{self.max_retries})")
                     response = await client.post(
-                        f"{self.api_base_url}/api/chat",
-                        json=payload,
+                        f"{self.api_base_url}/api/generate",
+                        json=generate_payload,
                         timeout=60.0
                     )
-                    
-                    # If chat endpoint fails, fall back to generate endpoint
-                    if response.status_code != 200:
-                        self.logger.warning(f"Chat endpoint failed with {response.status_code}, falling back to generate endpoint")
-                        # Modify payload for generate endpoint
-                        generate_payload = {
-                            "model": self.model_name,
-                            "prompt": f"{enhanced_system_prompt}\n\nUser: {prompt}\n\nAssistant:",
-                            "stream": False,
-                            "options": payload["options"],
-                            "format": "json"
-                        }
-                        
-                        response = await client.post(
-                            f"{self.api_base_url}/api/generate",
-                            json=generate_payload,
-                            timeout=60.0
-                        )
-                    
-                    if response.status_code != 200:
-                        error_detail = response.text
-                        self.logger.error(f"Ollama API error: {response.status_code} - {error_detail}")
-                        if attempt < self.max_retries - 1:
-                            self.logger.info(f"Retrying... (attempt {attempt+1}/{self.max_retries})")
-                            await asyncio.sleep(self.retry_delay)
-                            continue
-                        return {"error": f"API error: {response.status_code} - {error_detail}"}
-                    
-                    # Process the response based on endpoint
-                    response_data = response.json()
-                    
-                    # Extract the JSON content from the response
-                    content = ""
-                    if "message" in response_data:
-                        # Response from chat endpoint
-                        content = response_data.get("message", {}).get("content", "")
+                    last_response = response # Store last response for error reporting
+
+                    if response.status_code == 200:
+                        response_data = response.json()
+                        self.logger.info("Received successful response from /api/generate.")
+                        break # Exit retry loop on successful API call
                     else:
-                        # Response from generate endpoint
-                        content = response_data.get("response", "")
-                    
-                    # Parse the JSON content
-                    try:
-                        # Extract JSON if it's wrapped in backticks
-                        if "```json" in content:
-                            parts = content.split("```json")
-                            if len(parts) > 1:
-                                # Get the part after ```json
-                                json_part = parts[1].split("```")[0].strip()
-                                structured_data = json.loads(json_part)
-                            else:
-                                structured_data = json.loads(content)
-                        elif "```" in content:
-                            parts = content.split("```")
-                            if len(parts) > 1:
-                                # Get the part between ``` pairs
-                                json_part = parts[1].strip()
-                                structured_data = json.loads(json_part)
-                            else:
-                                structured_data = json.loads(content)
-                        else:
-                            # Try parsing the content directly
-                            structured_data = json.loads(content)
-                        
-                        # Validate against schema if a Pydantic model was provided
-                        if isinstance(schema, type) and issubclass(schema, BaseModel):
-                            try:
-                                # This will raise ValidationError if validation fails
-                                validated_data = schema.model_validate(structured_data)
-                                return validated_data.model_dump()
-                            except Exception as e:
-                                self.logger.error(f"Schema validation error: {str(e)}")
-                                return {"error": f"Schema validation error: {str(e)}", "data": structured_data}
-                        
-                        return structured_data
-                    
-                    except json.JSONDecodeError as e:
-                        self.logger.error(f"Failed to parse response as JSON: {e}\nContent: {content}")
-                        
-                        # Try a second attempt with a more aggressive JSON extraction
-                        try:
-                            # Look for anything that resembles a JSON object
-                            import re
-                            json_pattern = r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}'
-                            matches = re.findall(json_pattern, content)
-                            if matches:
-                                structured_data = json.loads(matches[0])
-                                self.logger.info("Successfully extracted JSON with regex")
-                                return structured_data
-                        except Exception:
-                            pass
-                            
-                        if attempt < self.max_retries - 1:
-                            self.logger.info(f"JSON parsing failed, retrying... (attempt {attempt+1}/{self.max_retries})")
-                            await asyncio.sleep(self.retry_delay)
-                            continue
-                        
-                        return {
-                            "error": f"Failed to parse JSON: {str(e)}",
-                            "raw_content": content
-                        }
-                
+                        last_error = f"API returned status {response.status_code}"
+                        self.logger.warning(f"/api/generate failed with status {response.status_code}. Response: {response.text}")
+                        # Continue to retry logic
+
             except (httpx.ConnectTimeout, httpx.ReadTimeout) as e:
-                self.logger.warning(f"Timeout error: {str(e)}")
-                if attempt < self.max_retries - 1:
-                    self.logger.info(f"Retrying... (attempt {attempt+1}/{self.max_retries})")
-                    await asyncio.sleep(self.retry_delay)
-                    continue
-                return {"error": f"Connection timeout after {self.max_retries} attempts"}
-                
+                last_error = f"Timeout contacting API: {e}"
+                self.logger.warning(f"{last_error} on attempt {attempt+1}")
+                # Continue to retry logic
             except Exception as e:
-                self.logger.error(f"Error with Ollama API: {str(e)}")
-                return {"error": str(e)}
-        
-        # If we've exhausted all retries
-        return {"error": "Failed to generate structured output after multiple attempts"}
-    
+                last_error = f"Unexpected error contacting API: {e}"
+                self.logger.error(f"{last_error} on attempt {attempt+1}", exc_info=True)
+                # Continue to retry logic
+
+            # If this wasn't the last attempt, wait before retrying
+            if attempt < self.max_retries - 1:
+                self.logger.info(f"Retrying API call for structured generation... (attempt {attempt+1}/{self.max_retries})")
+                await asyncio.sleep(self.retry_delay)
+            else:
+                # Last attempt failed API call
+                error_msg = f"Failed to get successful response after {self.max_retries} attempts. Last error: {last_error}"
+                if last_response:
+                    try:
+                        error_msg += f" Last status: {last_response.status_code} - {last_response.text}"
+                    except Exception:
+                         error_msg += f" Last status: {last_response.status_code}"
+                self.logger.error(error_msg)
+                return {"error": error_msg}
+
+        # --- Process successful response ---
+        if response_data:
+            content = response_data.get("response", "")
+            self.logger.debug(f"Raw content received: {content}")
+            content = content.strip()
+
+            # Attempt to parse the JSON content
+            structured_data = None
+            parse_error = None
+            try:
+                # First, try direct parsing
+                structured_data = json.loads(content)
+                self.logger.debug("Successfully parsed JSON directly.")
+            except json.JSONDecodeError as e1:
+                self.logger.warning(f"Direct JSON parsing failed: {e1}. Attempting extraction.")
+                # If direct parsing fails, try extracting from potential wrapping characters
+                try:
+                    start_index = content.find('{')
+                    end_index = content.rfind('}')
+                    if start_index != -1 and end_index != -1 and start_index < end_index:
+                        json_substring = content[start_index : end_index + 1]
+                        structured_data = json.loads(json_substring)
+                        self.logger.info("Successfully parsed JSON after extraction.")
+                    else:
+                        parse_error = e1 # Keep original error if extraction indices are bad
+                        self.logger.error("Could not find valid JSON object boundaries '{...}'.")
+                except json.JSONDecodeError as e2:
+                    parse_error = e2 # Keep the error from the second parse attempt
+                    self.logger.error(f"JSON extraction parsing failed: {e2}")
+
+            # If parsing failed after all attempts
+            if structured_data is None:
+                self.logger.error(f"Failed to parse response as JSON. Error: {parse_error}")
+                return {
+                    "error": f"Failed to parse JSON: {parse_error}",
+                    "raw_content": content
+                }
+            else:
+                # --- Validation (Optional but recommended) ---
+                if is_pydantic_schema:
+                    try:
+                        # Validate the parsed data against the Pydantic model
+                        validated_data = schema.model_validate(structured_data)
+                        self.logger.info("JSON response successfully parsed and validated.")
+                        return validated_data.model_dump() # Return validated and serialized data
+                    except Exception as validation_error:
+                        # Log validation error but return the parsed data anyway, flagging the error
+                        self.logger.error(f"Schema validation failed: {validation_error}")
+                        return {
+                            "error": f"Schema validation failed: {validation_error}",
+                            "parsed_data": structured_data # Return the data that was parsed
+                        }
+                else:
+                    # If no Pydantic schema provided, return the parsed JSON directly
+                    self.logger.info("JSON response successfully parsed (no Pydantic validation performed).")
+                    return structured_data
+        else:
+             # Should be unreachable if API call succeeded but response_data is None
+             self.logger.error("API call succeeded but response_data is missing.")
+             return {"error": "Internal error: Missing response data after successful API call."}
+
+
     def set_system_prompt(self, system_prompt: str):
         """Update the system prompt."""
         self.system_prompt = system_prompt
