@@ -24,6 +24,9 @@ class OllamaClient:
         top_p: float = 1.0,
         max_tokens: Optional[int] = None,
         stream: bool = False,
+        frequency_penalty: float = 0.0,
+        presence_penalty: float = 0.0,
+        stop: Optional[Union[str, List[str]]] = None,
         **kwargs
     ):
         """
@@ -44,16 +47,19 @@ class OllamaClient:
         self.top_p = top_p
         self.max_tokens = max_tokens
         self.stream = stream
+        self.frequency_penalty = frequency_penalty
+        self.presence_penalty = presence_penalty
+        self.stop = stop
         
         # Extract additional parameters
         self.top_k = kwargs.get("top_k", 40)
         self.repeat_penalty = kwargs.get("repeat_penalty", 1.1)
         
-        # Connection settings
+        # Connection settings - increased for more reliable connections
         self.api_base_url = settings.OLLAMA_BASE_URL
-        self.max_retries = kwargs.get("max_retries", 3)
-        self.retry_delay = kwargs.get("retry_delay", 1.0)  # seconds
-        self.connection_timeout = kwargs.get("connection_timeout", 10.0)  # seconds
+        self.max_retries = kwargs.get("max_retries", 4)  # Increased from 3 to 4
+        self.retry_delay = kwargs.get("retry_delay", 2.0)  # Increased from 1.0 to 2.0 seconds
+        self.connection_timeout = kwargs.get("connection_timeout", 30.0)  # Increased from 10.0 to 30.0 seconds
         
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"Initialized Ollama client with model {hf_repo} at {self.api_base_url}")
@@ -86,8 +92,25 @@ class OllamaClient:
                     response = client.get(f"{self.api_base_url}/api/tags")
                     if response.status_code == 200:
                         models = response.json().get("models", [])
+                        
+                        # Get all model names
                         model_names = [model.get("name", "") for model in models]
-                        return self.model_name in model_names
+                        self.logger.info(f"Found {len(model_names)} Ollama models")
+                        
+                        # Check for exact match
+                        if self.model_name in model_names:
+                            self.logger.info(f"Found exact match for model: {self.model_name}")
+                            return True
+                        
+                        # Get just the base model names without tags
+                        base_model_names = [name.split(':')[0] for name in model_names]
+                        if self.model_name.split(':')[0] in base_model_names:
+                            self.logger.info(f"Found base model match for: {self.model_name}")
+                            return True
+                            
+                        self.logger.warning(f"Model {self.model_name} not found in available models")
+                        return False
+                    
                     self.logger.warning(f"Failed to check model availability, status: {response.status_code}")
                     return False
             except httpx.ConnectTimeout:
@@ -104,8 +127,11 @@ class OllamaClient:
     
     async def generate_text(
         self, 
-        prompt: str,
+        prompt: Union[str, List[Dict[str, Any]]],
         max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[Union[str, List[str]]] = None,
         stream: Optional[bool] = None
     ) -> Union[str, AsyncGenerator[str, None]]:
         """
@@ -121,15 +147,181 @@ class OllamaClient:
         """
         stream = stream if stream is not None else self.stream
         max_tokens = max_tokens if max_tokens is not None else self.max_tokens
+        temperature = temperature if temperature is not None else self.temperature
+        top_p = top_p if top_p is not None else self.top_p
+        stop = stop if stop is not None else self.stop
         
+        # Use simplified model name if requested
+        model_name = self.model_name
+        # Strip off any tag/version to try a more basic model name
+        if ":" in model_name and not self.is_model_available():
+            basic_model_name = model_name.split(":")[0]
+            self.logger.info(f"Model {model_name} not found, trying with basic name {basic_model_name}")
+            model_name = basic_model_name
+        
+        # Check if prompt is in message format
+        if isinstance(prompt, list):
+            # Handle messages format by using chat endpoint
+            return await self._generate_from_messages(
+                messages=prompt,
+                model_name=model_name,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                stop=stop,
+                stream=stream
+            )
+        else:
+            # Regular prompt handling with generate endpoint
+            return await self._generate_from_prompt(
+                prompt=prompt,
+                model_name=model_name,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                stop=stop,
+                stream=stream
+            )
+    
+    async def _generate_from_messages(
+        self, 
+        messages: List[Dict[str, Any]],
+        model_name: str,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        stream: bool = False
+    ) -> Union[str, AsyncGenerator[str, None]]:
+        """Generate text from messages format using Ollama's chat API"""
+        
+        # Convert any Pydantic model objects to dictionaries
+        serializable_messages = []
+        for message in messages:
+            if hasattr(message, 'model_dump'):
+                serializable_messages.append(message.model_dump())
+            else:
+                serializable_messages.append(message)
+        
+        payload = {
+            "model": model_name,
+            "messages": serializable_messages,
+            "stream": stream,
+            "options": {
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": self.top_k,
+                "repeat_penalty": self.repeat_penalty
+            }
+        }
+        
+        if max_tokens:
+            payload["options"]["num_predict"] = max_tokens
+            
+        if stop:
+            payload["options"]["stop"] = stop if isinstance(stop, list) else [stop]
+            
+        # Handle streaming
+        if stream:
+            async def generate_stream():
+                client = httpx.AsyncClient(timeout=60.0)
+                try:
+                    for attempt in range(self.max_retries):
+                        try:
+                            async with client.stream(
+                                "POST", 
+                                f"{self.api_base_url}/api/chat",
+                                json=payload, 
+                                timeout=60.0
+                            ) as response:
+                                if response.status_code != 200:
+                                    if attempt < self.max_retries - 1:
+                                        await asyncio.sleep(self.retry_delay)
+                                        continue
+                                    yield ""
+                                    return
+                                    
+                                # Stream the response
+                                async for line in response.aiter_lines():
+                                    if line:
+                                        try:
+                                            chunk_data = json.loads(line)
+                                            if "message" in chunk_data and "content" in chunk_data["message"]:
+                                                yield chunk_data["message"]["content"]
+                                        except json.JSONDecodeError:
+                                            pass
+                                
+                                break
+                                
+                        except (httpx.ConnectTimeout, httpx.ReadTimeout):
+                            if attempt < self.max_retries - 1:
+                                await asyncio.sleep(self.retry_delay)
+                                continue
+                            yield ""
+                            return
+                        except Exception:
+                            yield ""
+                            return
+                finally:
+                    await client.aclose()
+            
+            return generate_stream()
+        
+        # Non-streaming
+        else:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                for attempt in range(self.max_retries):
+                    try:
+                        response = await client.post(
+                            f"{self.api_base_url}/api/chat",
+                            json=payload,
+                            timeout=60.0
+                        )
+                        
+                        if response.status_code != 200:
+                            if attempt < self.max_retries - 1:
+                                await asyncio.sleep(self.retry_delay)
+                                continue
+                            return ""
+                            
+                        response_data = response.json()
+                        if "message" in response_data and "content" in response_data["message"]:
+                            return response_data["message"]["content"]
+                        return ""
+                        
+                    except (httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+                        self.logger.error(f"Connection timeout to Ollama API: {str(e)}")
+                        if attempt < self.max_retries - 1:
+                            await asyncio.sleep(self.retry_delay)
+                            continue
+                        self.logger.error(f"Failed to connect to Ollama API after {self.max_retries} attempts")
+                        return ""
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error connecting to Ollama API: {str(e)}")
+                        return ""
+                
+                return ""
+    
+    async def _generate_from_prompt(
+        self, 
+        prompt: str,
+        model_name: str,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        stream: bool = False
+    ) -> Union[str, AsyncGenerator[str, None]]:
+        """Generate text from a single prompt using Ollama's generate API"""
         # Build request payload
         payload = {
-            "model": self.model_name,
+            "model": model_name,
             "prompt": prompt,
             "stream": stream,
             "options": {
-                "temperature": self.temperature,
-                "top_p": self.top_p,
+                "temperature": temperature,
+                "top_p": top_p,
                 "top_k": self.top_k,
                 "repeat_penalty": self.repeat_penalty
             }
@@ -140,12 +332,15 @@ class OllamaClient:
             
         if max_tokens:
             payload["options"]["num_predict"] = max_tokens
+            
+        if stop:
+            payload["options"]["stop"] = stop if isinstance(stop, list) else [stop]
         
-        # Setup httpx client with retry capability
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            # Handle streaming response
-            if stream:
-                async def generate_stream():
+        # Handle streaming
+        if stream:
+            async def generate_stream():
+                client = httpx.AsyncClient(timeout=60.0)
+                try:
                     for attempt in range(self.max_retries):
                         try:
                             async with client.stream(
@@ -155,46 +350,41 @@ class OllamaClient:
                                 timeout=60.0
                             ) as response:
                                 if response.status_code != 200:
-                                    error_detail = await response.text()
-                                    self.logger.error(f"Ollama API error: {response.status_code} - {error_detail}")
                                     if attempt < self.max_retries - 1:
-                                        self.logger.info(f"Retrying... (attempt {attempt+1}/{self.max_retries})")
                                         await asyncio.sleep(self.retry_delay)
                                         continue
-                                    yield f"Error: {response.status_code} - {error_detail}"
+                                    yield ""
                                     return
                                     
-                                # Stream the response as it comes
-                                async for chunk in response.aiter_lines():
-                                    if not chunk:
-                                        continue
-                                    try:
-                                        chunk_data = json.loads(chunk)
-                                        if "response" in chunk_data:
-                                            yield chunk_data["response"]
-                                    except json.JSONDecodeError:
-                                        yield chunk  # In case it's not valid JSON
+                                # Stream the response
+                                async for line in response.aiter_lines():
+                                    if line:
+                                        try:
+                                            chunk_data = json.loads(line)
+                                            if "response" in chunk_data:
+                                                yield chunk_data["response"]
+                                        except json.JSONDecodeError:
+                                            pass
                                 
-                                # If we got here, the request succeeded
                                 break
                                 
-                        except (httpx.ConnectTimeout, httpx.ReadTimeout) as e:
-                            self.logger.warning(f"Timeout during streaming request: {str(e)}")
+                        except (httpx.ConnectTimeout, httpx.ReadTimeout):
                             if attempt < self.max_retries - 1:
-                                self.logger.info(f"Retrying... (attempt {attempt+1}/{self.max_retries})")
                                 await asyncio.sleep(self.retry_delay)
                                 continue
-                            yield f"Error: Connection timeout after {self.max_retries} attempts"
+                            yield ""
                             return
-                        except Exception as e:
-                            self.logger.error(f"Error during streaming request: {str(e)}")
-                            yield f"Error: {str(e)}"
+                        except Exception:
+                            yield ""
                             return
-                
-                return generate_stream()
+                finally:
+                    await client.aclose()
             
-            # Handle non-streaming response
-            else:
+            return generate_stream()
+        
+        # Non-streaming
+        else:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 for attempt in range(self.max_retries):
                     try:
                         response = await client.post(
@@ -204,31 +394,24 @@ class OllamaClient:
                         )
                         
                         if response.status_code != 200:
-                            error_detail = response.text
-                            self.logger.error(f"Ollama API error: {response.status_code} - {error_detail}")
                             if attempt < self.max_retries - 1:
-                                self.logger.info(f"Retrying... (attempt {attempt+1}/{self.max_retries})")
                                 await asyncio.sleep(self.retry_delay)
                                 continue
-                            return f"Error: {response.status_code} - {error_detail}"
+                            return ""
                             
                         response_data = response.json()
                         return response_data.get("response", "")
                         
-                    except (httpx.ConnectTimeout, httpx.ReadTimeout) as e:
-                        self.logger.warning(f"Timeout error: {str(e)}")
+                    except (httpx.ConnectTimeout, httpx.ReadTimeout):
                         if attempt < self.max_retries - 1:
-                            self.logger.info(f"Retrying... (attempt {attempt+1}/{self.max_retries})")
                             await asyncio.sleep(self.retry_delay)
                             continue
-                        return f"Error: Connection timeout after {self.max_retries} attempts"
+                        return ""
                         
-                    except Exception as e:
-                        self.logger.error(f"Error with Ollama API: {str(e)}")
-                        return f"Error: {str(e)}"
+                    except Exception:
+                        return ""
                 
-                # If we've exhausted all retries
-                return "Error: Failed to generate text after multiple attempts"
+                return ""
     
     async def embed_text(self, texts: List[str]) -> List[List[float]]:
         """
@@ -471,3 +654,19 @@ class OllamaClient:
     def set_system_prompt(self, system_prompt: str):
         """Update the system prompt."""
         self.system_prompt = system_prompt
+
+    async def list_available_models(self) -> List[str]:
+        """List all available models in Ollama server."""
+        try:
+            async with httpx.AsyncClient(timeout=self.connection_timeout) as client:
+                response = await client.get(f"{self.api_base_url}/api/tags")
+                if response.status_code == 200:
+                    models = response.json().get("models", [])
+                    model_names = [model.get("name", "") for model in models]
+                    self.logger.info(f"Found {len(model_names)} available Ollama models")
+                    return model_names
+                self.logger.warning(f"Failed to get models, status: {response.status_code}")
+                return []
+        except Exception as e:
+            self.logger.error(f"Error listing available models: {str(e)}")
+            return []

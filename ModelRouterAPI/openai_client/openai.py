@@ -1,48 +1,31 @@
 import logging
 import json
-import os
 from typing import Optional, List, Union, AsyncGenerator, Dict, Any, Type
 from pydantic import BaseModel
 from openai import AsyncOpenAI, APIError
 from config import settings
 import asyncio
+import nest_asyncio
 
 class OpenAIClient:
-    """
-    Unified OpenAI client supporting:
-    - Text generation (GPT-4, GPT-3.5, DeepSeek)
-    - Text embeddings (text-embedding-ada-002)
-    - Image generation (DALL·E)
-    - Audio transcription (Whisper)
-    """
+    """Client for interacting with OpenAI's API"""
 
     def __init__(
         self,
         model_name: str = "gpt-4o-mini",
         system_prompt: Optional[str] = "You are a helpful AI assistant.",
         temperature: float = 0.7,
-        top_p: float = 0.9,
-        max_tokens: int = None,
-        stream: bool = False
+        top_p: float = 1.0,
+        max_tokens: Optional[int] = None,
+        stream: bool = False,
+        frequency_penalty: float = 0.0,
+        presence_penalty: float = 0.0,
+        stop: Optional[Union[str, List[str]]] = None,
+        **kwargs
     ):
-        """
-        Initializes an OpenAI client with customized model settings.
-
-        Args:
-            model_name (str): Model name (e.g., "gpt-4-turbo", "text-embedding-ada-002").
-            system_prompt (Optional[str]): Custom system instructions.
-            temperature (float): Controls randomness in generation.
-            top_p (float): Probability mass for nucleus sampling.
-            max_tokens (int): Maximum response length.
-            frequency_penalty (float): Penalize repeating words.
-            presence_penalty (float): Encourage diversity.
-            repetition_penalty (float): Adjust repetition tendency.
-            image_quality (str): Image quality setting for DALL·E.
-            image_style (str): Image style setting for DALL·E.
-        """
         self.client = AsyncOpenAI(
             api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_API_URL
+            base_url=settings.OPENAI_BASE_URL
         )
         self.model_name = model_name
         self.system_prompt = system_prompt
@@ -50,390 +33,213 @@ class OpenAIClient:
         self.top_p = top_p
         self.max_tokens = max_tokens
         self.stream = stream
+        self.frequency_penalty = frequency_penalty
+        self.presence_penalty = presence_penalty
+        self.stop = stop
+        self.logger = logging.getLogger(__name__)
 
-        # Ensure the model is available before proceeding
-        if not self.is_model_available():
-            raise ValueError(f"Model {self.model_name} is not supported by OpenAI.")
-
-    async def generate_text(self, prompt: str, max_tokens: Optional[int] = None, stream: bool = None) -> Union[str, AsyncGenerator[str, None]]:
-        """
-        Generates a response using OpenAI models (GPT-4, GPT-3.5, DeepSeek).
-        """
+    async def generate_text(
+        self, 
+        prompt: Union[str, List[Dict[str, Any]]],
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        stream: Optional[bool] = None
+    ) -> Union[str, AsyncGenerator[str, None]]:
+        """Generate text using OpenAI API"""
         stream = stream if stream is not None else self.stream
+        max_tokens = max_tokens if max_tokens is not None else self.max_tokens
+        temperature = temperature if temperature is not None else self.temperature
+        top_p = top_p if top_p is not None else self.top_p
+        stop = stop if stop is not None else self.stop
         
-        if stream:
-            return self._generate_stream(prompt, max_tokens)
+        # Prepare messages from prompt
+        if isinstance(prompt, list):
+            # Format messages
+            messages = []
+            for msg in prompt:
+                message_copy = dict(msg)
+                if message_copy.get("content") is None:
+                    message_copy["content"] = ""
+                messages.append(message_copy)
+                
+            # Add system message if not present
+            if not any(m.get("role") == "system" for m in messages):
+                messages.insert(0, {"role": "system", "content": self.system_prompt})
         else:
-            return await self._generate_complete(prompt, max_tokens)
-
-    async def _generate_stream(self, prompt: str, max_tokens: Optional[int] = None) -> AsyncGenerator[str, None]:
-        """Helper method for streaming text generation."""
-        payload = {
-            "model": self.model_name,
-            "messages": [
+            # Create messages from string prompt
+            messages = [
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": prompt}
-            ],
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "max_tokens": max_tokens if max_tokens else self.max_tokens,
-            "stream": True
-        }
+            ]
         
-        try:
-            response = await self.client.chat.completions.create(**payload)
-            async for chunk in response:
-                yield chunk.choices[0].delta.content if chunk.choices[0].delta.content else ""
-        except Exception as e:
-            logging.error(f"Error: {str(e)}")
-            yield f"Error: {str(e)}"
-
-    async def _generate_complete(self, prompt: str, max_tokens: Optional[int] = None) -> str:
-        """Helper method for non-streaming text generation."""
-        payload = {
+        # Build request parameters
+        params = {
             "model": self.model_name,
-            "messages": [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "max_tokens": max_tokens if max_tokens else self.max_tokens,
-            "stream": False
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "frequency_penalty": self.frequency_penalty,
+            "presence_penalty": self.presence_penalty,
+            "stream": stream
         }
         
-        try:
-            response = await self.client.chat.completions.create(**payload)
-            return response.choices[0].message.content
-        except APIError as e:
-            logging.error(f"OpenAI API Error: {str(e)}")
-            return f"API Error: {str(e)}"
-        except Exception as e:
-            logging.error(f"Unexpected Error: {str(e)}")
-            return "Error processing request"
-    
-    async def generate_structured_output(
-        self, prompt: str, schema: Union[Dict[str, Any], Type[BaseModel]], 
-        max_tokens: Optional[int] = None, stream: bool = None
-    ) -> Dict[str, Any]:
-        """
-        Generates a structured response from OpenAI using a provided JSON schema.
-
-        Args:
-            prompt (str): User input prompt.
-            schema: Either a Pydantic model class or a JSON schema dictionary.
-            max_tokens (int, optional): Maximum tokens in response.
-            stream (bool, optional): Enable/disable streaming (always disabled for structured outputs).
-
-        Returns:
-            Dict[str, Any]: Structured response parsed as per schema.
-        """
-        # Streaming not supported for structured outputs
-        if stream:
-            logging.warning("Streaming not supported for structured outputs, falling back to non-streaming")
-        
-        try:
-            # Prepare the schema
-            if isinstance(schema, type) and issubclass(schema, BaseModel):
-                json_schema = schema.model_json_schema()
-            else:
-                json_schema = schema
-                
-            # Check for API version compatibility
-            if hasattr(self.client, "beta") and hasattr(self.client.beta, "chat") and hasattr(self.client.beta.chat, "completions"):
-                # Use the newer OpenAI API with beta.chat.completions.create with response_format
-                payload = {
-                    "model": self.model_name,
-                    "messages": [
-                        {"role": "system", "content": f"{self.system_prompt}\nYou must respond with a valid JSON object that conforms to the provided JSON schema."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": self.temperature,
-                    "top_p": self.top_p,
-                    "max_tokens": max_tokens if max_tokens else self.max_tokens,
-                    "response_format": {"type": "json_object", "schema": json_schema}
-                }
-                
-                response = await self.client.beta.chat.completions.create(**payload)
-                response_content = response.choices[0].message.content
-                
-            else:
-                # Fallback to regular chat completion with instructions to return JSON
-                enhanced_system_prompt = f"{self.system_prompt}\nYou must respond with a valid JSON object that conforms to this schema: {json.dumps(json_schema)}\nYour response should ONLY contain the JSON object and nothing else."
-                
-                payload = {
-                    "model": self.model_name,
-                    "messages": [
-                        {"role": "system", "content": enhanced_system_prompt},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": self.temperature,
-                    "top_p": self.top_p,
-                    "max_tokens": max_tokens if max_tokens else self.max_tokens,
-                }
-                
-                response = await self.client.chat.completions.create(**payload)
-                response_content = response.choices[0].message.content
+        if max_tokens:
+            params["max_tokens"] = max_tokens
             
-            # Parse and validate JSON response
+        if stop:
+            params["stop"] = stop
+        
+        # Handle streaming or non-streaming
+        if stream:
+            return self._generate_stream(params)
+        else:
             try:
-                # Check if the response is wrapped in code blocks
-                if "```json" in response_content:
-                    parts = response_content.split("```json")
-                    if len(parts) > 1:
-                        json_part = parts[1].split("```")[0].strip()
-                        parsed_json = json.loads(json_part)
-                    else:
-                        parsed_json = json.loads(response_content)
-                elif "```" in response_content:
-                    parts = response_content.split("```")
-                    if len(parts) > 1:
-                        json_part = parts[1].strip()
-                        parsed_json = json.loads(json_part)
-                    else:
-                        parsed_json = json.loads(response_content)
-                else:
-                    parsed_json = json.loads(response_content)
+                response = await self.client.chat.completions.create(**params)
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                self.logger.error(f"Error with OpenAI API: {str(e)}")
+                raise
                 
-                # Validate against schema if a Pydantic model was provided
+    async def _generate_stream(self, params: Dict[str, Any]) -> AsyncGenerator[str, None]:
+        """Stream generation helper method"""
+        try:
+            stream = await self.client.chat.completions.create(**params)
+            async for chunk in stream:
+                content = ""
+                if hasattr(chunk.choices[0].delta, "content") and chunk.choices[0].delta.content is not None:
+                    content = chunk.choices[0].delta.content
+                yield content
+        except Exception as e:
+            self.logger.error(f"Error in streaming: {str(e)}")
+            yield ""
+
+    async def generate_structured_output(
+        self, 
+        prompt: str, 
+        schema: Union[Dict[str, Any], Type[BaseModel]], 
+        max_tokens: Optional[int] = None,
+        stream: bool = False
+    ) -> Dict[str, Any]:
+        """Generate structured JSON output conforming to schema"""
+        if stream:
+            self.logger.warning("Streaming not supported for structured outputs")
+            
+        # Convert Pydantic model to schema if needed
+        if isinstance(schema, type) and issubclass(schema, BaseModel):
+            json_schema = schema.model_json_schema()
+        else:
+            json_schema = schema
+            
+        try:
+            # Use response_format if available (newer OpenAI API)
+            params = {
+                "model": self.model_name,
+                "messages": [
+                    {"role": "system", "content": f"{self.system_prompt}\nYou must respond with valid JSON conforming to the provided schema."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "response_format": {"type": "json_object"}
+            }
+            
+            if max_tokens:
+                params["max_tokens"] = max_tokens
+                
+            response = await self.client.chat.completions.create(**params)
+            content = response.choices[0].message.content
+            
+            # Parse JSON response
+            try:
+                # Extract JSON from code blocks if needed
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].strip()
+                    
+                parsed_json = json.loads(content)
+                
+                # Validate against schema if Pydantic model was provided
                 if isinstance(schema, type) and issubclass(schema, BaseModel):
-                    try:
-                        validated_data = schema.model_validate(parsed_json)
-                        return validated_data.model_dump()
-                    except Exception as e:
-                        logging.error(f"Schema validation error: {e}")
-                        return {"error": str(e), "data": parsed_json}
+                    validated_data = schema.model_validate(parsed_json)
+                    return validated_data.model_dump()
                 
                 return parsed_json
                 
-            except json.JSONDecodeError as e:
-                logging.error(f"Failed to parse response as JSON: {e}\nContent: {response_content}")
+            except (json.JSONDecodeError, IndexError) as e:
+                self.logger.error(f"Failed to parse JSON response: {str(e)}")
+                return {"error": "Invalid JSON response", "content": content}
                 
-                # Try a more aggressive JSON extraction if needed
-                try:
-                    import re
-                    json_pattern = r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}'
-                    matches = re.findall(json_pattern, response_content)
-                    if matches:
-                        parsed_json = json.loads(matches[0])
-                        logging.info("Successfully extracted JSON with regex")
-                        return parsed_json
-                except Exception:
-                    pass
-                
-                return {
-                    "error": f"Invalid JSON response: {e}",
-                    "raw_content": response_content
-                }
-                
-        except APIError as e:
-            logging.error(f"OpenAI API Error: {str(e)}")
-            return {"error": str(e)}
         except Exception as e:
-            logging.error(f"Unexpected Error: {str(e)}")
+            self.logger.error(f"Error with OpenAI API: {str(e)}")
             return {"error": str(e)}
 
-    async def get_model_list(self) -> List[str]:
-        """
-        Retrieves available models from OpenAI.
-        """
+    async def embed_text(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings for text using OpenAI API"""
         try:
-            models = await self.client.models.list()
-            return [model.id for model in models.data]
-        except APIError as e:
-            logging.error(f"Model List Error: {str(e)}")
-            return []
+            # Use text-embedding-3-small as default embedding model if not explicitly using an embedding model
+            embed_model = self.model_name
+            if not "embedding" in self.model_name:
+                embed_model = "text-embedding-3-small"
+                
+            response = await self.client.embeddings.create(
+                model=embed_model,
+                input=texts
+            )
+            
+            return [item.embedding for item in response.data]
+            
+        except Exception as e:
+            self.logger.error(f"Error generating embeddings: {str(e)}")
+            raise
 
     def is_model_available(self) -> bool:
-        """
-        Checks if the requested model is available in OpenAI.
-        """
-        import nest_asyncio
+        """Check if the model is available by using get_model_list"""
+        
+        # Apply nest_asyncio to enable nested event loops
         nest_asyncio.apply()
-        available_models = asyncio.run(self.get_model_list())
-        return self.model_name in available_models
+        
+        try:
+            # Create a new event loop and run the async method
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            model_list = loop.run_until_complete(self.get_model_list())
+            loop.close()
+            
+            # Check if the current model is in the list
+            return self.model_name in model_list
+        except Exception as e:
+            self.logger.error(f"Error checking model availability: {str(e)}")
+            
+            # Fallback to pattern matching if API call fails
+            known_patterns = [
+                "gpt-4", "gpt-3.5", "text-embedding", "dall-e", 
+                "whisper", "claude", "command", "llama"
+            ]
+            return any(pattern in self.model_name.lower() for pattern in known_patterns)
 
     def set_system_prompt(self, system_prompt: str):
-        """Updates the system prompt dynamically."""
+        """Update the system prompt"""
         self.system_prompt = system_prompt
-        logging.info(f"System prompt updated for OpenAI model {self.model_name}: {system_prompt}")
 
-    async def generate_text_batch(self, prompts: List[Dict[str, Any]], model_name: Optional[str] = None, 
-                                 system_prompt: Optional[str] = None, max_tokens: Optional[int] = None) -> str:
-        """
-        Prepares and submits a batch of text generation requests for processing.
-        
-        Args:
-            prompts: List of dictionaries with 'custom_id' and 'content' keys
-            model_name: Optional model name to override the default
-            system_prompt: Optional system prompt to override the default
-            max_tokens: Optional max tokens to override the default
-            
-        Returns:
-            Batch ID for tracking the batch job
-        """
-        current_model = model_name or self.model_name
-        current_system = system_prompt or self.system_prompt
-        current_max_tokens = max_tokens or self.max_tokens
-        
-        # Create batch input file
-        batch_file_path = await self._create_batch_input_file(prompts, current_model, current_system, current_max_tokens)
-        
+    async def get_model_list(self) -> List[str]:
+        """Fetch available models from OpenAI API"""
         try:
-            # Upload batch file
-            file_id = await self._upload_batch_file(batch_file_path)
+            # Call the OpenAI API to list available models
+            response = await self.client.models.list()
             
-            # Create batch job
-            batch = await self._create_batch(file_id)
-            
-            # Clean up temporary file
-            if os.path.exists(batch_file_path):
-                os.remove(batch_file_path)
+            # Extract model IDs from response
+            model_ids = [model.id for model in response.data]
                 
-            return batch.id
-        except Exception as e:
-            logging.error(f"Batch processing error: {str(e)}")
-            # Clean up temporary file on error
-            if os.path.exists(batch_file_path):
-                os.remove(batch_file_path)
-            raise
-
-    async def _create_batch_input_file(self, prompts: List[Dict[str, Any]], model_name: str, 
-                                     system_prompt: str, max_tokens: int) -> str:
-        """Creates a JSONL file for batch processing with OpenAI."""
-        temp_file_path = f"batch_input_{id(prompts)}.jsonl"
-        
-        with open(temp_file_path, "w") as f:
-            for prompt_data in prompts:
-                if "custom_id" not in prompt_data or "content" not in prompt_data:
-                    raise ValueError("Each prompt must have 'custom_id' and 'content' keys")
-                    
-                batch_item = {
-                    "custom_id": prompt_data["custom_id"],
-                    "method": "POST",
-                    "url": "/v1/chat/completions",
-                    "body": {
-                        "model": model_name,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt_data["content"]}
-                        ],
-                        "max_tokens": max_tokens,
-                        "temperature": self.temperature,
-                        "top_p": self.top_p
-                    }
-                }
-                f.write(json.dumps(batch_item) + "\n")
-                
-        return temp_file_path
-
-    async def _upload_batch_file(self, file_path: str) -> str:
-        """Uploads the batch input file using the Files API."""
-        try:
-            with open(file_path, "rb") as file:
-                response = await self.client.files.create(
-                    file=file,
-                    purpose="batch"
-                )
-            return response.id
-        except Exception as e:
-            logging.error(f"Error uploading batch file: {str(e)}")
-            raise
-
-    async def _create_batch(self, file_id: str, metadata: Dict[str, str] = None) -> Any:
-        """Creates a batch processing job."""
-        try:
-            batch = await self.client.batches.create(
-                input_file_id=file_id,
-                endpoint="/v1/chat/completions",
-                completion_window="24h",
-                metadata=metadata
-            )
-            return batch
-        except Exception as e:
-            logging.error(f"Error creating batch: {str(e)}")
-            raise
-
-    async def get_batch_status(self, batch_id: str) -> Dict[str, Any]:
-        """Checks the status of a specific batch job."""
-        try:
-            batch = await self.client.batches.retrieve(batch_id)
-            return {
-                "id": batch.id,
-                "status": batch.status,
-                "progress": batch.request_counts,
-                "created_at": batch.created_at,
-                "output_file_id": batch.output_file_id,
-                "error_file_id": batch.error_file_id
-            }
-        except Exception as e:
-            logging.error(f"Error checking batch status: {str(e)}")
-            raise
-
-    async def get_batch_results(self, batch_id: str) -> Dict[str, Any]:
-        """
-        Retrieves the results of a completed batch.
-        Returns both the output and any errors that occurred.
-        """
-        try:
-            # Get batch status first
-            batch = await self.client.batches.retrieve(batch_id)
+            return model_ids
             
-            if batch.status != "completed":
-                return {
-                    "status": batch.status,
-                    "message": f"Batch is not completed yet. Current status: {batch.status}"
-                }
-            
-            results = {}
-            
-            # Get output file if available
-            if batch.output_file_id:
-                output_response = await self.client.files.content(batch.output_file_id)
-                output_content = output_response.text
-                results["output"] = [json.loads(line) for line in output_content.strip().split("\n")]
-            
-            # Get error file if available
-            if batch.error_file_id:
-                error_response = await self.client.files.content(batch.error_file_id)
-                error_content = error_response.text
-                results["errors"] = [json.loads(line) for line in error_content.strip().split("\n")]
-            
-            return results
         except Exception as e:
-            logging.error(f"Error retrieving batch results: {str(e)}")
-            raise
-
-    async def cancel_batch(self, batch_id: str) -> Dict[str, Any]:
-        """Cancels an ongoing batch job."""
-        try:
-            batch = await self.client.batches.cancel(batch_id)
-            return {
-                "id": batch.id,
-                "status": batch.status,
-                "message": "Batch cancellation initiated"
-            }
-        except Exception as e:
-            logging.error(f"Error cancelling batch: {str(e)}")
-            raise
-
-    async def list_batches(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Lists all batch jobs."""
-        try:
-            batches = await self.client.batches.list(limit=limit)
-            batch_list = []
+            self.logger.error(f"Error fetching model list from OpenAI: {str(e)}")
             
-            for batch in batches:
-                batch_list.append({
-                    "id": batch.id,
-                    "status": batch.status, 
-                    "created_at": batch.created_at,
-                    "completed_at": batch.completed_at,
-                    "endpoint": batch.endpoint,
-                    "metadata": batch.metadata
-                })
-                
-            return batch_list
-        except Exception as e:
-            logging.error(f"Error listing batches: {str(e)}")
-            raise
+            # Return fallback model list on error
+            return [
+                "gpt-4o", "gpt-4o-mini", "gpt-4", "gpt-4-turbo",
+                "gpt-3.5-turbo", "text-embedding-3-small", "text-embedding-3-large"
+            ]

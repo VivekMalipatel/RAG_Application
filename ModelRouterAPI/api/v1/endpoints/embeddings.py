@@ -1,9 +1,11 @@
 import time
 import uuid
+import base64
 from typing import List, Dict, Any, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
+import numpy as np
 
 from db.session import get_db
 from core.security import get_api_key
@@ -14,11 +16,9 @@ from schemas.chat import UsageInfo
 # Import our model handlers
 from model_handler import ModelRouter
 from model_type import ModelType
+from model_provider import Provider
 
 router = APIRouter()
-
-# Hardcoded model for embeddings
-EMBEDDING_MODEL = "nomic-ai/colnomic-embed-multimodal-7b"
 
 @router.post("", response_model=EmbeddingResponse)
 async def create_embeddings(
@@ -28,8 +28,13 @@ async def create_embeddings(
     db: Session = Depends(get_db),
 ):
     """
-    Creates embeddings for the provided input text.
-    Uses a hardcoded Hugging Face embedding model.
+    Creates an embedding vector representing the input text.
+    
+    - `input`: Input text to embed, can be a string or array of strings
+    - `model`: ID of the embedding model to use
+    - `dimensions`: Optional number of dimensions for the output embeddings
+    - `encoding_format`: Format to return embeddings in ("float" or "base64")
+    - `user`: Optional user identifier
     """
     start_time = time.time()
     request_id = str(uuid.uuid4())
@@ -38,21 +43,45 @@ async def create_embeddings(
         # Convert input to list if it's a single string
         input_texts = request.input if isinstance(request.input, list) else [request.input]
         
-        # Use hardcoded model name instead of the one from the request
-        # This ensures we always use our preferred embedding model
-        model_router = ModelRouter.initialize_from_model_name(
-            model_name=EMBEDDING_MODEL,
-            model_type=ModelType.TEXT_EMBEDDING,
+        # Validate model is specified
+        if not request.model:
+            raise HTTPException(status_code=400, detail="Model must be specified")
+            
+        # Initialize model router with requested model
+        model_router = await ModelRouter.initialize_from_model_name(
+            model_name="nomic-ai/colnomic-embed-multimodal-7b",
+            model_type=ModelType.TEXT_EMBEDDING
         )
         
-        # Generate embeddings
-        embeddings = await model_router.embed_text(input_texts)
+        # Set up extra parameters for embedding
+        model_kwargs = {}
+        if request.dimensions:
+            model_kwargs["dimensions"] = request.dimensions
+            
+        # Generate embeddings with optional dimension parameter
+        embeddings = await model_router.client.embed_text(
+            texts=input_texts,
+            dimensions=request.dimensions
+        )
         
-        # Estimate token usage (simpler than chat, just character count / 4)
+        # Convert to base64 if requested
+        if request.encoding_format == "base64":
+            embeddings = [
+                base64.b64encode(np.array(embedding, dtype=np.float32).tobytes()).decode('utf-8')
+                for embedding in embeddings
+            ]
+            
+        # Calculate token usage
         total_chars = sum(len(text) for text in input_texts)
-        prompt_tokens = total_chars // 4  # Rough approximation
+        prompt_tokens = total_chars // 4  # Rough estimation
         
-        # Log usage
+        # Prepare response
+        embedding_data = [
+            EmbeddingData(embedding=embedding, index=i, object="embedding")
+            for i, embedding in enumerate(embeddings)
+        ]
+        
+        # Log usage to database
         completion_time = time.time() - start_time
         background_tasks.add_task(
             log_usage,
@@ -60,39 +89,30 @@ async def create_embeddings(
             api_key_id=getattr(api_key, "id", None),
             request_id=request_id,
             endpoint="embeddings",
-            model=EMBEDDING_MODEL,
-            provider="huggingface",  # We know it's always huggingface
+            model=request.model,
+            provider=model_router.provider.value,
             prompt_tokens=prompt_tokens,
-            completion_tokens=0,
+            completion_tokens=0,  # Embeddings don't have completion tokens
             total_tokens=prompt_tokens,
             processing_time=completion_time,
-            request_data=request.json()
+            request_data=request.model_dump_json()
         )
         
-        # Create response
-        embedding_data = []
-        for i, embedding in enumerate(embeddings):
-            embedding_data.append(
-                EmbeddingData(
-                    embedding=embedding,
-                    index=i
-                )
-            )
-        
+        # Return OpenAI-compatible response
         return EmbeddingResponse(
             data=embedding_data,
-            model=EMBEDDING_MODEL,  # Return the actual model used, not the requested one
+            model=request.model,
             usage=UsageInfo(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=0,
                 total_tokens=prompt_tokens
-            )
+            ),
+            object="list"  # Standard OpenAI field
         )
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Helper function to log usage - same as in chat.py
 def log_usage(
     db: Session, 
     api_key_id: Optional[int],
@@ -106,7 +126,7 @@ def log_usage(
     processing_time: float,
     request_data: str
 ):
-    """Log API usage to database for tracking and billing."""
+    """Log API usage to database"""
     try:
         usage_record = Usage(
             api_key_id=api_key_id,
@@ -124,6 +144,4 @@ def log_usage(
         db.add(usage_record)
         db.commit()
     except Exception as e:
-        # Log error but don't fail the request
-        print(f"Error logging usage: {str(e)}")
         db.rollback()

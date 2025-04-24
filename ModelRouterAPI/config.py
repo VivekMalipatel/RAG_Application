@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str = secrets.token_urlsafe(32)
     API_KEY_HEADER: str = "X-Api-Key"
+    BEARER_TOKEN_HEADER: str = "Authorization"  # For "Authorization: Bearer token" format
     API_KEYS: List[str] = ["test-key"]  # Default test key, replace in production
+    USE_BEARER_TOKEN: bool = True  # Enable Authorization: Bearer format
     
     # Database settings
     DATABASE_URL: str = "sqlite:///./modelrouter.db"
@@ -25,7 +27,7 @@ class Settings(BaseSettings):
     HUGGINGFACE_API_TOKEN: Optional[str] = os.getenv("HUGGINGFACE_API_TOKEN")
     
     # Ollama provider settings
-    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://10.9.0.6:11434")
 
     # Default models for each provider
     DEFAULT_MODELS: Dict[str, str] = {

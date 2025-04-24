@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 import uvicorn
 from contextlib import asynccontextmanager
+import asyncio
 
 # Import API routers
 from api.v1.router import api_router
@@ -28,7 +29,9 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     init_db()
     logger.info("ModelRouter API server is starting up")
+
     yield
+    
     # Shutdown logic
     logger.info("ModelRouter API server is shutting down")
     

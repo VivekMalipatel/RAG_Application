@@ -1,68 +1,88 @@
 from pydantic import BaseModel, Field, validator
-from typing import List, Dict, Optional, Union, Literal, Any
+from typing import List, Optional, Dict, Any, Literal, Union
 
+# --- Core Message Structures ---
 class ChatMessage(BaseModel):
-    role: str
-    content: str
+    role: Literal["system", "user", "assistant"]
+    content: Optional[str] = None
     name: Optional[str] = None
 
+# --- Request Body ---
+class ResponseFormat(BaseModel):
+    type: Literal["text", "json_object"] = "text"
+
+class StreamOptions(BaseModel):
+    include_usage: Optional[bool] = None
+
 class ChatCompletionRequest(BaseModel):
-    model: str
     messages: List[ChatMessage]
-    temperature: Optional[float] = 0.7
-    top_p: Optional[float] = 1.0
-    n: Optional[int] = 1
+    model: str
+    frequency_penalty: Optional[float] = Field(default=0, ge=-2.0, le=2.0)
+    logit_bias: Optional[Dict[int, float]] = None # Map of token ID to bias value
+    logprobs: Optional[bool] = False
+    max_tokens: Optional[int] = None # Deprecated but supported for compatibility
+    max_completion_tokens: Optional[int] = None # New parameter replacing max_tokens
+    n: Optional[int] = Field(default=1, ge=1) # How many choices to generate
+    presence_penalty: Optional[float] = Field(default=0, ge=-2.0, le=2.0)
+    response_format: Optional[ResponseFormat] = None
+    seed: Optional[int] = None
+    stop: Optional[Union[str, List[str]]] = None # Up to 4 sequences
     stream: Optional[bool] = False
-    stop: Optional[Union[str, List[str]]] = None
-    max_tokens: Optional[int] = None
-    presence_penalty: Optional[float] = 0.0
-    frequency_penalty: Optional[float] = 0.0
-    logit_bias: Optional[Dict[str, float]] = None
-    user: Optional[str] = None
+    stream_options: Optional[StreamOptions] = None # Only used if stream=True
+    temperature: Optional[float] = Field(default=1.0, ge=0.0, le=2.0)
+    top_p: Optional[float] = Field(default=1.0, ge=0.0, le=1.0)
+    user: Optional[str] = None # End-user identifier
     
     @validator('messages')
     def validate_messages(cls, messages):
+        """Validate that there is at least one message and system message is first if present."""
         if not messages:
             raise ValueError("At least one message is required")
         
-        # Check that system message comes first if present
-        if messages and messages[0].role != "system" and any(m.role == "system" for m in messages[1:]):
-            raise ValueError("System message must be the first message")
-        
+        # Ensure system message is first if present
+        has_system = any(msg.role == "system" for msg in messages)
+        if has_system and messages[0].role != "system":
+            raise ValueError("System message must be the first message if present")
+            
         return messages
 
+# --- Response Body (Non-Streaming) ---
 class ChatCompletionChoice(BaseModel):
+    finish_reason: Literal["stop", "length", "content_filter"] 
     index: int
     message: ChatMessage
-    finish_reason: Optional[str] = None
+    logprobs: Optional[Any] = None
 
 class UsageInfo(BaseModel):
-    prompt_tokens: int
     completion_tokens: int
+    prompt_tokens: int
     total_tokens: int
 
 class ChatCompletionResponse(BaseModel):
-    id: str
-    object: str = "chat.completion"
-    created: int  # Unix timestamp
-    model: str
+    id: str = Field(..., example="chatcmpl-123")
     choices: List[ChatCompletionChoice]
+    created: int = Field(..., example=1677652288) # Unix timestamp
+    model: str = Field(..., example="gpt-3.5-turbo")
+    system_fingerprint: Optional[str] = Field(None, example="fp_44709d6fcb")
+    object: Literal["chat.completion"] = "chat.completion"
     usage: UsageInfo
 
-
-# For streaming responses
+# --- Response Body (Streaming) ---
 class ChatCompletionChunkDelta(BaseModel):
-    role: Optional[str] = None
     content: Optional[str] = None
+    role: Optional[Literal["system", "user", "assistant"]] = None
 
 class ChatCompletionChunkChoice(BaseModel):
-    index: int
     delta: ChatCompletionChunkDelta
-    finish_reason: Optional[str] = None
+    finish_reason: Optional[Literal["stop", "length", "content_filter"]] = None
+    index: int
+    logprobs: Optional[Any] = None
 
 class ChatCompletionChunkResponse(BaseModel):
-    id: str
-    object: str = "chat.completion.chunk"
-    created: int
-    model: str
+    id: str = Field(..., example="chatcmpl-123")
     choices: List[ChatCompletionChunkChoice]
+    created: int = Field(..., example=1677652288) # Unix timestamp
+    model: str = Field(..., example="gpt-3.5-turbo")
+    system_fingerprint: Optional[str] = Field(None, example="fp_44709d6fcb")
+    object: Literal["chat.completion.chunk"] = "chat.completion.chunk"
+    usage: Optional[UsageInfo] = None # Only in final chunk if stream_options.include_usage is True

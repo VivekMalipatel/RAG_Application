@@ -1,7 +1,6 @@
 import time
 import uuid
 from typing import List, Dict, Any, Optional, Union
-import numpy as np
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -9,17 +8,15 @@ from sqlalchemy.orm import Session
 from db.session import get_db
 from core.security import get_api_key
 from db.models import ApiKey, Usage
-from schemas.reranker import RerankerRequest, RerankerResponse, RerankerScoreItem
+from schemas.reranker import RerankerRequest, RerankerResponse, RerankerDocument
 from schemas.chat import UsageInfo
 
 # Import our model handlers
 from model_handler import ModelRouter
 from model_type import ModelType
+from model_provider import Provider
 
 router = APIRouter()
-
-# Hardcoded model for reranking
-RERANKER_MODEL = "jinaai/jina-colbert-v2"
 
 @router.post("", response_model=RerankerResponse)
 async def rerank_documents(
@@ -29,68 +26,82 @@ async def rerank_documents(
     db: Session = Depends(get_db),
 ):
     """
-    Reranks a list of documents based on relevance to a query.
-    Uses a hardcoded Hugging Face reranker model.
+    Reranks a list of documents based on their relevance to the input query.
+    
+    - `query`: The search query to rank documents against
+    - `documents`: Array of text strings to be reranked
+    - `model`: ID of the reranker model to use
+    - `max_chunks`: Maximum number of documents to return in the response
+    - `return_documents`: Whether to include document text in the response
+    - `user`: Optional user identifier
     """
     start_time = time.time()
     request_id = str(uuid.uuid4())
     
     try:
-        # Use hardcoded model name instead of the one from the request
-        model_router = ModelRouter.initialize_from_model_name(
-            model_name=RERANKER_MODEL,
-            model_type=ModelType.RERANKER,
+        # Validate model is specified
+        if not request.model:
+            raise HTTPException(status_code=400, detail="Model must be specified")
+            
+        # Initialize model router with requested model
+        model_router = await ModelRouter.initialize_from_model_name(
+            model_name="jinaai/jina-colbert-v2",
+            model_type=ModelType.RERANKER
         )
         
         # Rerank documents
-        ranked_indices = await model_router.rerank_documents(
-            query=request.query, 
-            documents=request.documents, 
-            max_tokens=request.max_tokens
+        reranking_results = await model_router.rerank_documents(
+            query=request.query,
+            documents=request.documents,
+            max_documents=request.max_chunks
         )
         
-        # Generate scores (normalize to 0-1 range)
-        # This is a simple approximation since we don't have actual scores from the ranking
-        scores = np.linspace(1.0, 0.1, len(ranked_indices))
+        # Prepare response data
+        data = []
+        for result in reranking_results:
+            doc_index = next((i for i, doc in enumerate(request.documents) 
+                           if doc == result["document"]), 0)
+                           
+            # Create reranker document with or without original text
+            if request.return_documents:
+                data.append(RerankerDocument(
+                    document=result["document"],
+                    index=doc_index,
+                    relevance_score=result["relevance_score"]
+                ))
+            else:
+                data.append(RerankerDocument(
+                    index=doc_index,
+                    relevance_score=result["relevance_score"]
+                ))
         
-        # Create results with document indices and scores
-        results = []
-        for i, idx in enumerate(ranked_indices):
-            results.append(
-                RerankerScoreItem(
-                    document_index=idx,
-                    score=float(scores[i])
-                )
-            )
-        
-        # Estimate token usage (rough approximation)
+        # Calculate token usage (rough estimation)
         query_chars = len(request.query)
         docs_chars = sum(len(doc) for doc in request.documents)
         total_chars = query_chars + docs_chars
-        # Very rough token estimation (4 chars per token is an approximation)
-        total_tokens = total_chars // 4
+        total_tokens = total_chars // 4  # Rough approximation
         
-        # Log usage
+        # Log usage to database
         completion_time = time.time() - start_time
         background_tasks.add_task(
             log_usage,
             db=db,
             api_key_id=getattr(api_key, "id", None),
             request_id=request_id,
-            endpoint="reranker",
-            model=RERANKER_MODEL,
-            provider="huggingface",  # We know it's always huggingface
+            endpoint="rerank",
+            model=request.model,
+            provider=model_router.provider.value,
             prompt_tokens=total_tokens,
-            completion_tokens=0,
+            completion_tokens=0,  # Reranking doesn't produce completion tokens
             total_tokens=total_tokens,
             processing_time=completion_time,
-            request_data=request.json()
+            request_data=request.model_dump_json()
         )
         
-        # Create response
+        # Return response
         return RerankerResponse(
-            model=RERANKER_MODEL,  # Return the actual model used, not the requested one
-            results=results,
+            model=request.model,
+            data=data,
             usage=UsageInfo(
                 prompt_tokens=total_tokens,
                 completion_tokens=0,
@@ -101,7 +112,6 @@ async def rerank_documents(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Helper function to log usage - same as in other endpoint files
 def log_usage(
     db: Session, 
     api_key_id: Optional[int],
@@ -115,7 +125,7 @@ def log_usage(
     processing_time: float,
     request_data: str
 ):
-    """Log API usage to database for tracking and billing."""
+    """Log API usage to database"""
     try:
         usage_record = Usage(
             api_key_id=api_key_id,
@@ -133,6 +143,4 @@ def log_usage(
         db.add(usage_record)
         db.commit()
     except Exception as e:
-        # Log error but don't fail the request
-        print(f"Error logging usage: {str(e)}")
         db.rollback()

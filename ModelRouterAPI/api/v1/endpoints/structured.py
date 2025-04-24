@@ -21,7 +21,7 @@ async def generate_structured_output(
     """
     try:
         # Initialize the ModelRouter
-        model_router = ModelRouter.initialize_from_model_name(
+        model_router = await ModelRouter.initialize_from_model_name(
             model_name=request.model,
             model_type=ModelType.TEXT_GENERATION,
             temperature=request.temperature,
