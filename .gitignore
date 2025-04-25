@@ -24,3 +24,7 @@ ModelRouterAPI/ollama/llama.cpp
 ModelRouterAPI/huggingface/.models
 ModelRouterAPI/tmpvpzmf1z4
 ModelRouterAPI/ollama/llama.cpp
+IndexerAPI/.indexerapi
+IndexerAPI/.models
+.DS_Store
+Temp_Files/.DS_Store
