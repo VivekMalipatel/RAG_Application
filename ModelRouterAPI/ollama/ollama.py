@@ -153,7 +153,39 @@ class OllamaClient:
         serializable_messages = []
         for message in messages:
             if hasattr(message, 'model_dump'):
-                serializable_messages.append(message.model_dump())
+                message = message.model_dump()
+
+            if isinstance(message.get('content'), list):
+                processed_message = {"role": message.get('role', 'user')}
+                text_parts = []
+                images = []
+                
+                for content_item in message['content']:
+                    content_type = content_item.get('type')
+                    
+                    if content_type == 'text':
+                        text_parts.append(content_item.get('text', ''))
+                    elif content_type == 'image_url':
+                        image_url = content_item.get('image_url', {}).get('url')
+                        if image_url:
+                            try:
+                                async with httpx.AsyncClient() as client:
+                                    response = await client.get(image_url)
+                                    if response.status_code == 200:
+                                        import base64
+                                        base64_image = base64.b64encode(response.content).decode('utf-8')
+                                        images.append(base64_image)
+                                    else:
+                                        self.logger.error(f"Failed to download image from {image_url}, status: {response.status_code}")
+                            except Exception as e:
+                                self.logger.error(f"Error processing image {image_url}: {str(e)}")
+                
+                processed_message["content"] = " ".join(text_parts)
+                
+                if images:
+                    processed_message["images"] = images
+                
+                serializable_messages.append(processed_message)
             else:
                 serializable_messages.append(message)
         

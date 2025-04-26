@@ -125,9 +125,13 @@ class ModelSelector:
         )
         
         if openai_score >= threshold and openai_score >= ollama_score:
+            if len(openai_match)<len(model_name):
+                openai_match = model_name
             return Provider.OPENAI, openai_match
         
         if ollama_score >= threshold:
+            if len(ollama_match)<len(model_name):
+                ollama_match = model_name
             return Provider.OLLAMA, ollama_match
             
         raise ModelNotFoundException(f"Could not find a matching model for '{model_name}' of type {model_type.value}")

@@ -55,10 +55,13 @@ class OpenAIClient:
             messages = []
             for msg in prompt:
                 message_copy = dict(msg)
-                if message_copy.get("content") is None:
+
+                content = message_copy.get("content")
+                if content is None:
                     message_copy["content"] = ""
-                messages.append(message_copy)
                 
+                messages.append(message_copy)
+
             if not any(m.get("role") == "system" for m in messages):
                 messages.insert(0, {"role": "system", "content": self.system_prompt})
         else:

@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Any, Literal, Union
 
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
-    content: Optional[str] = None
+    content: Optional[Union[str, List[dict]]] = None
     name: Optional[str] = None
     refusal: Optional[Any] = None
     annotations: Optional[List[Any]] = []

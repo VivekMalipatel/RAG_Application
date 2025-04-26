@@ -27,7 +27,10 @@ def count_tokens(text: str, model: str = "gpt-3.5-turbo") -> int:
         encoding = tiktoken.encoding_for_model(model)
         return len(encoding.encode(text))
     except Exception:
-        return int(len(text.split()) * 1.3)
+        if isinstance(text, str):
+            return int(len(text.split()) * 1.3)
+        else:
+            return int(len(text) * 1.3)
 
 @router.post("/chat/completions", response_model=None)
 async def create_chat_completion(
