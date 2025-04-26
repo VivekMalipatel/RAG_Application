@@ -35,14 +35,14 @@ class QueueConsumer:
             if not processor:
                 error_msg = f"No processor registered for item type: {queue_item.item_type}"
                 logger.error(error_msg)
-                await self.queue_handler.update_status(queue_item.id, "failed", error_msg)
+                await self.queue_handler.move_to_failure_queue(queue_item.id, error_msg)
                 return {"id": queue_item.id, "status": "failed", "error": error_msg}
             
             data = await self.queue_handler.get_item_data(queue_item)
             if data is None:
                 error_msg = f"No data found for queue item: {queue_item.id}"
                 logger.error(error_msg)
-                await self.queue_handler.update_status(queue_item.id, "failed", error_msg)
+                await self.queue_handler.move_to_failure_queue(queue_item.id, error_msg)
                 return {"id": queue_item.id, "status": "failed", "error": error_msg}
             
             metadata = json.loads(queue_item.metadata) if queue_item.metadata else {}
@@ -51,7 +51,7 @@ class QueueConsumer:
             except Exception as e:
                 error_msg = f"Error processing item {queue_item.id}: {str(e)}"
                 logger.error(error_msg, exc_info=True)
-                await self.queue_handler.update_status(queue_item.id, "failed", error_msg)
+                await self.queue_handler.move_to_failure_queue(queue_item.id, error_msg)
                 return {"id": queue_item.id, "status": "failed", "error": error_msg}
             
             embeddings = []
@@ -66,7 +66,7 @@ class QueueConsumer:
                         except Exception as e:
                             logger.error(f"Error generating image embeddings: {str(e)}", exc_info=True)
                             error_msg = f"Error generating embeddings: {str(e)}"
-                            await self.queue_handler.update_status(queue_item.id, "failed", error_msg)
+                            await self.queue_handler.move_to_failure_queue(queue_item.id, error_msg)
                             return {"id": queue_item.id, "status": "failed", "error": error_msg}
                     elif first_item and isinstance(first_item, str):
                         logger.info(f"Generating text embeddings for {queue_item.id}")
@@ -75,14 +75,14 @@ class QueueConsumer:
                         except Exception as e:
                             logger.error(f"Error generating text embeddings: {str(e)}", exc_info=True)
                             error_msg = f"Error generating embeddings: {str(e)}"
-                            await self.queue_handler.update_status(queue_item.id, "failed", error_msg)
+                            await self.queue_handler.move_to_failure_queue(queue_item.id, error_msg)
                             return {"id": queue_item.id, "status": "failed", "error": error_msg}
 
             result = {
                 "id": queue_item.id,
-                "source": processed_data.get("source", queue_item.source),
+                "source": queue_item.source,
                 "metadata": processed_data.get("metadata", metadata),
-                "timestamp": processed_data.get("timestamp", datetime.now().isoformat()),
+                "timestamp": queue_item.indexing_datetime,
                 "data": processed_data.get("data", []),
                 "embeddings": embeddings
             }
@@ -95,7 +95,7 @@ class QueueConsumer:
         except Exception as e:
             error_msg = f"Unexpected error processing item {queue_item.id}: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            await self.queue_handler.update_status(queue_item.id, "failed", error_msg)
+            await self.queue_handler.move_to_failure_queue(queue_item.id, error_msg)
             return {"id": queue_item.id, "status": "failed", "error": error_msg}
     
     async def start_processing(self, poll_interval: float = 2.0):
@@ -136,3 +136,9 @@ class QueueConsumer:
         logger.info(f"Successfully processed item {result['id']} with {embedding_count} embeddings for {data_count} data items")
 
         #TODO: Implement any additional logic for handling processed data (Sending it to vector DB, etc.)
+        
+    async def list_failure_queue(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return await self.queue_handler.get_failure_queue_items(limit)
+    
+    async def retry_failed_item(self, queue_id: str) -> bool:
+        return await self.queue_handler.retry_item_from_failure_queue(queue_id)
