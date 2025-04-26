@@ -27,6 +27,9 @@ async def ingest_file(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid metadata format")
     
+    #TODO: Validate file type and size
+    # The File Type and Size will be depending on what files and size the Markdown class can handle.
+    
     # Read file content
     file_content = await file.read()
     
