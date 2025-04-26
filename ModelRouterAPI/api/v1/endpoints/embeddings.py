@@ -45,13 +45,6 @@ async def create_embeddings(
     
     try:
         input_texts = request.input if isinstance(request.input, list) else [request.input]
-        
-        if any(not text.strip() for text in input_texts):
-            return create_error_response(
-                "One or more input strings are empty. Input strings must be non-empty.",
-                "invalid_input_empty",
-                400
-            )
             
         if not request.model:
             return create_error_response(
@@ -66,20 +59,43 @@ async def create_embeddings(
                 "invalid_encoding_format",
                 400
             )
-            
-        try:
-            model_router = await ModelRouter.initialize_from_model_name(
-                model_name=request.model,
-                model_type=ModelType.TEXT_EMBEDDING
-            )
-        except Exception as model_error:
-            return create_error_response(
-                f"The model '{request.model}' does not exist or is not available",
-                "model_not_found",
-                404
-            )
+
+        is_image_input = all(isinstance(item, dict) for item in input_texts) if input_texts else False
         
-        embeddings = await model_router.embed_text(texts=input_texts)
+        try:
+            if is_image_input:
+                #TODO: Add image validation logic here
+                try:
+                    model_router = await ModelRouter.initialize_from_model_name(
+                        model_name=request.model,
+                        model_type=ModelType.IMAGE_EMBEDDING
+                    )
+                except Exception as model_error:
+                    return create_error_response(
+                        f"The model '{request.model}' does not exist or is not available",
+                        "model_not_found",
+                        404
+                    )
+                embeddings = await model_router.embed_image(image=input_texts)
+            else:
+                try:
+                    model_router = await ModelRouter.initialize_from_model_name(
+                        model_name=request.model,
+                        model_type=ModelType.TEXT_EMBEDDING
+                    )
+                except Exception as model_error:
+                    return create_error_response(
+                        f"The model '{request.model}' does not exist or is not available",
+                        "model_not_found",
+                        404
+                    )
+                embeddings = await model_router.embed_text(texts=input_texts)
+        except Exception as e:
+            return create_error_response(
+                f"Error generating embeddings: {str(e)}",
+                "embedding_error",
+                500
+            )
         
         if request.encoding_format == "base64":
             if embeddings and isinstance(embeddings, list) and embeddings and isinstance(embeddings[0], list) and \
@@ -95,7 +111,10 @@ async def create_embeddings(
                     for embedding in embeddings
                 ]
         
-        prompt_tokens = sum(len(text.split()) for text in input_texts)
+        if is_image_input:
+            prompt_tokens = len(input_texts) * 100 
+        else:
+            prompt_tokens = sum(len(text.split()) for text in input_texts)
         
         embedding_data = [
             EmbeddingData(embedding=embedding, index=i, object="embedding")

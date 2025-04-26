@@ -86,7 +86,7 @@ class ModelCache:
                 self.logger.error(f"Error removing model {model_key}: {e}")
     
     def get_model_key(self, model_name: str, model_type: ModelType) -> str:
-        return f"{model_name}_{model_type.value}"
+        return f"{model_name}"
     
     def _is_nomic_multimodal_model(self, model_name: str) -> bool:
         nomic_models = [

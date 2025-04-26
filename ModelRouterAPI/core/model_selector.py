@@ -108,6 +108,9 @@ class ModelSelector:
         if model_type == ModelType.TEXT_EMBEDDING:
             return Provider.HUGGINGFACE, "nomic-ai/colnomic-embed-multimodal-3b"
         
+        if model_type == ModelType.IMAGE_EMBEDDING:
+            return Provider.HUGGINGFACE, "nomic-ai/colnomic-embed-multimodal-3b"
+        
         if model_type == ModelType.RERANKER:
             return Provider.HUGGINGFACE, "jinaai/jina-colbert-v2"
         
@@ -133,6 +136,9 @@ class ModelSelector:
         model_name_lower = model_name.lower()
         
         if model_type == ModelType.TEXT_EMBEDDING:
+            return Provider.HUGGINGFACE
+        
+        if model_type == ModelType.IMAGE_EMBEDDING:
             return Provider.HUGGINGFACE
                     
         if model_type == ModelType.RERANKER:

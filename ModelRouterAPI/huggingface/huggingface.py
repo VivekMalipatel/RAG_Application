@@ -1,5 +1,6 @@
 import torch
 import logging
+import asyncio
 from transformers import AutoTokenizer, AutoModel, TextIteratorStreamer
 from typing import List, Union, Optional, AsyncGenerator
 import threading
@@ -54,7 +55,7 @@ class HuggingFaceClient:
                 "device_map": self.device
             }
 
-            if model_type == ModelType.TEXT_GENERATION or model_type == ModelType.TEXT_EMBEDDING:
+            if model_type == ModelType.TEXT_GENERATION or model_type == ModelType.TEXT_EMBEDDING or model_type == ModelType.IMAGE_EMBEDDING:
                 self._load_text_model(**kwargs)
             elif model_type == ModelType.RERANKER:
                 self._load_reranker_model(**kwargs)
@@ -151,41 +152,14 @@ class HuggingFaceClient:
             )
             return self.tokenizer.decode(output[0], skip_special_tokens=True)
     
-    def embed_text(self, texts: List[str]) -> List[List[float]]:
+    async def embed_text(self, texts: List[str]) -> List[List[float]]:
         if "colnomic-embed-multimodal" in self.model_name or "nomic-embed-multimodal" in self.model_name:
             self.logger.info(f"Using specialized processing for Nomic multimodal model: {self.model_name}")
             try:
-                if hasattr(self, 'processor') and self.processor is not None:
-                    batch_queries = self.processor.process_queries(texts)
-                    
-                    if isinstance(batch_queries, dict):
-                        for key, tensor in batch_queries.items():
-                            if hasattr(tensor, 'to'):
-                                dtype = torch.float32 if self.device == 'cpu' else None
-                                batch_queries[key] = tensor.to(device=self.device, dtype=dtype)
-                    else:
-                        batch_queries = batch_queries.to(device=self.device, dtype=torch.float32 if self.device == 'cpu' else None)
-                elif hasattr(self, 'tokenizer') and hasattr(self.tokenizer, 'process_queries'):
-                    batch_queries = self.tokenizer.process_queries(texts)
-                    if isinstance(batch_queries, dict):
-                        for key, tensor in batch_queries.items():
-                            if hasattr(tensor, 'to'):
-                                dtype = torch.float32 if self.device == 'cpu' else None
-                                batch_queries[key] = tensor.to(device=self.device, dtype=dtype)
-                    else:
-                        batch_queries = batch_queries.to(device=self.device, dtype=torch.float32 if self.device == 'cpu' else None)
-                else:
-                    if not hasattr(self.model, 'processor'):
-                        raise ValueError(f"No processor found for Nomic model {self.model_name}")
-                    batch_queries = self.model.processor.process_queries(texts)
-                    if isinstance(batch_queries, dict):
-                        for key, tensor in batch_queries.items():
-                            if hasattr(tensor, 'to'):
-                                dtype = torch.float32 if self.device == 'cpu' else None
-                                batch_queries[key] = tensor.to(device=self.device, dtype=dtype)
-                    else:
-                        batch_queries = batch_queries.to(device=self.device, dtype=torch.float32 if self.device == 'cpu' else None)
+                batch_queries = self.processor.process_queries(texts)
                 
+                batch_queries = batch_queries.to(device=self.device, dtype=torch.float32 if self.device == 'cpu' else None)
+
                 if self.device == 'cpu' and hasattr(self.model, 'to'):
                     self.model = self.model.to(dtype=torch.float32)
                 
@@ -202,9 +176,60 @@ class HuggingFaceClient:
                 embeddings = self.model(**inputs).last_hidden_state.mean(dim=1)
             return embeddings.cpu().numpy().tolist()
     
-    #TODO: Add Image Eembed
+    async def embed_image(self, images: List[dict]) -> List[List[float]]:
+        if "colnomic-embed-multimodal" in self.model_name or "nomic-embed-multimodal" in self.model_name:
+            self.logger.info(f"Using specialized processing for Nomic multimodal model: {self.model_name}")
+            try:
+                processed_images = []
+                context_prompts = []
+                
+                import base64
+                from io import BytesIO
+                from PIL import Image
 
-    def rerank_documents(self, query: str, documents: List[str], max_tokens: int) -> List[int]:
+                max_wait_time = 30
+                wait_time = 0
+                check_interval = 0.5 
+
+                while self.processor is None and wait_time < max_wait_time:
+                    self.logger.warning(f"Processor not yet initialized, waiting... ({wait_time}s/{max_wait_time}s)")
+                    await asyncio.sleep(check_interval)
+                    wait_time += check_interval
+                
+                for image_data in images:
+                    if isinstance(image_data["image"], str):
+                        base64_str = image_data["image"]
+                        img_data = base64.b64decode(base64_str)
+                        img_bytes = BytesIO(img_data)
+                        img = Image.open(img_bytes)
+                        processed_images.append(img)
+                    else:
+                        raise ValueError("Images must be base64 encoded")
+                    
+                    context_prompts.append(image_data["text"])
+                
+                batch_images = self.processor.process_images(
+                    images=processed_images, 
+                    context_prompts=context_prompts
+                )
+                
+                batch_images = batch_images.to(device=self.device, dtype=torch.float32 if self.device == 'cpu' else None)
+
+                if self.device == 'cpu' and hasattr(self.model, 'to'):
+                    self.model = self.model.to(dtype=torch.float32)
+                
+                with torch.no_grad():
+                    image_embeddings = self.model(**batch_images)
+                
+                return image_embeddings.cpu().numpy().tolist()
+            except Exception as e:
+                self.logger.error(f"Error generating embeddings with Nomic model: {e}")
+                raise
+        else:
+            self.logger.error("Image embedding is not supported for this model.")
+            raise NotImplementedError("Image embedding is not supported for this model.")
+
+    async def rerank_documents(self, query: str, documents: List[str], max_tokens: int) -> List[int]:
         query_tokens = self.tokenizer(query, return_tensors="pt").to(self.device)
         doc_tokens = self.tokenizer(documents, return_tensors="pt", padding=True).to(self.device)
 

@@ -122,13 +122,19 @@ class ModelRouter:
             raise UnsupportedFeatureError(f"Provider {self.provider} does not support text embedding")
             
         try:
-            import inspect
-            if inspect.iscoroutinefunction(self.client.embed_text):
-                return await self.client.embed_text(texts)
-            else:
-                return self.client.embed_text(texts)
+            return await self.client.embed_text(texts)
         except Exception as e:
             self.logger.error(f"Error generating embeddings with {self.provider.value}: {str(e)}")
+            raise
+    
+    async def embed_image(self, image: List[dict]) -> List[List[float]]:
+        if not hasattr(self.client, "embed_image"):
+            raise UnsupportedFeatureError(f"Provider {self.provider} does not support image embedding")
+            
+        try:
+            return await self.client.embed_image(image)
+        except Exception as e:
+            self.logger.error(f"Error generating image embeddings with {self.provider.value}: {str(e)}")
             raise
 
     async def rerank_documents(
@@ -141,11 +147,7 @@ class ModelRouter:
             raise UnsupportedFeatureError(f"Provider {self.provider} does not support document reranking")
             
         try:
-            import inspect
-            if inspect.iscoroutinefunction(self.client.rerank_documents):
-                return await self.client.rerank_documents(query, documents, max_documents)
-            else:
-                return self.client.rerank_documents(query, documents, max_documents)
+            return await self.client.rerank_documents(query, documents, max_documents)
         except Exception as e:
             self.logger.error(f"Error reranking documents with {self.provider.value}: {str(e)}")
             raise

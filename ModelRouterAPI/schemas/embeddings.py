@@ -5,7 +5,7 @@ from schemas.chat import UsageInfo
 
 class EmbeddingRequest(BaseModel):
     model: str = Field(..., description="ID of the model to use")
-    input: Union[str, List[str]] = Field(..., description="Input text to embed, encoded as a string or array of strings")
+    input: Union[str, List[str], List[dict]] = Field(..., description="Input text to embed, encoded as a string or array of strings")
     user: Optional[str] = Field(None, description="A unique identifier representing your end-user")
     encoding_format: Optional[str] = Field("float", description="The format to return the embeddings in. Can be either float or base64")
     dimensions: Optional[int] = Field(None, description="The number of dimensions the resulting output embeddings should have")
