@@ -16,11 +16,7 @@ async def generate_structured_output(
     request: StructuredOutputRequest,
     api_key: str = Depends(get_api_key)
 ):
-    """
-    Generate structured output from a model according to a provided JSON schema.
-    """
     try:
-        # Initialize the ModelRouter
         model_router = await ModelRouter.initialize_from_model_name(
             model_name=request.model,
             model_type=ModelType.TEXT_GENERATION,
@@ -30,21 +26,18 @@ async def generate_structured_output(
             system_prompt=request.system_prompt
         )
         
-        # Generate structured output using the JSON schema provided in the request
         structured_data = await model_router.generate_structured_output(
             prompt=request.prompt,
-            schema=request.schema,  # Use the JSON schema directly
+            schema=request.schema,
             max_tokens=request.max_tokens
         )
         
-        # Check if there's an error in the response
         if isinstance(structured_data, dict) and "error" in structured_data:
             raise HTTPException(
                 status_code=422, 
                 detail=f"Failed to generate valid structured output: {structured_data.get('error')}"
             )
             
-        # Create response
         response = StructuredOutputResponse(
             model=request.model,
             output=structured_data,

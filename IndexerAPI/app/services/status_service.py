@@ -12,8 +12,6 @@ class StatusService:
         self.db = db
     
     async def get_item_status(self, item_id: str) -> StatusResponse:
-        """Get processing status of a submitted item"""
-        # Query for item
         stmt = select(FileItem).where(FileItem.id == item_id)
         result = await self.db.execute(stmt)
         item = result.scalar_one_or_none()
@@ -21,7 +19,6 @@ class StatusService:
         if not item:
             return None
         
-        # Create response
         result = None
         if item.status == "completed":
             result = {

@@ -7,21 +7,15 @@ from db.session import SessionLocal
 from db.models import ApiKey, Usage
 from config import settings
 
-# Get logger
 logger = logging.getLogger(__name__)
 
 def init_db() -> None:
-    """Initialize the database."""
-    # Create tables
     Base.metadata.create_all(bind=engine)
     
-    # Create a database session
     db = SessionLocal()
     try:
-        # Check if there are any API keys
         existing_keys = db.query(ApiKey).count()
         
-        # Only create a default API key if none exist
         if existing_keys == 0:
             for api_key in settings.API_KEYS:
                 new_key = ApiKey(

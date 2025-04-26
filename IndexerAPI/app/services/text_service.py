@@ -14,43 +14,34 @@ class TextService:
         self.db = db
     
     async def process_text(self, request: RawTextIngestRequest, background_tasks: BackgroundTasks):
-        """Process raw text and queue it for processing"""
-        # Generate a unique ID for this text request
         text_id = str(uuid.uuid4())
         
-        # Create file item record for raw text
         text_item = FileItem(
             id=text_id,
-            raw_text=request.text[:1000],  # Store a preview of the text
+            raw_text=request.text[:1000],
             source=request.source,
             file_type="raw_text",
             metadata=request.metadata,
             status="queued"
         )
         
-        # Save to database
         self.db.add(text_item)
         await self.db.commit()
         
-        # Queue for background processing
         background_tasks.add_task(self._process_in_background, text_id, request.text)
         
         return text_item
     
     async def _process_in_background(self, text_id: str, text: str):
-        """Process raw text in background"""
-        # Update status to processing
         async with AsyncSession() as session:
             text_item = await session.get(FileItem, text_id)
             text_item.status = "processing"
             await session.commit()
         
             try:
-                # Process the raw text
                 processor = TextProcessor()
                 result = await processor.process(text)
                 
-                # Update text item with processing result
                 text_item.status = "completed"
                 text_item.embedding_stored = result.get("embedding_id")
                 text_item.metadata = {

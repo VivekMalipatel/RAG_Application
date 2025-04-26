@@ -8,8 +8,6 @@ import asyncio
 import nest_asyncio
 
 class OpenAIClient:
-    """Client for interacting with OpenAI's API"""
-
     def __init__(
         self,
         model_name: str = "gpt-4o-mini",
@@ -47,16 +45,13 @@ class OpenAIClient:
         stop: Optional[Union[str, List[str]]] = None,
         stream: Optional[bool] = None
     ) -> Union[str, AsyncGenerator[str, None]]:
-        """Generate text using OpenAI API"""
         stream = stream if stream is not None else self.stream
         max_tokens = max_tokens if max_tokens is not None else self.max_tokens
         temperature = temperature if temperature is not None else self.temperature
         top_p = top_p if top_p is not None else self.top_p
         stop = stop if stop is not None else self.stop
         
-        # Prepare messages from prompt
         if isinstance(prompt, list):
-            # Format messages
             messages = []
             for msg in prompt:
                 message_copy = dict(msg)
@@ -64,17 +59,14 @@ class OpenAIClient:
                     message_copy["content"] = ""
                 messages.append(message_copy)
                 
-            # Add system message if not present
             if not any(m.get("role") == "system" for m in messages):
                 messages.insert(0, {"role": "system", "content": self.system_prompt})
         else:
-            # Create messages from string prompt
             messages = [
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": prompt}
             ]
         
-        # Build request parameters
         params = {
             "model": self.model_name,
             "messages": messages,
@@ -91,7 +83,6 @@ class OpenAIClient:
         if stop:
             params["stop"] = stop
         
-        # Handle streaming or non-streaming
         if stream:
             return self._generate_stream(params)
         else:
@@ -103,7 +94,6 @@ class OpenAIClient:
                 raise
                 
     async def _generate_stream(self, params: Dict[str, Any]) -> AsyncGenerator[str, None]:
-        """Stream generation helper method"""
         try:
             stream = await self.client.chat.completions.create(**params)
             async for chunk in stream:
@@ -122,21 +112,17 @@ class OpenAIClient:
         max_tokens: Optional[int] = None,
         stream: bool = False
     ) -> Dict[str, Any]:
-        """Generate structured JSON output conforming to schema"""
         if stream:
             self.logger.warning("Streaming not supported for structured outputs")
             
-        # Convert Pydantic model to schema if needed
         if isinstance(schema, type) and issubclass(schema, BaseModel):
             json_schema = schema.model_json_schema()
         else:
             json_schema = schema
             
         try:
-            # Create system prompt with schema information
             system_prompt = f"{self.system_prompt}\nYou must respond with valid JSON conforming to the provided schema."
             
-            # Format the response_format parameter according to OpenAI API requirements
             response_format = {
                 "type": "json_schema",
                 "json_schema": {
@@ -162,9 +148,7 @@ class OpenAIClient:
             response = await self.client.chat.completions.create(**params)
             content = response.choices[0].message.content
             
-            # Parse JSON response
             try:
-                # Extract JSON from code blocks if needed (should be less common with response_format)
                 if "```json" in content:
                     content = content.split("```json")[1].split("```")[0].strip()
                 elif "```" in content:
@@ -172,7 +156,6 @@ class OpenAIClient:
                     
                 parsed_json = json.loads(content)
                 
-                # Validate against schema if Pydantic model was provided
                 if isinstance(schema, type) and issubclass(schema, BaseModel):
                     validated_data = schema.model_validate(parsed_json)
                     return validated_data.model_dump()
@@ -188,9 +171,7 @@ class OpenAIClient:
             return {"error": str(e)}
 
     async def embed_text(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for text using OpenAI API"""
         try:
-            # Use text-embedding-3-small as default embedding model if not explicitly using an embedding model
             embed_model = self.model_name
             if not "embedding" in self.model_name:
                 embed_model = "text-embedding-3-small"
@@ -207,24 +188,18 @@ class OpenAIClient:
             raise
 
     def is_model_available(self) -> bool:
-        """Check if the model is available by using get_model_list"""
-        
-        # Apply nest_asyncio to enable nested event loops
         nest_asyncio.apply()
         
         try:
-            # Create a new event loop and run the async method
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             model_list = loop.run_until_complete(self.get_model_list())
             loop.close()
             
-            # Check if the current model is in the list
             return self.model_name in model_list
         except Exception as e:
             self.logger.error(f"Error checking model availability: {str(e)}")
             
-            # Fallback to pattern matching if API call fails
             known_patterns = [
                 "gpt-4", "gpt-3.5", "text-embedding", "dall-e", 
                 "whisper", "claude", "command", "llama"
@@ -232,16 +207,12 @@ class OpenAIClient:
             return any(pattern in self.model_name.lower() for pattern in known_patterns)
 
     def set_system_prompt(self, system_prompt: str):
-        """Update the system prompt"""
         self.system_prompt = system_prompt
 
     async def get_model_list(self) -> List[str]:
-        """Fetch available models from OpenAI API"""
         try:
-            # Call the OpenAI API to list available models
             response = await self.client.models.list()
             
-            # Extract model IDs from response
             model_ids = [model.id for model in response.data]
                 
             return model_ids
@@ -249,7 +220,6 @@ class OpenAIClient:
         except Exception as e:
             self.logger.error(f"Error fetching model list from OpenAI: {str(e)}")
             
-            # Return fallback model list on error
             return [
                 "gpt-4o", "gpt-4o-mini", "gpt-4", "gpt-4-turbo",
                 "gpt-3.5-turbo", "text-embedding-3-small", "text-embedding-3-large"

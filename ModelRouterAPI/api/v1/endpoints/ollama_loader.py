@@ -12,7 +12,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 class ModelLoadRequest(BaseModel):
-    """Request to load a model from Hugging Face to Ollama"""
     hf_repo: str
     quantization: str = "Q8_0"
     force_convert: bool = False
@@ -20,14 +19,12 @@ class ModelLoadRequest(BaseModel):
     enable_adapter: bool = False
 
 class ModelLoadResponse(BaseModel):
-    """Response for model loading"""
     success: bool
     model_name: Optional[str] = None
     message: str
     task_id: Optional[str] = None
 
 class TaskStatusResponse(BaseModel):
-    """Response for task status checking"""
     task_id: str
     status: str
 
@@ -38,24 +35,11 @@ async def load_model_from_huggingface(
     api_key = Depends(get_api_key),
     db: Session = Depends(get_db),
 ):
-    """
-    Load a model from Hugging Face into Ollama.
-    
-    This endpoint will:
-    1. Download the model from Hugging Face
-    2. Convert it to GGUF format
-    3. Load it into Ollama
-    
-    It requires API key authentication and admin privileges.
-    """
     try:
-        # Initialize the model loader
         model_loader = OllamaModelLoader()
         
-        # Generate task ID
         task_id = f"{request.hf_repo.replace('/', '_')}_{request.quantization}"
         
-        # Start the model loading process in the background
         background_tasks.add_task(
             model_loader.ensure_model_available,
             hf_repo=request.hf_repo,
@@ -79,14 +63,9 @@ async def check_task_status(
     api_key = Depends(get_api_key),
     db: Session = Depends(get_db),
 ):
-    """
-    Check the status of a model loading task.
-    """
     try:
-        # Initialize the model loader
         model_loader = OllamaModelLoader()
         
-        # Get task status
         status = await model_loader.get_task_status(task_id)
         
         return TaskStatusResponse(
@@ -102,14 +81,9 @@ async def get_available_ollama_models(
     api_key = Depends(get_api_key),
     db: Session = Depends(get_db),
 ):
-    """
-    Get a list of all available models in Ollama.
-    """
     try:
-        # Initialize the model loader
         model_loader = OllamaModelLoader()
         
-        # Get available models
         models = await model_loader.get_available_models()
         
         return models
@@ -124,14 +98,9 @@ async def check_model_availability(
     api_key = Depends(get_api_key),
     db: Session = Depends(get_db),
 ):
-    """
-    Check if a specific model is available in Ollama.
-    """
     try:
-        # Initialize the model loader
         model_loader = OllamaModelLoader()
         
-        # Check if model is available
         is_available = await model_loader.is_model_available(model_name)
         
         return {

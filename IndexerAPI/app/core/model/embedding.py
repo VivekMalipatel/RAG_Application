@@ -1,244 +1,141 @@
-"""
-Embedding generation handler for Model Router API.
-
-This module provides utilities for generating text embeddings using
-the Model Router API's embedding capabilities.
-"""
-
 import logging
-import numpy as np
+import os
+import json
 from typing import Dict, Any, List, Optional, Union
+import numpy as np
 
 from app.core.model.api_client import ModelClient
 
 logger = logging.getLogger(__name__)
 
 class EmbeddingGenerator:
-    """Embedding generation handler for creating vector representations of text."""
     
     def __init__(
-        self, 
-        model_client: Optional[ModelClient] = None,
+        self,
         model: Optional[str] = None,
-        dimensions: Optional[int] = None,
-        batch_size: int = 20
+        api_client: Optional[ModelClient] = None,
+        dimensions: Optional[int] = None
     ):
-        """
-        Initialize the Embedding Generator.
-        
-        Args:
-            model_client: Initialized ModelClient instance
-            model: Model identifier to use for embedding generation
-            dimensions: Vector dimensions (if None, uses model default)
-            batch_size: Number of texts to process in a single batch
-        """
-        self.client = model_client or ModelClient()
-        self.model = model or self.client.config.embedding_model
+        self.model = model or os.environ.get("DEFAULT_EMBEDDING_MODEL", "text-embedding-ada-002")
         self.dimensions = dimensions
-        self.batch_size = batch_size
-        
+        self.api_client = api_client or ModelClient()
         logger.info(f"Initialized Embedding Generator with model: {self.model}")
     
-    async def generate_embedding(self, text: str) -> Dict[str, Any]:
-        """
-        Generate an embedding for a single text.
+    async def generate_embedding(
+        self,
+        text: Union[str, List[str]],
+        model: Optional[str] = None
+    ) -> Dict[str, Any]:
+        if isinstance(text, str):
+            input_texts = [text]
+            is_single_input = True
+        else:
+            input_texts = text
+            is_single_input = False
         
-        Args:
-            text: Text to generate embedding for
-            
-        Returns:
-            Dictionary containing embedding vector and metadata
-        """
+        logger.info(f"Generating embeddings for {len(input_texts)} text(s) with model: {model or self.model}")
+        
         try:
-            if not text.strip():
-                logger.warning("Empty text provided for embedding generation")
-                return {
-                    "success": False,
-                    "error": "Empty text provided",
-                    "model": self.model
-                }
-            
-            logger.info(f"Generating embedding for text (length: {len(text)})")
-            
-            # Create embedding request parameters
-            params = {
-                "model": self.model,
-                "input": text,
+            data = {
+                "model": model or self.model,
+                "input": input_texts
             }
             
             if self.dimensions:
-                params["dimensions"] = self.dimensions
-            
-            # Call the Model Router API embedding endpoint
-            response = self.client.client.embeddings.create(**params)
-            
-            # Extract embedding vector and metadata
-            embedding = response.data[0].embedding
-            
-            return {
-                "success": True,
-                "embedding": embedding,
-                "model": self.model,
-                "dimensions": len(embedding),
-                "usage": {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "total_tokens": response.usage.total_tokens
-                }
-            }
+                data["dimensions"] = self.dimensions
                 
+            response = await self.api_client._make_request(
+                "POST",
+                "/embeddings",
+                data=data
+            )
+            
+            embeddings_data = response.get("data", [])
+            
+            if not embeddings_data:
+                logger.error("No embeddings in response")
+                return {
+                    "success": False,
+                    "error": "No embeddings returned from API"
+                }
+            
+            embeddings = [item["embedding"] for item in embeddings_data]
+            usage = response.get("usage", {})
+            
+            if is_single_input:
+                result = {
+                    "success": True,
+                    "embedding": embeddings[0],
+                    "dimensions": len(embeddings[0]),
+                    "usage": usage,
+                    "model": model or self.model
+                }
+            else:
+                result = {
+                    "success": True,
+                    "embeddings": embeddings,
+                    "dimensions": len(embeddings[0]) if embeddings else 0,
+                    "count": len(embeddings),
+                    "usage": usage,
+                    "model": model or self.model
+                }
+                
+            return result
+            
         except Exception as e:
-            logger.error(f"Error generating embedding: {str(e)}")
+            logger.error(f"Error generating embeddings: {str(e)}")
             return {
                 "success": False,
-                "error": str(e),
-                "model": self.model
+                "error": str(e)
             }
     
-    async def generate_embeddings_batch(self, texts: List[str]) -> Dict[str, Any]:
-        """
-        Generate embeddings for a batch of texts.
-        
-        Args:
-            texts: List of texts to generate embeddings for
-            
-        Returns:
-            Dictionary containing list of embedding vectors and metadata
-        """
+    async def cosine_similarity(
+        self,
+        embedding1: List[float],
+        embedding2: List[float]
+    ) -> float:
         try:
-            if not texts:
-                logger.warning("Empty text list provided for batch embedding generation")
-                return {
-                    "success": False,
-                    "error": "Empty text list provided",
-                    "model": self.model
-                }
+            v1 = np.array(embedding1)
+            v2 = np.array(embedding2)
             
-            # Filter out empty texts
-            filtered_texts = [text for text in texts if text.strip()]
+            dot_product = np.dot(v1, v2)
             
-            if not filtered_texts:
-                logger.warning("All texts in batch were empty")
-                return {
-                    "success": False,
-                    "error": "All texts in batch were empty",
-                    "model": self.model
-                }
+            mag1 = np.linalg.norm(v1)
+            mag2 = np.linalg.norm(v2)
             
-            logger.info(f"Generating embeddings for {len(filtered_texts)} texts")
-            
-            # Create embedding request parameters
-            params = {
-                "model": self.model,
-                "input": filtered_texts,
-            }
-            
-            if self.dimensions:
-                params["dimensions"] = self.dimensions
-            
-            # Call the Model Router API embedding endpoint
-            response = self.client.client.embeddings.create(**params)
-            
-            # Extract embedding vectors
-            embeddings = [data.embedding for data in response.data]
-            
-            return {
-                "success": True,
-                "embeddings": embeddings,
-                "model": self.model,
-                "dimensions": len(embeddings[0]) if embeddings else 0,
-                "count": len(embeddings),
-                "usage": {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "total_tokens": response.usage.total_tokens
-                }
-            }
+            if mag1 > 0 and mag2 > 0:
+                return dot_product / (mag1 * mag2)
+            else:
+                return 0.0
                 
         except Exception as e:
-            logger.error(f"Error generating batch embeddings: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "model": self.model
-            }
+            logger.error(f"Error calculating cosine similarity: {str(e)}")
+            return 0.0
     
-    async def process_large_text_batch(self, texts: List[str]) -> Dict[str, Any]:
-        """
-        Process a large batch of texts by splitting into smaller batches.
-        
-        Args:
-            texts: List of texts to generate embeddings for
-            
-        Returns:
-            Dictionary containing list of embedding vectors and metadata
-        """
+    async def find_most_similar(
+        self,
+        query_embedding: List[float],
+        embeddings: List[List[float]],
+        top_k: int = 5
+    ) -> List[Dict[str, Any]]:
         try:
-            if not texts:
-                return {
-                    "success": False,
-                    "error": "Empty text list provided",
-                    "model": self.model
+            similarities = []
+            for i, emb in enumerate(embeddings):
+                similarity = await self.cosine_similarity(query_embedding, emb)
+                similarities.append((i, similarity))
+            
+            similarities.sort(key=lambda x: x[1], reverse=True)
+            
+            results = [
+                {
+                    "index": idx,
+                    "similarity": score
                 }
+                for idx, score in similarities[:top_k]
+            ]
             
-            # Filter out empty texts
-            filtered_texts = [text for text in texts if text.strip()]
+            return results
             
-            total_texts = len(filtered_texts)
-            logger.info(f"Processing {total_texts} texts in batches of {self.batch_size}")
-            
-            all_embeddings = []
-            total_tokens = 0
-            
-            # Process in batches
-            for i in range(0, total_texts, self.batch_size):
-                batch = filtered_texts[i:i+self.batch_size]
-                logger.info(f"Processing batch {i//self.batch_size + 1}/{(total_texts-1)//self.batch_size + 1}")
-                
-                batch_result = await self.generate_embeddings_batch(batch)
-                
-                if not batch_result["success"]:
-                    logger.error(f"Error processing batch: {batch_result['error']}")
-                    continue
-                    
-                all_embeddings.extend(batch_result["embeddings"])
-                total_tokens += batch_result["usage"]["total_tokens"]
-            
-            return {
-                "success": True,
-                "embeddings": all_embeddings,
-                "model": self.model,
-                "dimensions": len(all_embeddings[0]) if all_embeddings else 0,
-                "count": len(all_embeddings),
-                "usage": {
-                    "total_tokens": total_tokens
-                }
-            }
-                
         except Exception as e:
-            logger.error(f"Error processing large text batch: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "model": self.model
-            }
-    
-    @staticmethod
-    def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-        """
-        Calculate cosine similarity between two vectors.
-        
-        Args:
-            vec1: First vector
-            vec2: Second vector
-            
-        Returns:
-            Cosine similarity score (0-1)
-        """
-        if len(vec1) != len(vec2):
-            raise ValueError("Vectors must be of the same length")
-            
-        # Convert to numpy arrays for efficient computation
-        a = np.array(vec1)
-        b = np.array(vec2)
-        
-        # Calculate cosine similarity
-        return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+            logger.error(f"Error finding most similar embeddings: {str(e)}")
+            return []

@@ -14,9 +14,6 @@ async def get_status(
     item_id: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get processing status of a submitted item
-    """
     logger.info(f"Status check for item: {item_id}")
     
     status_service = StatusService(db)

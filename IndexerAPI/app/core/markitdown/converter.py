@@ -9,41 +9,16 @@ from markitdown import MarkItDown
 logger = logging.getLogger(__name__)
 
 class MarkdownConverter:
-    """
-    Handles conversion of various file formats to Markdown using Microsoft's MarkItDown library.
-    Supports PDF, PowerPoint, Word, Excel, Images, Audio, HTML, and more.
-    """
 
     def __init__(self, enable_plugins: bool = False, use_azure: bool = False, azure_endpoint: Optional[str] = None):
-        """
-        Initialize the MarkdownConverter.
-        
-        Args:
-            enable_plugins: Whether to enable MarkItDown plugins
-            use_azure: Whether to use Azure Document Intelligence
-            azure_endpoint: Azure Document Intelligence endpoint if use_azure is True
-        """
         self.enable_plugins = enable_plugins
         self.use_azure = use_azure
         self.azure_endpoint = azure_endpoint
             
-        # Initialize MarkItDown instance
         self._markitdown = MarkItDown(enable_plugins=enable_plugins)
         logger.info("MarkdownConverter initialized with MarkItDown")
         
     def convert_file(self, file_path: str) -> Dict[str, Any]:
-        """
-        Convert a file to Markdown using MarkItDown.
-        
-        Args:
-            file_path: Path to the file to convert
-            
-        Returns:
-            Dict containing:
-                text_content: The markdown content
-                metadata: Additional metadata from the conversion
-        """
-            
         if not os.path.exists(file_path):
             logger.error(f"File not found: {file_path}")
             return {"text_content": "", "metadata": {"error": f"File not found: {file_path}"}}
@@ -51,7 +26,6 @@ class MarkdownConverter:
         try:
             logger.info(f"Converting file to markdown: {file_path}")
             
-            # Use Azure Document Intelligence if specified
             if self.use_azure and self.azure_endpoint:
                 result = self._markitdown.convert(
                     file_path, 
@@ -63,7 +37,6 @@ class MarkdownConverter:
                 
             logger.info(f"Successfully converted file to markdown: {file_path}")
             
-            # Return the markdown content and metadata
             return {
                 "text_content": result.text_content,
                 "metadata": {
@@ -79,28 +52,13 @@ class MarkdownConverter:
             return {"text_content": "", "metadata": {"error": str(e)}}
             
     def convert_stream(self, file_stream: BinaryIO, file_extension: str) -> Dict[str, Any]:
-        """
-        Convert a file stream to Markdown.
-        
-        Args:
-            file_stream: Binary file-like object
-            file_extension: File extension (e.g., '.pdf', '.docx')
-            
-        Returns:
-            Dict containing:
-                text_content: The markdown content
-                metadata: Additional metadata from the conversion
-        """
-            
         try:
             logger.info(f"Converting stream to markdown with extension: {file_extension}")
             
-            # MarkItDown convert_stream requires binary data
             result = self._markitdown.convert_stream(file_stream, file_extension=file_extension)
             
             logger.info("Successfully converted stream to markdown")
             
-            # Return the markdown content and metadata
             return {
                 "text_content": result.text_content,
                 "metadata": {
@@ -116,28 +74,13 @@ class MarkdownConverter:
             return {"text_content": "", "metadata": {"error": str(e)}}
     
     def convert_url(self, url: str) -> Dict[str, Any]:
-        """
-        Convert content from a URL to Markdown.
-        MarkItDown has special handling for YouTube URLs.
-        
-        Args:
-            url: The URL to convert
-            
-        Returns:
-            Dict containing:
-                text_content: The markdown content
-                metadata: Additional metadata from the conversion
-        """
-            
         try:
             logger.info(f"Converting URL to markdown: {url}")
             
-            # Handle URL conversion
             result = self._markitdown.convert(url)
             
             logger.info(f"Successfully converted URL to markdown: {url}")
             
-            # Return the markdown content and metadata
             return {
                 "text_content": result.text_content,
                 "metadata": {

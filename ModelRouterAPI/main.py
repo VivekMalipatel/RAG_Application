@@ -7,12 +7,10 @@ import uvicorn
 from contextlib import asynccontextmanager
 import asyncio
 
-# Import API routers
 from api.v1.router import api_router
 from db.init_db import init_db
 from huggingface.model_cache import ModelCache
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -21,21 +19,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Lifespan context manager for FastAPI app.
-    Handles startup and shutdown events.
-    """
-    # Startup logic
     logger.info("Initializing database...")
     init_db()
     logger.info("ModelRouter API server is starting up")
 
     yield
     
-    # Shutdown logic
     logger.info("ModelRouter API server is shutting down")
     
-    # Cleanup model cache resources
     try:
         logger.info("Cleaning up model cache...")
         model_cache = ModelCache()
@@ -51,16 +42,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update with specific origins in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Custom exception handling
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
@@ -69,10 +58,8 @@ async def generic_exception_handler(request: Request, exc: Exception):
         content={"error": {"message": str(exc), "type": "server_error"}},
     )
 
-# Include API routes
 app.include_router(api_router, prefix="/v1")
 
-# Custom OpenAPI schema that better matches OpenAI's format
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
@@ -83,8 +70,6 @@ def custom_openapi():
         description=app.description,
         routes=app.routes,
     )
-    
-    # Customize the schema here if needed to match OpenAI's format
     
     app.openapi_schema = openapi_schema
     return app.openapi_schema

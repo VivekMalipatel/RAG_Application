@@ -1,91 +1,101 @@
-"""
-Base client for interacting with the Model Router API.
-
-This module provides a client for communicating with the Model Router API,
-which is compatible with the OpenAI API structure.
-"""
-
 import logging
 import os
-from typing import Dict, Any, Optional, Union, List
-import openai
-from pydantic import BaseModel
+import json
+import asyncio
+from typing import Dict, Any, List, Optional, Union, Tuple
+from urllib.parse import urljoin
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
-class ModelConfig(BaseModel):
-    """Configuration for Model Router API connection."""
-    api_key: str = "test-key"  # Many clients require an API key, even if not used
-    base_url: str = "http://localhost:8000/v1"
-    timeout: int = 120  # seconds
-    default_model: str = "gpt-3.5-turbo"  # Default model identifier
-    embedding_model: str = "text-embedding-ada-002"  # Default embedding model
-
 class ModelClient:
-    """Client for interacting with the Model Router API."""
     
     def __init__(
-        self, 
-        api_key: Optional[str] = None, 
-        base_url: Optional[str] = None,
-        timeout: Optional[int] = None,
-        default_model: Optional[str] = None,
-        embedding_model: Optional[str] = None
+        self,
+        api_base: Optional[str] = None,
+        api_key: Optional[str] = None,
+        timeout: int = 60,
+        max_retries: int = 3,
+        retry_delay: int = 1
     ):
-        """
-        Initialize the Model Client.
+        self.api_base = api_base or os.environ.get("MODEL_API_BASE", "http://localhost:8000/v1")
+        self.api_key = api_key or os.environ.get("MODEL_API_KEY", "")
+        self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
         
-        Args:
-            api_key: API key for authentication (optional for local Model Router)
-            base_url: Base URL of the Model Router API
-            timeout: Request timeout in seconds
-            default_model: Default model to use for text generation
-            embedding_model: Default model to use for embeddings
-        """
-        # Load configuration from environment variables or use defaults
-        self.config = ModelConfig(
-            api_key=api_key or os.getenv("MODEL_ROUTER_API_KEY", "test-key"),
-            base_url=base_url or os.getenv("MODEL_ROUTER_BASE_URL", "http://localhost:8000/v1"),
-            timeout=timeout or int(os.getenv("MODEL_ROUTER_TIMEOUT", "120")),
-            default_model=default_model or os.getenv("MODEL_ROUTER_DEFAULT_MODEL", "gpt-3.5-turbo"),
-            embedding_model=embedding_model or os.getenv("MODEL_ROUTER_EMBEDDING_MODEL", "text-embedding-ada-002")
-        )
-        
-        # Configure the OpenAI client with our Model Router API settings
-        self.client = openai.OpenAI(
-            api_key=self.config.api_key,
-            base_url=self.config.base_url,
-            timeout=self.config.timeout
-        )
-        
-        logger.info(f"Initialized Model Client with base URL: {self.config.base_url}")
+        logger.info(f"Initialized Model client with API base: {self.api_base}")
     
-    def get_available_models(self) -> List[Dict[str, Any]]:
-        """
-        Get list of available models from the Model Router API.
-        
-        Returns:
-            List of model information dictionaries
-        """
+    async def get_models(self) -> Dict[str, Any]:
+        logger.info("Getting available models")
         try:
-            response = self.client.models.list()
-            logger.info(f"Retrieved {len(response.data)} models from Model Router API")
-            return [model.model_dump() for model in response.data]
+            endpoint = "/models"
+            response = await self._make_request("GET", endpoint)
+            return response
         except Exception as e:
-            logger.error(f"Error retrieving models: {str(e)}")
-            return []
+            logger.error(f"Error getting models: {str(e)}")
+            return {"success": False, "error": str(e)}
     
-    def health_check(self) -> bool:
-        """
-        Check if the Model Router API is available.
-        
-        Returns:
-            True if the API is available, False otherwise
-        """
+    async def check_health(self) -> Dict[str, Any]:
+        logger.info("Checking API health")
         try:
-            # Most OpenAI-compatible APIs have a /models endpoint that can be used as a health check
-            _ = self.client.models.list()
-            return True
+            endpoint = "/health"
+            response = await self._make_request("GET", endpoint)
+            return {"success": True, "status": response}
         except Exception as e:
-            logger.error(f"Model Router API health check failed: {str(e)}")
-            return False
+            logger.error(f"API health check failed: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    async def _make_request(
+        self, 
+        method: str, 
+        endpoint: str, 
+        data: Optional[Dict[str, Any]] = None, 
+        params: Optional[Dict[str, Any]] = None,
+        stream: bool = False
+    ) -> Dict[str, Any]:
+        url = urljoin(self.api_base, endpoint)
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+            
+        for attempt in range(self.max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    if stream:
+                        response = await client.stream(
+                            method,
+                            url,
+                            json=data,
+                            params=params,
+                            headers=headers
+                        )
+                        return response
+                    else:
+                        if method.upper() == "GET":
+                            response = await client.get(url, params=params, headers=headers)
+                        elif method.upper() == "POST":
+                            response = await client.post(url, json=data, headers=headers)
+                        else:
+                            raise ValueError(f"Unsupported HTTP method: {method}")
+                        
+                        response.raise_for_status()
+                        
+                        return response.json()
+            
+            except httpx.HTTPStatusError as e:
+                logger.warning(f"HTTP error on attempt {attempt+1}/{self.max_retries}: {str(e)}")
+                if attempt == self.max_retries - 1:
+                    logger.error(f"Maximum retries reached. Last error: {str(e)}")
+                    raise Exception(f"API request failed after {self.max_retries} attempts: {str(e)}")
+                await asyncio.sleep(self.retry_delay)
+                
+            except Exception as e:
+                logger.error(f"Request error on attempt {attempt+1}/{self.max_retries}: {str(e)}")
+                if attempt == self.max_retries - 1:
+                    raise Exception(f"API request failed after {self.max_retries} attempts: {str(e)}")
+                await asyncio.sleep(self.retry_delay)

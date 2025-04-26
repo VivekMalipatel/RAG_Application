@@ -21,12 +21,8 @@ async def ingest_file(
     metadata: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Upload a file for processing and indexing
-    """
     logger.info(f"Received file: {file.filename} from source: {source}")
     
-    # Parse metadata if provided
     meta_dict = None
     if metadata:
         try:
@@ -34,13 +30,11 @@ async def ingest_file(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid metadata format")
     
-    # Create file request
     file_request = FileIngestRequest(
         source=source,
         metadata=meta_dict
     )
     
-    # Process the file using FileService
     file_service = FileService(db)
     result = await file_service.process_file(file, file_request, background_tasks)
     
@@ -55,12 +49,8 @@ async def ingest_url(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Submit a URL for processing and indexing
-    """
     logger.info(f"Received URL: {url_request.url} from source: {url_request.source}")
     
-    # Process the URL using UrlService
     url_service = UrlService(db)
     result = await url_service.process_url(url_request, background_tasks)
     
@@ -75,12 +65,8 @@ async def ingest_raw_text(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Submit raw text for processing and indexing
-    """
     logger.info(f"Received raw text from source: {text_request.source}")
     
-    # Process the text using TextService
     text_service = TextService(db)
     result = await text_service.process_text(text_request, background_tasks)
     

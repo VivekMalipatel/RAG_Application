@@ -2,7 +2,6 @@ import logging
 from typing import Optional, Dict, List, Union, AsyncGenerator, Any, Type
 from pydantic import BaseModel
 
-# Import provider-specific clients
 from openai_client import OpenAIClient
 from ollama import OllamaClient
 from huggingface import HuggingFaceClient
@@ -13,12 +12,9 @@ from core.model_selector import ModelSelector
 from core.model_selector import ModelNotFoundException
 
 class UnsupportedFeatureError(Exception):
-    """Exception raised when a feature is not supported by a provider or model"""
     pass
 
 class ModelRouter:
-    """Unified model router to abstract interactions with multiple model providers"""
-
     def __init__(
         self,
         provider: Union[Provider, str],
@@ -35,7 +31,6 @@ class ModelRouter:
         stop: Optional[Union[str, List[str]]] = None,
         **kwargs
     ):
-        # Convert string provider to Provider enum if needed
         if isinstance(provider, str):
             try:
                 self.provider = Provider(provider)
@@ -51,7 +46,6 @@ class ModelRouter:
         self.max_tokens = max_tokens
         self.logger = logging.getLogger(__name__)
         
-        # Common parameters for all providers
         common_params = {
             "system_prompt": system_prompt,
             "temperature": temperature,
@@ -64,16 +58,13 @@ class ModelRouter:
             **kwargs
         }
         
-        # Initialize the client based on provider
         if self.provider == Provider.OPENAI:
             self.client = OpenAIClient(model_name=model_name, **common_params)
             
         elif self.provider == Provider.OLLAMA:
-            # Ollama client has a different parameter name for model
             self.client = OllamaClient(hf_repo=model_name, quantization=model_quantization, **common_params)
             
         elif self.provider == Provider.HUGGINGFACE:
-            # HuggingFace client needs the model type
             self.client = HuggingFaceClient(model_name=model_name, model_type=model_type, **common_params)
             
         else:
@@ -85,11 +76,9 @@ class ModelRouter:
         model_type: ModelType,
         **kwargs
     ) -> 'ModelRouter':
-        """Factory method to create a ModelRouter instance based on model name"""
         selector = ModelSelector()
         
         try:
-            # Use the new select_best_model method which returns both provider and actual model name
             provider, actual_model_name = await selector.select_best_model(
                 model_type=model_type, 
                 model_name=model_name
@@ -97,15 +86,13 @@ class ModelRouter:
             
             return ModelRouter(
                 provider=provider,
-                model_name=actual_model_name,  # Use the actual resolved model name
+                model_name=actual_model_name,
                 model_type=model_type,
                 **kwargs
             )
         except ModelNotFoundException as e:
-            # Handle model not found error
             raise ValueError(f"Model not found: {str(e)}")
         except Exception as e:
-            # Handle other errors
             raise ValueError(f"Error initializing model router: {str(e)}")
 
     async def generate_text(
@@ -117,7 +104,6 @@ class ModelRouter:
         stop: Optional[Union[str, List[str]]] = None,
         stream: Optional[bool] = None
     ) -> Union[str, AsyncGenerator[str, None]]:
-        """Generate text from a prompt or list of messages"""
         try:
             return await self.client.generate_text(
                 prompt, 
@@ -132,18 +118,14 @@ class ModelRouter:
             raise
 
     async def embed_text(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for a list of texts"""
         if not hasattr(self.client, "embed_text"):
             raise UnsupportedFeatureError(f"Provider {self.provider} does not support text embedding")
             
         try:
-            # Check if the client's embed_text method is a coroutine function
             import inspect
             if inspect.iscoroutinefunction(self.client.embed_text):
-                # If it's async, use await
                 return await self.client.embed_text(texts)
             else:
-                # If it's not async, call it directly
                 return self.client.embed_text(texts)
         except Exception as e:
             self.logger.error(f"Error generating embeddings with {self.provider.value}: {str(e)}")
@@ -155,18 +137,14 @@ class ModelRouter:
         documents: List[str], 
         max_documents: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        """Rerank documents based on relevance to a query"""
         if not hasattr(self.client, "rerank_documents"):
             raise UnsupportedFeatureError(f"Provider {self.provider} does not support document reranking")
             
         try:
-            # Check if the client's rerank_documents method is a coroutine function
             import inspect
             if inspect.iscoroutinefunction(self.client.rerank_documents):
-                # If it's async, use await
                 return await self.client.rerank_documents(query, documents, max_documents)
             else:
-                # If it's not async, call it directly
                 return self.client.rerank_documents(query, documents, max_documents)
         except Exception as e:
             self.logger.error(f"Error reranking documents with {self.provider.value}: {str(e)}")
@@ -178,7 +156,6 @@ class ModelRouter:
         schema: Union[Dict[str, Any], Type[BaseModel]],
         max_tokens: Optional[int] = None
     ) -> Dict[str, Any]:
-        """Generate structured output conforming to a provided schema"""
         if not hasattr(self.client, "generate_structured_output"):
             raise UnsupportedFeatureError(f"Provider {self.provider} does not support structured output generation")
             
@@ -193,16 +170,14 @@ class ModelRouter:
             raise
 
     def set_system_prompt(self, system_prompt: str) -> None:
-        """Update the system prompt for the model"""
         self.system_prompt = system_prompt
         
         if hasattr(self.client, "set_system_prompt"):
             self.client.set_system_prompt(system_prompt)
             
     def is_model_available(self) -> bool:
-        """Check if the model is available in the provider"""
         if not hasattr(self.client, "is_model_available"):
-            return True  # Assume available if we can't check
+            return True
             
         try:
             return self.client.is_model_available()
