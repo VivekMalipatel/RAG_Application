@@ -1,3 +1,3 @@
-from app.core.markitdown.converter import MarkdownConverter
+from .markdown_handler import MarkDown
 
-__all__ = ["MarkdownConverter"]
+__all__ = ["MarkDown"]

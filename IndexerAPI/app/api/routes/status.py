@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
-from app.schemas.file_schemas import StatusResponse
-from app.services.status_service import StatusService
+from app.schemas.schemas import StatusResponse
+from app.queue import QueueHandler
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -16,10 +16,15 @@ async def get_status(
 ):
     logger.info(f"Status check for item: {item_id}")
     
-    status_service = StatusService(db)
-    result = await status_service.get_item_status(item_id)
+    queue_handler = QueueHandler(db)
+    result = await queue_handler.get_item_status(item_id)
     
     if not result:
         raise HTTPException(status_code=404, detail="Item not found")
-        
-    return result
+    
+    return StatusResponse(
+        id=result["id"],
+        status=result["status"],
+        message=result["message"],
+        result=result.get("result")
+    )

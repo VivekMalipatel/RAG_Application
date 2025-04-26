@@ -1,21 +1,18 @@
 import logging
-from fastapi import APIRouter, UploadFile, File, Depends, BackgroundTasks, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, Form, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, Dict, Any
+from typing import Optional
 import json
 
 from app.db.database import get_db
-from app.schemas.file_schemas import FileIngestRequest, UrlIngestRequest, RawTextIngestRequest, IngestResponse
-from app.services.file_service import FileService
-from app.services.url_service import UrlService
-from app.services.text_service import TextService
+from app.schemas.schemas import FileIngestRequest, UrlIngestRequest, RawTextIngestRequest, IngestResponse
+from app.queue import QueueHandler
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.post("/file", response_model=IngestResponse)
 async def ingest_file(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     source: str = Form(...),
     metadata: Optional[str] = Form(None),
@@ -30,47 +27,59 @@ async def ingest_file(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid metadata format")
     
-    file_request = FileIngestRequest(
+    # Read file content
+    file_content = await file.read()
+    
+    # Add file to queue
+    queue_handler = QueueHandler(db)
+    queue_id = await queue_handler.enqueue_file(
+        file_content=file_content,
+        filename=file.filename,
         source=source,
         metadata=meta_dict
     )
     
-    file_service = FileService(db)
-    result = await file_service.process_file(file, file_request, background_tasks)
-    
     return IngestResponse(
-        id=result.id,
+        id=queue_id,
         message="File accepted for processing"
     )
 
 @router.post("/url", response_model=IngestResponse)
 async def ingest_url(
     url_request: UrlIngestRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     logger.info(f"Received URL: {url_request.url} from source: {url_request.source}")
     
-    url_service = UrlService(db)
-    result = await url_service.process_url(url_request, background_tasks)
+    # Add URL to queue
+    queue_handler = QueueHandler(db)
+    queue_id = await queue_handler.enqueue_url(
+        url=url_request.url,
+        source=url_request.source,
+        metadata=url_request.metadata
+    )
     
     return IngestResponse(
-        id=result.id,
+        id=queue_id,
         message="URL accepted for processing"
     )
 
 @router.post("/raw-text", response_model=IngestResponse)
 async def ingest_raw_text(
     text_request: RawTextIngestRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     logger.info(f"Received raw text from source: {text_request.source}")
     
-    text_service = TextService(db)
-    result = await text_service.process_text(text_request, background_tasks)
+    # Add text to queue
+    queue_handler = QueueHandler(db)
+    queue_id = await queue_handler.enqueue_text(
+        text=text_request.text,
+        source=text_request.source,
+        metadata=text_request.metadata
+    )
     
     return IngestResponse(
-        id=result.id,
+        id=queue_id,
         message="Raw text accepted for processing"
     )
