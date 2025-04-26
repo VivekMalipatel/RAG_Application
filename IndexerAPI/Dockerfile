@@ -4,8 +4,6 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    tesseract-ocr \
-    libgl1-mesa-glx \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
