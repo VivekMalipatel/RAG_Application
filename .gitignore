@@ -28,3 +28,5 @@ IndexerAPI/.indexerapi
 IndexerAPI/.models
 .DS_Store
 Temp_Files/.DS_Store
+IndexerAPI/app.db
+ModelRouterAPI/modelrouter.db

@@ -45,7 +45,7 @@ class QueueConsumer:
                 await self.queue_handler.move_to_failure_queue(queue_item.id, error_msg)
                 return {"id": queue_item.id, "status": "failed", "error": error_msg}
             
-            metadata = json.loads(queue_item.metadata) if queue_item.metadata else {}
+            metadata = json.loads(queue_item.item_metadata) if queue_item.item_metadata else {}
             try:
                 processed_data = await processor.process(data, metadata)
             except Exception as e:
