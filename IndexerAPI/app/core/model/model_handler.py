@@ -15,7 +15,7 @@ class ModelHandler:
         self.client = OpenAI(api_key=self.api_key, base_url=self.api_base)
         logger.info(f"ModelHandler initialized with API base: {self.api_base}")
 
-    def embed_text(self, texts: List[str], model: str = "nomic-ai/colnomic-embed-multimodal-7b") -> List[List[float]]:
+    def embed_text(self, texts: List[str], model: str = "nomic-ai/colnomic-embed-multimodal-3b") -> List[List[float]]:
         if not texts:
             logger.warning("Empty texts list provided for embedding")
             return []
@@ -36,7 +36,7 @@ class ModelHandler:
             logger.error(f"Error generating text embeddings: {str(e)}")
             raise
 
-    def embed_image(self, image_texts: List[Dict[str, str]], model: str = "nomic-ai/colnomic-embed-multimodal-7b") -> List[List[float]]:
+    def embed_image(self, image_texts: List[Dict[str, str]], model: str = "nomic-ai/colnomic-embed-multimodal-3b") -> List[List[float]]:
         if not image_texts:
             logger.warning("Empty image_texts list provided for embedding")
             return []

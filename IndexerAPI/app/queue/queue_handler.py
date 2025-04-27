@@ -159,7 +159,7 @@ class QueueHandler:
             "item_type": queue_item.item_type,
             "source": queue_item.source,
             "indexing_datetime": queue_item.indexing_datetime.isoformat(),
-            "metadata": json.loads(queue_item.metadata) if queue_item.metadata else None
+            "metadata": json.loads(queue_item.item_metadata) if queue_item.item_metadata else None
         }
     
     async def list_queue_items(self, status: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
@@ -214,7 +214,7 @@ class QueueHandler:
             metadata['retry_count'] = retry_count
             queue_item.item_metadata = json.dumps(metadata)
         else:
-            metadata = json.loads(queue_item.metadata) if queue_item.metadata else {}
+            metadata = json.loads(queue_item.item_metadata) if queue_item.item_metadata else {}
             metadata['first_failure'] = datetime.now().isoformat()
             metadata['error_message'] = error_message
             metadata['retry_count'] = 1
@@ -249,7 +249,7 @@ class QueueHandler:
                 "item_type": queue_item.item_type,
                 "source": queue_item.source,
                 "indexing_datetime": queue_item.indexing_datetime.isoformat(),
-                "metadata": json.loads(queue_item.metadata) if queue_item.metadata else None,
+                "metadata": json.loads(queue_item.item_metadata) if queue_item.item_metadata else None,
                 "error_message": failure_item.error_message,
                 "failure_datetime": failure_item.failure_datetime.isoformat(),
                 "retry_count": failure_item.retry_count

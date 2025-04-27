@@ -10,6 +10,9 @@ asyncio>=3.4.3
 openai>=1.0.0
 transformers>=4.30.0
 torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+# Install the above PyTorch packages with: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 requests>=2.28.2
 pytest>=7.3.1
 aiohttp>=3.8.5

@@ -113,6 +113,7 @@ numpy==2.2.5
     #   peft
     #   scikit-learn
     #   scipy
+    #   torchvision
     #   transformers
 nvidia-cublas-cu12==12.4.5.8
     # via
@@ -143,7 +144,6 @@ nvidia-nccl-cu12==2.21.5
     # via torch
 nvidia-nvjitlink-cu12==12.4.127
     # via
-    #   nvidia-cufft-cu12
     #   nvidia-cusolver-cu12
     #   nvidia-cusparse-cu12
     #   torch
@@ -163,7 +163,9 @@ passlib==1.7.4
 peft==0.15.2
     # via colpali-engine
 pillow==11.2.1
-    # via colpali-engine
+    # via
+    #   colpali-engine
+    #   torchvision
 pluggy==1.5.0
     # via pytest
 propcache==0.3.1
@@ -245,6 +247,12 @@ torch==2.6.0
     #   accelerate
     #   colpali-engine
     #   peft
+    #   torchaudio
+    #   torchvision
+torchaudio==2.6.0
+    # via -r requirements.in
+torchvision==0.21.0
+    # via -r requirements.in
 tqdm==4.67.1
     # via
     #   huggingface-hub
