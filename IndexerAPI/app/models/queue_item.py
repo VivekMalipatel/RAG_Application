@@ -1,8 +1,6 @@
 from sqlalchemy import Column, String, DateTime, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
+from app.db.base import Base
 
 class QueueItem(Base):
     __tablename__ = "queue_items"
@@ -12,7 +10,7 @@ class QueueItem(Base):
     item_type = Column(String, nullable=False)
     status = Column(String, nullable=False)
     indexing_datetime = Column(DateTime, nullable=False)
-    metadata = Column(Text, nullable=True)
+    item_metadata = Column(Text, nullable=True)
     message = Column(Text, nullable=True)
     
     file_data = relationship("FileData", back_populates="queue_item", uselist=False, cascade="all, delete-orphan")

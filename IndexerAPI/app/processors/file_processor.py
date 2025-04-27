@@ -4,7 +4,7 @@ import os
 import subprocess
 from typing import Dict, Any, List, Optional
 from PIL import Image
-import PyPDF2
+import pypdf
 from pdf2image import convert_from_bytes
 import base64
 from magika import Magika
@@ -87,17 +87,17 @@ class FileProcessor(BaseProcessor):
         else:
             raise ValueError(f"Unsupported File type: {file_type}")
     
-    def convert_to_images(self, file_data: bytes, file_type: str) -> List[Dict[str, Any]]:
+    def convert_to_images(self, file_data: bytes) -> List[Dict[str, Any]]:
         result = []
         
         try:
             pdf_stream = io.BytesIO(file_data)
-            pdf_reader = PyPDF2.PdfReader(pdf_stream)
+            pdf_reader = pypdf.PdfReader(pdf_stream)
             total_pages = len(pdf_reader.pages)
             logger.info(f"Processing PDF with {total_pages} pages")
     
             for page_num in range(total_pages):
-                writer = PyPDF2.PdfWriter()
+                writer = pypdf.PdfWriter()
                 writer.add_page(pdf_reader.pages[page_num])
                 single_page_pdf = io.BytesIO()
                 writer.write(single_page_pdf)
@@ -187,7 +187,7 @@ class FileProcessor(BaseProcessor):
             logger.error(error_msg)
             raise ValueError(error_msg)
 
-        images_with_text = self.convert_to_images(file_data, file_type)
+        images_with_text = self.convert_to_images(file_data)
         
         return {
             "data": images_with_text
@@ -271,43 +271,34 @@ async def main():
         print(f"Error: File '{file_path}' not found.")
         sys.exit(1)
     
-    # Import the FileProcessor and initialize it
     processor = FileProcessor()
-    
-    # Read the file data
+
     with open(file_path, 'rb') as f:
         file_data = f.read()
     
-    # Get file type using the processor's detect method
     file_type = processor.detect_file_type(file_data)
     print(f"Detected file type: {file_type}")
     
     try:
-        # Process the document
         result = processor.process_unstructured_document(file_data, file_type)
-        
-        # Print summary of results
+
         print("\n--- Processing Results ---")
         print(f"Processed {len(result['data'])} pages/images")
-        
-        # Display first page text sample (truncated)
+
         if result['data'] and len(result['data']) > 0:
             sample_text = result['data'][0]['text']
             print(f"\nSample text from first page (truncated to 150 chars):")
             print(f"{sample_text[:150]}...")
-            
-            # Info about base64 image size
+
             image_size = len(result['data'][0]['image'])
             print(f"\nBase64 image size for first page: {image_size} characters")
-        
-        # Save the full result to a JSON file for further analysis
+
         output_dir = Path('output')
         output_dir.mkdir(exist_ok=True)
         
         output_file = output_dir / f"{file_path.stem}_processed.json"
         
         with open(output_file, 'w', encoding='utf-8') as f:
-            # Convert result to JSON with pretty printing
             json.dump(result, f, indent=2, ensure_ascii=False)
             
         print(f"\nFull results saved to: {output_file}")

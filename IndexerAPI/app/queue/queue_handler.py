@@ -33,7 +33,7 @@ class QueueHandler:
             item_type="file",
             status="queued",
             indexing_datetime=datetime.now(),
-            metadata=json.dumps(metadata)
+            item_metadata=json.dumps(metadata)
         )
         
         file_data = FileData(
@@ -56,7 +56,7 @@ class QueueHandler:
             item_type="url",
             status="queued",
             indexing_datetime=datetime.now(),
-            metadata=json.dumps(metadata) if metadata else None
+            item_metadata=json.dumps(metadata) if metadata else None
         )
         
         url_data = URLData(
@@ -79,7 +79,7 @@ class QueueHandler:
             item_type="text",
             status="queued",
             indexing_datetime=datetime.now(),
-            metadata=json.dumps(metadata) if metadata else None
+            item_metadata=json.dumps(metadata) if metadata else None
         )
         
         text_data = TextData(
@@ -203,7 +203,7 @@ class QueueHandler:
         failure_item = result.scalar_one_or_none()
         
         if failure_item:
-            metadata = json.loads(queue_item.metadata) if queue_item.metadata else {}
+            metadata = json.loads(queue_item.item_metadata) if queue_item.item_metadata else {}
             retry_count = int(failure_item.retry_count) + 1
             failure_item.retry_count = str(retry_count)
             failure_item.error_message = error_message
@@ -212,13 +212,13 @@ class QueueHandler:
             metadata['last_failure'] = datetime.now().isoformat()
             metadata['error_message'] = error_message
             metadata['retry_count'] = retry_count
-            queue_item.metadata = json.dumps(metadata)
+            queue_item.item_metadata = json.dumps(metadata)
         else:
             metadata = json.loads(queue_item.metadata) if queue_item.metadata else {}
             metadata['first_failure'] = datetime.now().isoformat()
             metadata['error_message'] = error_message
             metadata['retry_count'] = 1
-            queue_item.metadata = json.dumps(metadata)
+            queue_item.item_metadata = json.dumps(metadata)
             
             failure_item = FailureQueueItem(
                 queue_id=queue_id,
@@ -271,9 +271,9 @@ class QueueHandler:
         queue_item.status = "queued"
         queue_item.message = "Retry after failure"
 
-        metadata = json.loads(queue_item.metadata) if queue_item.metadata else {}
+        metadata = json.loads(queue_item.item_metadata) if queue_item.item_metadata else {}
         metadata['last_retry'] = datetime.now().isoformat()
-        queue_item.metadata = json.dumps(metadata)
+        queue_item.item_metadata = json.dumps(metadata)
         
         # Don't remove from failure queue table - just keep the record for tracking
         # We'll update the retry count when it fails again if needed

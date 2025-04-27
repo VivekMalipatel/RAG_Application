@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, ForeignKey, Text, DateTime
 from sqlalchemy.orm import relationship
 
-from app.models.queue_item import Base
+from app.db.base import Base
 
 class FailureQueueItem(Base):
     __tablename__ = "failure_queue_items"

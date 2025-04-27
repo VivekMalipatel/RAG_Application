@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, LargeBinary, ForeignKey
 from sqlalchemy.orm import relationship
 
-from app.models.queue_item import Base
+from app.db.base import Base
 
 class FileData(Base):
     __tablename__ = "file_data"

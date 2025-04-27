@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, Text, ForeignKey
 from sqlalchemy.orm import relationship
 
-from app.models.queue_item import Base
+from app.db.base import Base
 
 class URLData(Base):
     __tablename__ = "url_data"
