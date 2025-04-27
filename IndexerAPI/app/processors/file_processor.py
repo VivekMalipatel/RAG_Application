@@ -37,13 +37,16 @@ class FileProcessor(BaseProcessor):
             'txtutf8',
             'txtutf16',
             'pptx',
+            'jpeg',
+            'jpg',
+            'png'
         ]
         
         self.structured_docs = [
             'csv',
             'xls',
             'xlsx',
-            'txt',
+            'txt'
         ]
 
         self.direct_processing_docs = [
@@ -196,6 +199,12 @@ class FileProcessor(BaseProcessor):
     def process_structured_document(self, file_data: bytes, file_type: str) -> Dict[str, Any]:
         try:
             markdown_text = self.markdown.convert_bytes(file_data)
+
+            #TODO: Determine a strategy to proerly handle large files
+            MAX_CHARS = 8000 
+            if len(markdown_text) > MAX_CHARS:
+                logger.warning(f"Structured document markdown is too long ({len(markdown_text)} chars). Truncating to {MAX_CHARS} chars.")
+                markdown_text = markdown_text[:MAX_CHARS]
             return {
                 "data": [markdown_text]
             }

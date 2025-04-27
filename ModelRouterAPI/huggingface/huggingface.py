@@ -166,6 +166,9 @@ class HuggingFaceClient:
                 with torch.no_grad():
                     query_embeddings = self.model(**batch_queries)
                 
+                if query_embeddings.dtype != torch.float32:
+                    query_embeddings = query_embeddings.to(torch.float32)
+                
                 return query_embeddings.cpu().numpy().tolist()
             except Exception as e:
                 self.logger.error(f"Error generating embeddings with Nomic model: {e}")
@@ -174,6 +177,10 @@ class HuggingFaceClient:
             inputs = self.tokenizer(texts, padding=True, return_tensors="pt").to(self.device)
             with torch.no_grad():
                 embeddings = self.model(**inputs).last_hidden_state.mean(dim=1)
+            
+            if embeddings.dtype != torch.float32:
+                embeddings = embeddings.to(torch.float32)
+
             return embeddings.cpu().numpy().tolist()
     
     async def embed_image(self, images: List[dict]) -> List[List[float]]:
@@ -220,6 +227,9 @@ class HuggingFaceClient:
                 
                 with torch.no_grad():
                     image_embeddings = self.model(**batch_images)
+                
+                if image_embeddings.dtype != torch.float32:
+                    image_embeddings = image_embeddings.to(torch.float32)
                 
                 return image_embeddings.cpu().numpy().tolist()
             except Exception as e:

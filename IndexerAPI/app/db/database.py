@@ -17,13 +17,13 @@ SQLALCHEMY_DATABASE_URL = settings.DB_URL
 if SQLALCHEMY_DATABASE_URL.startswith('sqlite'):
     engine = create_async_engine(
         SQLALCHEMY_DATABASE_URL.replace('sqlite:', 'sqlite+aiosqlite:'),
-        echo=True,
+        echo=False,
         future=True
     )
 else:
     engine = create_async_engine(
         SQLALCHEMY_DATABASE_URL,
-        echo=True,
+        echo=False,
         future=True
     )
 
