@@ -168,17 +168,32 @@ class OllamaClient:
                     elif content_type == 'image_url':
                         image_url = content_item.get('image_url', {}).get('url')
                         if image_url:
-                            try:
-                                async with httpx.AsyncClient() as client:
-                                    response = await client.get(image_url)
-                                    if response.status_code == 200:
-                                        import base64
-                                        base64_image = base64.b64encode(response.content).decode('utf-8')
-                                        images.append(base64_image)
-                                    else:
-                                        self.logger.error(f"Failed to download image from {image_url}, status: {response.status_code}")
-                            except Exception as e:
-                                self.logger.error(f"Error processing image {image_url}: {str(e)}")
+                            import base64
+                            # Check if the image is already in Base64 format (with data URI scheme)
+                            if image_url.startswith('data:image/'):
+                                # Extract the Base64 part after the comma
+                                base64_part = image_url.split(',', 1)
+                                if len(base64_part) > 1:
+                                    images.append(base64_part[1])
+                                else:
+                                    self.logger.error(f"Invalid Base64 image format: {image_url[:30]}...")
+                            elif image_url.startswith('http://') or image_url.startswith('https://'):
+                                try:
+                                    async with httpx.AsyncClient() as client:
+                                        response = await client.get(image_url)
+                                        if response.status_code == 200:
+                                            base64_image = base64.b64encode(response.content).decode('utf-8')
+                                            images.append(base64_image)
+                                        else:
+                                            self.logger.error(f"Failed to download image from {image_url}, status: {response.status_code}")
+                                except Exception as e:
+                                    self.logger.error(f"Error processing image {image_url}: {str(e)}")
+                            else:
+                                try:
+                                    base64.b64decode(image_url)
+                                    images.append(image_url)
+                                except Exception as e:
+                                    self.logger.error(f"Invalid Base64 string or URL: {image_url[:30]}... Error: {str(e)}")
                 
                 processed_message["content"] = " ".join(text_parts)
                 
