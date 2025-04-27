@@ -27,7 +27,7 @@ class HuggingFaceClient:
         self.device = (
             device
             if device
-            else ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+            else ("auto" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         )
         self.model_name = model_name
         self.model_type = model_type
