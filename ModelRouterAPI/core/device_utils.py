@@ -2,12 +2,17 @@ import os
 import logging
 import torch
 from config import settings
+import gc
 
 logger = logging.getLogger(__name__)
 
 class DeviceManager:
     _cached_device = None
     _device_info_logged = False
+    # Default thresholds
+    GPU_MEMORY_THRESHOLD = 0.8  # 80%
+    GPU_MEMORY_CRITICAL = 0.98  # 98%
+    CPU_MEMORY_THRESHOLD = 0.8  # 80%
     
     @staticmethod
     def get_optimal_device() -> str:
@@ -151,6 +156,7 @@ class DeviceManager:
                     free_mem, total_mem = torch.cuda.mem_get_info(current_device)
                     stats["gpu_free"] = free_mem / (1024**3)
                     stats["gpu_total"] = total_mem / (1024**3)
+                    stats["gpu_used_percent"] = 100 - (free_mem / total_mem * 100)
             except Exception as e:
                 logger.warning(f"Could not get GPU memory stats: {e}")
                 
@@ -159,7 +165,84 @@ class DeviceManager:
             stats["cpu_percent"] = psutil.cpu_percent()
             stats["ram_used_percent"] = psutil.virtual_memory().percent
             stats["ram_available_gb"] = psutil.virtual_memory().available / (1024**3)
+            stats["ram_total_gb"] = psutil.virtual_memory().total / (1024**3)
         except ImportError:
             pass
             
         return stats
+    
+    @staticmethod
+    def check_cuda_availability_with_memory_threshold():
+        """Check if CUDA is available and has enough memory to load models."""
+        if not torch.cuda.is_available():
+            return False, "CUDA not available"
+            
+        try:
+            stats = DeviceManager.get_memory_stats()
+            if "gpu_used_percent" in stats:
+                gpu_usage = stats["gpu_used_percent"] / 100
+                if gpu_usage < DeviceManager.GPU_MEMORY_THRESHOLD:
+                    return True, f"GPU has sufficient memory (using {gpu_usage*100:.1f}% of total)"
+                else:
+                    return False, f"GPU memory usage too high: {gpu_usage*100:.1f}% (threshold: {DeviceManager.GPU_MEMORY_THRESHOLD*100}%)"
+            else:
+                # If we can't get memory info, assume it's OK if CUDA is available
+                return True, "CUDA available but couldn't determine memory usage"
+        except Exception as e:
+            logger.warning(f"Error checking GPU memory: {e}")
+            return False, f"Error checking GPU memory: {str(e)}"
+    
+    @staticmethod
+    def check_cpu_memory_availability():
+        """Check if the system has enough CPU memory to load models."""
+        try:
+            import psutil
+            mem_info = psutil.virtual_memory()
+            if mem_info.percent < DeviceManager.CPU_MEMORY_THRESHOLD * 100:
+                return True, f"CPU has sufficient memory (using {mem_info.percent:.1f}%)"
+            else:
+                return False, f"CPU memory usage too high: {mem_info.percent:.1f}% (threshold: {DeviceManager.CPU_MEMORY_THRESHOLD*100}%)"
+        except Exception as e:
+            logger.warning(f"Error checking CPU memory: {e}")
+            return False, f"Error checking CPU memory: {str(e)}"
+    
+    @staticmethod
+    def is_gpu_memory_critical():
+        """Check if GPU memory usage is critically high."""
+        if not torch.cuda.is_available():
+            return False
+            
+        try:
+            stats = DeviceManager.get_memory_stats()
+            if "gpu_used_percent" in stats:
+                gpu_usage = stats["gpu_used_percent"] / 100
+                return gpu_usage > DeviceManager.GPU_MEMORY_CRITICAL
+            return False
+        except Exception:
+            return False
+    
+    @staticmethod
+    def is_gpu_suitable_for_inference(batch_size=1, estimated_memory_per_item=0.1):
+        """
+        Check if GPU is suitable for inference based on current memory usage and batch size.
+        estimated_memory_per_item is in GB.
+        """
+        if not torch.cuda.is_available():
+            return False
+            
+        try:
+            stats = DeviceManager.get_memory_stats()
+            if "gpu_free" in stats:
+                required_memory = batch_size * estimated_memory_per_item
+                return stats["gpu_free"] >= required_memory
+            return True  # If we can't determine, assume it's OK
+        except Exception:
+            return True  # If we can't determine, assume it's OK
+    
+    @staticmethod
+    def clear_gpu_memory():
+        """Force clear the GPU memory cache."""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
+            logger.info("GPU memory cache cleared")
