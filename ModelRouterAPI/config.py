@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     
     HUGGINGFACE_API_TOKEN: Optional[str] = os.getenv("HUGGINGFACE_API_TOKEN")
     
-    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://10.9.0.6:11434")
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
     DEFAULT_MODELS: Dict[str, str] = {
         "openai": "gpt-3.5-turbo",
