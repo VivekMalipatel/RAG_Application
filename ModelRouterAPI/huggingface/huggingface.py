@@ -14,6 +14,9 @@ from model_type import ModelType
 from huggingface.model_cache import ModelCache
 from core.device_utils import DeviceManager
 
+# Global registry to remember model inference failures
+MODEL_INFERENCE_FAILURES = {}
+
 class HuggingFaceClient:
     def __init__(
         self,
@@ -71,6 +74,14 @@ class HuggingFaceClient:
     
     def _determine_optimal_device(self, requested_device: Optional[str] = None):
         """Determine the optimal device based on available hardware and memory."""
+        # Check if this model has had previous failures on GPU
+        if self.model_name in MODEL_INFERENCE_FAILURES:
+            failure_info = MODEL_INFERENCE_FAILURES[self.model_name]
+            if failure_info.get("gpu_failures", 0) > 0 and time.time() - failure_info.get("last_failure", 0) < 600:  # 10 minutes timeout
+                self.logger.warning(f"Model {self.model_name} previously failed on GPU, forcing CPU usage for next 10 minutes")
+                self.device = "cpu"
+                return
+                
         # First, respect explicitly requested device if provided
         if requested_device in ["cuda", "cpu", "mps"]:
             if requested_device == "cuda" and not torch.cuda.is_available():
@@ -322,10 +333,24 @@ class HuggingFaceClient:
         
         try:
             # Try recovery function (which should use CPU)
-            return await recovery_func()
+            result = await recovery_func()
+            
+            # Track successful recovery
+            if self.model_name in MODEL_INFERENCE_FAILURES:
+                MODEL_INFERENCE_FAILURES[self.model_name]["recovery_success"] = MODEL_INFERENCE_FAILURES[self.model_name].get("recovery_success", 0) + 1
+                
+            return result
         except Exception as e:
             self.logger.error(f"Recovery function also failed after OOM: {e}")
             self.logger.error(f"Exception trace: {traceback.format_exc()}")
+            
+            # Track CPU failures too
+            if self.model_name not in MODEL_INFERENCE_FAILURES:
+                MODEL_INFERENCE_FAILURES[self.model_name] = {"gpu_failures": 0, "cpu_failures": 0}
+            
+            MODEL_INFERENCE_FAILURES[self.model_name]["cpu_failures"] = MODEL_INFERENCE_FAILURES[self.model_name].get("cpu_failures", 0) + 1
+            MODEL_INFERENCE_FAILURES[self.model_name]["last_failure"] = time.time()
+            
             raise
 
     async def _ensure_cpu_model_available(self):
@@ -613,7 +638,14 @@ class HuggingFaceClient:
 
             self.logger.info(f"Moving processed batch to {actual_device}")
             
-            batch_images = batch_images.to(device=actual_device, dtype=torch.float32 if actual_device == 'cpu' else None)
+            # Check if batch_images is a dictionary or a tensor
+            if isinstance(batch_images, dict):
+                # For dictionary output from processor
+                batch_images = {k: v.to(device=actual_device, dtype=torch.float32 if actual_device == 'cpu' else None) 
+                              for k, v in batch_images.items()}
+            else:
+                # For tensor output from processor
+                batch_images = batch_images.to(device=actual_device, dtype=torch.float32 if actual_device == 'cpu' else None)
 
             if actual_device == 'cpu' and hasattr(inference_model, 'to'):
                 inference_model = inference_model.to(dtype=torch.float32)
@@ -626,13 +658,49 @@ class HuggingFaceClient:
             
             # Release memory if possible
             if actual_device == "cuda":
-                batch_images = batch_images.cpu()
-                torch.cuda.empty_cache()
+                try:
+                    # Safely move tensors to CPU if possible
+                    if isinstance(batch_images, dict):
+                        for k in batch_images:
+                            if hasattr(batch_images[k], 'cpu'):
+                                batch_images[k] = batch_images[k].cpu()
+                    elif hasattr(batch_images, 'cpu'):
+                        batch_images = batch_images.cpu()
+                    # Clear CUDA cache
+                    torch.cuda.empty_cache()
+                except (AttributeError, TypeError) as e:
+                    # Some processors return objects that can't be moved to CPU
+                    self.logger.warning(f"Could not move batch_images to CPU: {e}")
+                    torch.cuda.empty_cache()
+            
+            # Reset failure tracking for this model
+            if self.model_name in MODEL_INFERENCE_FAILURES:
+                MODEL_INFERENCE_FAILURES[self.model_name]["successful_runs"] = MODEL_INFERENCE_FAILURES[self.model_name].get("successful_runs", 0) + 1
             
             return image_embeddings.cpu().numpy().tolist()
+        except torch.cuda.OutOfMemoryError as e:
+            # Track GPU failures for this model
+            if self.model_name not in MODEL_INFERENCE_FAILURES:
+                MODEL_INFERENCE_FAILURES[self.model_name] = {"gpu_failures": 0, "cpu_failures": 0}
+            
+            MODEL_INFERENCE_FAILURES[self.model_name]["gpu_failures"] = MODEL_INFERENCE_FAILURES[self.model_name].get("gpu_failures", 0) + 1
+            MODEL_INFERENCE_FAILURES[self.model_name]["last_failure"] = time.time()
+            self.logger.warning(f"Marked {self.model_name} as having GPU memory issues. Will avoid GPU for next 10 minutes.")
+            
+            # Re-raise to be caught by the calling function
+            raise
         except Exception as e:
             self.logger.error(f"Error generating embeddings with Nomic model: {e}")
             self.logger.error(f"Exception trace: {traceback.format_exc()}")
+            
+            # If this is a GPU error, track it
+            if "cuda" in str(e).lower() or "gpu" in str(e).lower():
+                if self.model_name not in MODEL_INFERENCE_FAILURES:
+                    MODEL_INFERENCE_FAILURES[self.model_name] = {"gpu_failures": 0, "cpu_failures": 0}
+                
+                MODEL_INFERENCE_FAILURES[self.model_name]["gpu_failures"] = MODEL_INFERENCE_FAILURES[self.model_name].get("gpu_failures", 0) + 1
+                MODEL_INFERENCE_FAILURES[self.model_name]["last_failure"] = time.time()
+                
             raise
     
     async def _process_image_batches(self, images, prompts, batch_size, device, model):
@@ -647,7 +715,12 @@ class HuggingFaceClient:
                 context_prompts=batch_prompts
             )
             
-            batch_processed = batch_processed.to(device=device, dtype=torch.float32 if device == 'cpu' else None)
+            # Handle both dict and tensor outputs
+            if isinstance(batch_processed, dict):
+                batch_processed = {k: v.to(device=device, dtype=torch.float32 if device == 'cpu' else None) 
+                                 for k, v in batch_processed.items()}
+            else:
+                batch_processed = batch_processed.to(device=device, dtype=torch.float32 if device == 'cpu' else None)
             
             with torch.no_grad():
                 batch_embeddings = model(**batch_processed)
@@ -660,9 +733,22 @@ class HuggingFaceClient:
             
             # Clean up after batch
             if device == "cuda":
-                del batch_processed
-                torch.cuda.empty_cache()
-                gc.collect()
+                try:
+                    # Safely free memory
+                    if isinstance(batch_processed, dict):
+                        for k in batch_processed:
+                            if hasattr(batch_processed[k], 'cpu'):
+                                batch_processed[k] = batch_processed[k].cpu()
+                    elif hasattr(batch_processed, 'cpu'):
+                        batch_processed = batch_processed.cpu()
+                    
+                    del batch_processed
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                except (AttributeError, TypeError):
+                    # Just clear cache if moving to CPU fails
+                    torch.cuda.empty_cache()
+                    gc.collect()
                 
         return results
     
