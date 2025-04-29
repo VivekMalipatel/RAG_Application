@@ -190,7 +190,7 @@ class ModelCache:
                 return model, tokenizer
             except Exception as e:
                 self.logger.error(f"Error loading model on CPU: {e}")
-                self.logger.error(traceback.format_exc())
+                self.logger.error(f"Error details: {traceback.format_exc()}")
                 raise RuntimeError(f"Failed to load model {model_name} on any device")
         else:
             raise RuntimeError(f"Insufficient memory on both GPU and CPU to load model {model_name}")
@@ -199,8 +199,10 @@ class ModelCache:
         """Load CPU version of model in background for potential fallback."""
         try:
             self.logger.info(f"Preloading CPU version of model {model_name} in background")
-            model, _ = self._load_model_on_specific_device(model_name, model_type, "cpu", token, trust_remote_code)
+            model, tokenizer = self._load_model_on_specific_device(model_name, model_type, "cpu", token, trust_remote_code)
             self.cpu_models[model_key] = model
+            if model_key not in self.tokenizers:
+                self.tokenizers[model_key] = tokenizer
             self.logger.info(f"Successfully preloaded CPU version of model {model_name}")
         except Exception as e:
             self.logger.error(f"Failed to preload CPU model {model_name} in background: {e}")
@@ -220,6 +222,11 @@ class ModelCache:
             
             ModelClass, ProcessorClass = self._get_colpali_class(model_name)
             
+            if device == "cpu":
+                # For CPU, use a different loading approach to avoid meta tensor errors
+                return self._load_nomic_model_on_cpu(model_name, ModelClass, ProcessorClass)
+            
+            # For GPU, use the standard approach with flash attention if available
             model_kwargs = {
                 "torch_dtype": torch.bfloat16 if device != "cpu" else torch.float32,
                 "device_map": device,
@@ -246,6 +253,63 @@ class ModelCache:
         except Exception as e:
             self.logger.error(f"Failed to load Nomic model with colpali on {device}: {e}")
             self.logger.error(f"Error details: {traceback.format_exc()}")
+            raise
+    
+    def _load_nomic_model_on_cpu(self, model_name, ModelClass, ProcessorClass):
+        """Special handling for loading Nomic models on CPU to avoid meta tensor errors."""
+        self.logger.info(f"Using special CPU loading approach for Nomic model: {model_name}")
+        
+        # Load processor first
+        processor = ProcessorClass.from_pretrained(
+            model_name, 
+            cache_dir=os.path.join(self.models_dir, "transformers")
+        )
+        
+        try:
+            # First try - direct approach with CPU settings
+            model_kwargs = {
+                "torch_dtype": torch.float32,
+                "device_map": "cpu",
+                "cache_dir": os.path.join(self.models_dir, "transformers"),
+                "low_cpu_mem_usage": True,
+                "use_safetensors": True
+            }
+            
+            # Avoid using transformers' dispatch_model by loading directly
+            model = ModelClass.from_pretrained(
+                model_name,
+                **model_kwargs
+            ).eval()
+            
+            return model, processor
+            
+        except NotImplementedError as e:
+            if "Cannot copy out of meta tensor" in str(e):
+                self.logger.warning("Got meta tensor error, trying alternative loading approach...")
+                
+                # Second approach - load in two steps to avoid meta tensor issues
+                try:
+                    # Try setting torch_dtype to None first to avoid tensor conversion errors
+                    model = ModelClass.from_pretrained(
+                        model_name,
+                        torch_dtype=None,
+                        device_map=None,  # Don't specify device during load
+                        cache_dir=os.path.join(self.models_dir, "transformers")
+                    )
+                    
+                    # Then explicitly move to CPU with float32
+                    model = model.to(device="cpu", dtype=torch.float32)
+                    model.eval()
+                    
+                    return model, processor
+                    
+                except Exception as e2:
+                    self.logger.error(f"Second CPU loading approach failed: {e2}")
+                    raise RuntimeError("All CPU loading approaches failed") from e2
+            else:
+                raise
+        except Exception as e:
+            self.logger.error(f"CPU loading approach failed: {e}")
             raise
             
     def _load_standard_model(self, model_name, device, token, trust_remote_code):

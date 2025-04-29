@@ -2,11 +2,13 @@ import torch
 import logging
 import asyncio
 import gc
+import traceback
 from transformers import AutoTokenizer, AutoModel, TextIteratorStreamer
 from typing import List, Union, Optional, AsyncGenerator, Dict
 import threading
 import requests
 import numpy as np
+import time
 from config import settings
 from model_type import ModelType
 from huggingface.model_cache import ModelCache
@@ -196,7 +198,7 @@ class HuggingFaceClient:
     #             top_p=self.top_p,
     #         )
     #         return self.tokenizer.decode(output[0], skip_special_tokens=True)
-    
+
     async def embed_text(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for a list of texts with dynamic device selection."""
         try:
@@ -216,6 +218,7 @@ class HuggingFaceClient:
             
         except Exception as e:
             self.logger.error(f"Error in embed_text: {str(e)}")
+            self.logger.error(f"Exception trace: {traceback.format_exc()}")
             raise
     
     async def _embed_text_nomic(self, texts: List[str]) -> List[List[float]]:
@@ -255,6 +258,7 @@ class HuggingFaceClient:
             return query_embeddings.cpu().numpy().tolist()
         except Exception as e:
             self.logger.error(f"Error generating embeddings with Nomic model: {e}")
+            self.logger.error(f"Exception trace: {traceback.format_exc()}")
             raise
     
     async def _embed_text_standard(self, texts: List[str]) -> List[List[float]]:
@@ -313,11 +317,133 @@ class HuggingFaceClient:
         self.logger.warning("Handling OutOfMemory error by clearing GPU memory and retrying with CPU")
         DeviceManager.clear_gpu_memory()
         
+        # Make sure CPU model is available before proceeding
+        await self._ensure_cpu_model_available()
+        
         try:
             # Try recovery function (which should use CPU)
             return await recovery_func()
         except Exception as e:
             self.logger.error(f"Recovery function also failed after OOM: {e}")
+            self.logger.error(f"Exception trace: {traceback.format_exc()}")
+            raise
+
+    async def _ensure_cpu_model_available(self):
+        """Ensure that CPU model is available for fallback, waiting if necessary."""
+        model_cache = ModelCache()
+        model_key = model_cache.get_model_key(self.model_name, self.model_type)
+        
+        # Check if CPU model is available
+        if model_key not in model_cache.cpu_models:
+            self.logger.warning("CPU model not yet available, waiting for background loading to complete...")
+            
+            # Try to wait for the CPU model to become available
+            max_wait_time = 120  # Maximum wait time in seconds
+            check_interval = 1.0  # Check interval in seconds
+            wait_time = 0
+            
+            while wait_time < max_wait_time:
+                if model_key in model_cache.cpu_models:
+                    self.logger.info(f"CPU model is now available after waiting {wait_time} seconds")
+                    return
+                
+                await asyncio.sleep(check_interval)
+                wait_time += check_interval
+                
+                if wait_time % 10 == 0:  # Log every 10 seconds
+                    self.logger.info(f"Still waiting for CPU model to be loaded... ({wait_time}/{max_wait_time}s)")
+            
+            # If we get here, the CPU model never became available
+            # As a last resort, try loading it synchronously
+            self.logger.warning(f"CPU model not available after waiting {max_wait_time}s, attempting to load it now")
+            try:
+                # Use direct loading instead of the background thread that might have failed
+                self._load_cpu_model_synchronously(model_key)
+                self.logger.info("Successfully loaded CPU model synchronously")
+            except Exception as e:
+                self.logger.error(f"Failed to load CPU model synchronously: {e}")
+                self.logger.error(f"Exception trace: {traceback.format_exc()}")
+                raise RuntimeError("Could not load CPU model for fallback after GPU OOM error") from e
+
+    def _load_cpu_model_synchronously(self, model_key):
+        """Load CPU model synchronously as a last resort for OOM recovery."""
+        self.logger.info("Loading CPU model synchronously for fallback...")
+        model_cache = ModelCache()
+        
+        try:
+            # For Nomic multimodal models, need special handling
+            is_nomic_multimodal = any(model_id in self.model_name for model_id in [
+                "nomic-ai/colnomic-embed-multimodal",
+                "nomic-ai/nomic-embed-multimodal"
+            ])
+            
+            if is_nomic_multimodal:
+                # Get the appropriate classes
+                from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor, BiQwen2_5, BiQwen2_5_Processor
+                
+                if "colnomic" in self.model_name:
+                    ModelClass, ProcessorClass = ColQwen2_5, ColQwen2_5_Processor
+                else:
+                    ModelClass, ProcessorClass = BiQwen2_5, BiQwen2_5_Processor
+                
+                # Load the model directly with CPU parameters
+                model_kwargs = {
+                    "torch_dtype": torch.float32,  # Use float32 for CPU
+                    "device_map": "cpu",
+                    "cache_dir": model_cache.models_dir + "/transformers",
+                    "local_files_only": False,
+                    "use_safetensors": True  # Explicitly use safetensors to avoid some loading issues
+                }
+                
+                # Avoid using transformers' dispatch_model for CPU model
+                model = ModelClass.from_pretrained(
+                    self.model_name,
+                    **model_kwargs
+                ).eval()
+                
+                processor = ProcessorClass.from_pretrained(
+                    self.model_name,
+                    cache_dir=model_cache.models_dir + "/transformers"
+                )
+                
+                # Store in the model cache
+                model_cache.cpu_models[model_key] = model
+                if model_key not in model_cache.tokenizers:
+                    model_cache.tokenizers[model_key] = processor
+                model_cache.model_placement[model_key] = "cpu"
+                
+                # Update processor reference
+                self.processor = processor
+                
+            else:
+                # Standard model loading
+                tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_name,
+                    token=self.hf_token,
+                    cache_dir=model_cache.models_dir + "/transformers"
+                )
+                
+                model = AutoModel.from_pretrained(
+                    self.model_name,
+                    trust_remote_code=self.trust_remote_code,
+                    revision="main",
+                    token=self.hf_token,
+                    device_map="cpu",
+                    torch_dtype=torch.float32,
+                    cache_dir=model_cache.models_dir + "/transformers"
+                ).eval()
+                
+                # Store in the model cache
+                model_cache.cpu_models[model_key] = model
+                if model_key not in model_cache.tokenizers:
+                    model_cache.tokenizers[model_key] = tokenizer
+                model_cache.model_placement[model_key] = "cpu"
+            
+            self.logger.info(f"Successfully loaded CPU model synchronously for {model_key}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load CPU model synchronously: {e}")
+            self.logger.error(f"Exception trace: {traceback.format_exc()}")
             raise
     
     async def _embed_text_with_device(self, texts: List[str], device: str) -> List[List[float]]:
@@ -334,35 +460,53 @@ class HuggingFaceClient:
         elif device == "cuda" and model_key in model_cache.gpu_models:
             model = model_cache.gpu_models[model_key]
         else:
-            self.logger.error(f"No model available for device {device}, cannot recover from OOM")
-            raise RuntimeError(f"No model available for device {device}")
+            if device == "cpu":
+                error_msg = f"No CPU model available for {model_key}, fallback cannot proceed"
+                self.logger.error(error_msg)
+                
+                # Try loading the CPU model directly as a last resort
+                self._load_cpu_model_synchronously(model_key)
+                
+                if model_key in model_cache.cpu_models:
+                    model = model_cache.cpu_models[model_key]
+                else:
+                    raise RuntimeError(error_msg)
+            else:
+                error_msg = f"No model available for device {device}, cannot recover from OOM"
+                self.logger.error(error_msg)
+                raise RuntimeError(error_msg)
         
-        if "colnomic-embed-multimodal" in self.model_name or "nomic-embed-multimodal" in self.model_name:
-            # Handle Nomic models
-            batch_queries = self.processor.process_queries(texts)
-            batch_queries = batch_queries.to(device=device, dtype=torch.float32 if device == 'cpu' else None)
-            
-            if device == 'cpu' and hasattr(model, 'to'):
-                model = model.to(dtype=torch.float32)
-            
-            with torch.no_grad():
-                query_embeddings = model(**batch_queries)
-            
-            if query_embeddings.dtype != torch.float32:
-                query_embeddings = query_embeddings.to(torch.float32)
-            
-            return query_embeddings.cpu().numpy().tolist()
-        else:
-            # Handle standard models
-            inputs = self.tokenizer(texts, padding=True, return_tensors="pt").to(device)
-            
-            with torch.no_grad():
-                embeddings = model(**inputs).last_hidden_state.mean(dim=1)
+        try:
+            if "colnomic-embed-multimodal" in self.model_name or "nomic-embed-multimodal" in self.model_name:
+                # Handle Nomic models
+                batch_queries = self.processor.process_queries(texts)
+                batch_queries = batch_queries.to(device=device, dtype=torch.float32 if device == 'cpu' else None)
                 
-                if embeddings.dtype != torch.float32:
-                    embeddings = embeddings.to(torch.float32)
+                if device == 'cpu' and hasattr(model, 'to'):
+                    model = model.to(dtype=torch.float32)
                 
-                return embeddings.cpu().numpy().tolist()
+                with torch.no_grad():
+                    query_embeddings = model(**batch_queries)
+                
+                if query_embeddings.dtype != torch.float32:
+                    query_embeddings = query_embeddings.to(torch.float32)
+                
+                return query_embeddings.cpu().numpy().tolist()
+            else:
+                # Handle standard models
+                inputs = self.tokenizer(texts, padding=True, return_tensors="pt").to(device)
+                
+                with torch.no_grad():
+                    embeddings = model(**inputs).last_hidden_state.mean(dim=1)
+                    
+                    if embeddings.dtype != torch.float32:
+                        embeddings = embeddings.to(torch.float32)
+                    
+                    return embeddings.cpu().numpy().tolist()
+        except Exception as e:
+            self.logger.error(f"Error in _embed_text_with_device: {e}")
+            self.logger.error(f"Exception trace: {traceback.format_exc()}")
+            raise
     
     def _prepare_for_inference(self, batch_size: int, model_type: ModelType = None):
         """Prepare for inference by checking if device is suitable for the batch size."""
@@ -406,6 +550,7 @@ class HuggingFaceClient:
             
         except Exception as e:
             self.logger.error(f"Error in embed_image: {str(e)}")
+            self.logger.error(f"Exception trace: {traceback.format_exc()}")
             raise
     
     async def _embed_image_nomic(self, images: List[dict]) -> List[List[float]]:
@@ -425,9 +570,14 @@ class HuggingFaceClient:
                 await asyncio.sleep(check_interval)
                 wait_time += check_interval
             
+            if self.processor is None:
+                raise RuntimeError("Processor initialization failed or timed out")
+            
             # Get model for inference with appropriate device
             model_cache = ModelCache()
             inference_model, actual_device = model_cache.get_model_for_inference(self.model_key, len(images))
+            
+            self.logger.info(f"Using model on {actual_device} for image embedding")
             
             processed_images = []
             context_prompts = []
@@ -445,13 +595,23 @@ class HuggingFaceClient:
                 context_prompts.append(image_data["text"])
             
             # Process in smaller batches if the batch size is large
-            if len(processed_images) > 8 and actual_device == "cuda":
-                return await self._process_image_batches(processed_images, context_prompts, 8, actual_device, inference_model)
+            if len(processed_images) > 4 and actual_device == "cuda":
+                return await self._process_image_batches(processed_images, context_prompts, 4, actual_device, inference_model)
             
-            batch_images = self.processor.process_images(
-                images=processed_images, 
-                context_prompts=context_prompts
-            )
+            self.logger.info(f"Processing {len(processed_images)} images with processor")
+            
+            # Try-except for the processor.process_images step, which often fails
+            try:
+                batch_images = self.processor.process_images(
+                    images=processed_images, 
+                    context_prompts=context_prompts
+                )
+            except Exception as e:
+                self.logger.error(f"Error processing images: {e}")
+                self.logger.error(f"Exception trace: {traceback.format_exc()}")
+                raise
+
+            self.logger.info(f"Moving processed batch to {actual_device}")
             
             batch_images = batch_images.to(device=actual_device, dtype=torch.float32 if actual_device == 'cpu' else None)
 
@@ -472,6 +632,7 @@ class HuggingFaceClient:
             return image_embeddings.cpu().numpy().tolist()
         except Exception as e:
             self.logger.error(f"Error generating embeddings with Nomic model: {e}")
+            self.logger.error(f"Exception trace: {traceback.format_exc()}")
             raise
     
     async def _process_image_batches(self, images, prompts, batch_size, device, model):
@@ -522,45 +683,63 @@ class HuggingFaceClient:
         elif device == "cuda" and model_key in model_cache.gpu_models:
             model = model_cache.gpu_models[model_key]
         else:
-            self.logger.error(f"No model available for device {device}, cannot recover from OOM")
-            raise RuntimeError(f"No model available for device {device}")
+            if device == "cpu":
+                error_msg = f"No CPU model available for {model_key}, fallback cannot proceed"
+                self.logger.error(error_msg)
+                
+                # Try loading the CPU model directly as a last resort
+                self._load_cpu_model_synchronously(model_key)
+                
+                if model_key in model_cache.cpu_models:
+                    model = model_cache.cpu_models[model_key]
+                else:
+                    raise RuntimeError(error_msg)
+            else:
+                error_msg = f"No model available for device {device}, cannot recover from OOM"
+                self.logger.error(error_msg)
+                raise RuntimeError(error_msg)
         
-        import base64
-        from io import BytesIO
-        from PIL import Image
-        
-        processed_images = []
-        context_prompts = []
-        
-        for image_data in images:
-            base64_str = image_data["image"]
-            img_data = base64.b64decode(base64_str)
-            img_bytes = BytesIO(img_data)
-            img = Image.open(img_bytes)
-            processed_images.append(img)
-            context_prompts.append(image_data["text"])
-        
-        # Process in smaller batches for CPU
-        if len(processed_images) > 4 and device == "cpu":
-            return await self._process_image_batches(processed_images, context_prompts, 4, device, model)
-        
-        batch_images = self.processor.process_images(
-            images=processed_images, 
-            context_prompts=context_prompts
-        )
-        
-        batch_images = batch_images.to(device=device, dtype=torch.float32 if device == 'cpu' else None)
-
-        if device == 'cpu' and hasattr(model, 'to'):
-            model = model.to(dtype=torch.float32)
-        
-        with torch.no_grad():
-            image_embeddings = model(**batch_images)
-        
-        if image_embeddings.dtype != torch.float32:
-            image_embeddings = image_embeddings.to(torch.float32)
-        
-        return image_embeddings.cpu().numpy().tolist()
+        try:
+            import base64
+            from io import BytesIO
+            from PIL import Image
+            
+            processed_images = []
+            context_prompts = []
+            
+            for image_data in images:
+                base64_str = image_data["image"]
+                img_data = base64.b64decode(base64_str)
+                img_bytes = BytesIO(img_data)
+                img = Image.open(img_bytes)
+                processed_images.append(img)
+                context_prompts.append(image_data["text"])
+            
+            # Process in smaller batches for CPU
+            if len(processed_images) > 2 and device == "cpu":
+                return await self._process_image_batches(processed_images, context_prompts, 2, device, model)
+            
+            batch_images = self.processor.process_images(
+                images=processed_images, 
+                context_prompts=context_prompts
+            )
+            
+            batch_images = batch_images.to(device=device, dtype=torch.float32 if device == 'cpu' else None)
+    
+            if device == 'cpu' and hasattr(model, 'to'):
+                model = model.to(dtype=torch.float32)
+            
+            with torch.no_grad():
+                image_embeddings = model(**batch_images)
+            
+            if image_embeddings.dtype != torch.float32:
+                image_embeddings = image_embeddings.to(torch.float32)
+            
+            return image_embeddings.cpu().numpy().tolist()
+        except Exception as e:
+            self.logger.error(f"Error in _embed_image_with_device: {e}")
+            self.logger.error(f"Exception trace: {traceback.format_exc()}")
+            raise
 
     async def rerank_documents(self, query: str, documents: List[str], max_tokens: int) -> List[int]:
         """Rerank documents with dynamic device selection and memory management."""
