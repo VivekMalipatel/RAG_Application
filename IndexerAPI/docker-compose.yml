@@ -1,20 +1,18 @@
 version: '3'
 
 services:
-  # Main application service
   indexer-api:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8010:8010"
     depends_on:
       - unoserver
     environment:
       - UNOSERVER_HOST=unoserver
       - UNOSERVER_PORT=2003
-
-  # Unoserver for file conversions
+      
   unoserver:
     image: ghcr.io/unoconv/unoserver-docker
     ports:
