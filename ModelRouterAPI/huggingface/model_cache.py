@@ -12,6 +12,9 @@ import torch
 from transformers import AutoTokenizer, AutoModel
 from model_type import ModelType
 from core.device_utils import DeviceManager
+from accelerate import init_empty_weights, load_checkpoint_and_dispatch
+from transformers import AutoTokenizer, AutoConfig, AutoModel
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +39,6 @@ class ModelCache:
         self.running = True
         self.logger = logging.getLogger(__name__)
         self.hf_token = os.environ.get("HF_TOKEN")
-        # Keep track of both GPU and CPU versions of models
-        self.gpu_models: Dict[str, Any] = {}
-        self.cpu_models: Dict[str, Any] = {}
-        self.model_placement: Dict[str, str] = {}  # Stores which device the model is currently using
         
         self.models_dir = os.path.join(os.path.dirname(__file__), ".models")
         os.makedirs(self.models_dir, exist_ok=True)
@@ -77,30 +76,15 @@ class ModelCache:
         for model_key in models_to_remove:
             try:
                 with self.model_locks.get(model_key, threading.Lock()):
-                    # Clean up both GPU and CPU versions if they exist
-                    if model_key in self.gpu_models:
-                        self.logger.info(f"Removing idle GPU model: {model_key}")
-                        del self.gpu_models[model_key]
-                        
-                    if model_key in self.cpu_models:
-                        self.logger.info(f"Removing idle CPU model: {model_key}")
-                        del self.cpu_models[model_key]
-                        
                     if model_key in self.models:
+                        self.logger.info(f"Removing idle model: {model_key}")
                         del self.models[model_key]
-                        
-                    if model_key in self.tokenizers:
-                        del self.tokenizers[model_key]
-                        
-                    if model_key in self.last_used:
-                        del self.last_used[model_key]
-                        
-                    if model_key in self.model_placement:
-                        del self.model_placement[model_key]
-                        
-                    # Clean GPU memory if possible
-                    if torch.cuda.is_available():
-                        DeviceManager.clear_gpu_memory()
+                        if model_key in self.tokenizers:
+                            del self.tokenizers[model_key]
+                        if model_key in self.last_used:
+                            del self.last_used[model_key]
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
             except Exception as e:
                 self.logger.error(f"Error removing model {model_key}: {e}")
     
@@ -132,215 +116,6 @@ class ModelCache:
             self.logger.error(f"Failed to import colpali: {e}")
             raise
     
-    def _load_model_with_device_fallback(self, model_name, model_type, device, token=None, trust_remote_code=True):
-        """Load a model with device fallback if the primary device doesn't have enough memory."""
-        model_key = self.get_model_key(model_name, model_type)
-        
-        # First, attempt to determine if the requested device can handle the model
-        if device == "cuda":
-            cuda_available, cuda_message = DeviceManager.check_cuda_availability_with_memory_threshold()
-            self.logger.info(f"CUDA availability check: {cuda_message}")
-            
-            if cuda_available:
-                try:
-                    # Try loading on CUDA first
-                    self.logger.info(f"Loading model {model_name} on CUDA")
-                    model, tokenizer = self._load_model_on_specific_device(
-                        model_name, model_type, "cuda", token, trust_remote_code
-                    )
-                    self.gpu_models[model_key] = model
-                    self.model_placement[model_key] = "cuda"
-                    
-                    # Preemptively load CPU version for fallback during high GPU usage
-                    cpu_available, cpu_message = DeviceManager.check_cpu_memory_availability()
-                    if cpu_available:
-                        # Load model on CPU in background to prepare for potential fallback
-                        thread = threading.Thread(
-                            target=self._load_cpu_model_background,
-                            args=(model_name, model_type, token, trust_remote_code, model_key)
-                        )
-                        thread.daemon = True
-                        thread.start()
-                    else:
-                        self.logger.warning(f"Can't preload CPU model for fallback: {cpu_message}")
-                        
-                    return model, tokenizer
-                except torch.cuda.OutOfMemoryError as e:
-                    self.logger.warning(f"CUDA out of memory when loading model {model_name}: {e}")
-                    DeviceManager.clear_gpu_memory()
-                    # Fall through to CPU loading
-                except Exception as e:
-                    self.logger.error(f"Error loading model on CUDA: {e}")
-                    self.logger.error(traceback.format_exc())
-                    DeviceManager.clear_gpu_memory()
-                    # Fall through to CPU loading
-            
-        # If CUDA failed or wasn't available, try CPU
-        cpu_available, cpu_message = DeviceManager.check_cpu_memory_availability()
-        self.logger.info(f"CPU availability check: {cpu_message}")
-        
-        if cpu_available:
-            try:
-                self.logger.info(f"Loading model {model_name} on CPU")
-                model, tokenizer = self._load_model_on_specific_device(
-                    model_name, model_type, "cpu", token, trust_remote_code
-                )
-                self.cpu_models[model_key] = model
-                self.model_placement[model_key] = "cpu"
-                return model, tokenizer
-            except Exception as e:
-                self.logger.error(f"Error loading model on CPU: {e}")
-                self.logger.error(f"Error details: {traceback.format_exc()}")
-                raise RuntimeError(f"Failed to load model {model_name} on any device")
-        else:
-            raise RuntimeError(f"Insufficient memory on both GPU and CPU to load model {model_name}")
-    
-    def _load_cpu_model_background(self, model_name, model_type, token, trust_remote_code, model_key):
-        """Load CPU version of model in background for potential fallback."""
-        try:
-            self.logger.info(f"Preloading CPU version of model {model_name} in background")
-            model, tokenizer = self._load_model_on_specific_device(model_name, model_type, "cpu", token, trust_remote_code)
-            self.cpu_models[model_key] = model
-            if model_key not in self.tokenizers:
-                self.tokenizers[model_key] = tokenizer
-            self.logger.info(f"Successfully preloaded CPU version of model {model_name}")
-        except Exception as e:
-            self.logger.error(f"Failed to preload CPU model {model_name} in background: {e}")
-    
-    def _load_model_on_specific_device(self, model_name, model_type, device, token, trust_remote_code):
-        """Load model on a specific device."""
-        if self._is_nomic_multimodal_model(model_name):
-            return self._load_nomic_model(model_name, device, token, trust_remote_code)
-        else:
-            return self._load_standard_model(model_name, device, token, trust_remote_code)
-            
-    def _load_nomic_model(self, model_name, device, token, trust_remote_code):
-        """Load a Nomic multimodal model."""
-        self.logger.info(f"Loading Nomic multimodal model using colpali: {model_name} on {device}")
-        try:
-            from transformers.utils.import_utils import is_flash_attn_2_available
-            
-            ModelClass, ProcessorClass = self._get_colpali_class(model_name)
-            
-            if device == "cpu":
-                # For CPU, use a different loading approach to avoid meta tensor errors
-                return self._load_nomic_model_on_cpu(model_name, ModelClass, ProcessorClass)
-            
-            # For GPU, use the standard approach with flash attention if available
-            model_kwargs = {
-                "torch_dtype": torch.bfloat16 if device != "cpu" else torch.float32,
-                "device_map": device,
-                "cache_dir": os.path.join(self.models_dir, "transformers"),
-                "local_files_only": False
-            }
-            
-            if device != "cpu" and is_flash_attn_2_available():
-                model_kwargs["attn_implementation"] = "flash_attention_2"
-                
-            model = ModelClass.from_pretrained(
-                model_name,
-                **model_kwargs
-            ).eval()
-            
-            processor = ProcessorClass.from_pretrained(
-                model_name, 
-                cache_dir=os.path.join(self.models_dir, "transformers")
-            )
-            
-            self.logger.info(f"Successfully loaded Nomic model with colpali: {model_name} on {device}")
-            return model, processor
-        
-        except Exception as e:
-            self.logger.error(f"Failed to load Nomic model with colpali on {device}: {e}")
-            self.logger.error(f"Error details: {traceback.format_exc()}")
-            raise
-    
-    def _load_nomic_model_on_cpu(self, model_name, ModelClass, ProcessorClass):
-        """Special handling for loading Nomic models on CPU to avoid meta tensor errors."""
-        self.logger.info(f"Using special CPU loading approach for Nomic model: {model_name}")
-        
-        # Load processor first
-        processor = ProcessorClass.from_pretrained(
-            model_name, 
-            cache_dir=os.path.join(self.models_dir, "transformers")
-        )
-        
-        try:
-            # First try - direct approach with CPU settings
-            model_kwargs = {
-                "torch_dtype": torch.float32,
-                "device_map": "cpu",
-                "cache_dir": os.path.join(self.models_dir, "transformers"),
-                "low_cpu_mem_usage": True,
-                "use_safetensors": True
-            }
-            
-            # Avoid using transformers' dispatch_model by loading directly
-            model = ModelClass.from_pretrained(
-                model_name,
-                **model_kwargs
-            ).eval()
-            
-            return model, processor
-            
-        except NotImplementedError as e:
-            if "Cannot copy out of meta tensor" in str(e):
-                self.logger.warning("Got meta tensor error, trying alternative loading approach...")
-                
-                # Second approach - load in two steps to avoid meta tensor issues
-                try:
-                    # Try setting torch_dtype to None first to avoid tensor conversion errors
-                    model = ModelClass.from_pretrained(
-                        model_name,
-                        torch_dtype=None,
-                        device_map=None,  # Don't specify device during load
-                        cache_dir=os.path.join(self.models_dir, "transformers")
-                    )
-                    
-                    # Then explicitly move to CPU with float32
-                    model = model.to(device="cpu", dtype=torch.float32)
-                    model.eval()
-                    
-                    return model, processor
-                    
-                except Exception as e2:
-                    self.logger.error(f"Second CPU loading approach failed: {e2}")
-                    raise RuntimeError("All CPU loading approaches failed") from e2
-            else:
-                raise
-        except Exception as e:
-            self.logger.error(f"CPU loading approach failed: {e}")
-            raise
-            
-    def _load_standard_model(self, model_name, device, token, trust_remote_code):
-        """Load a standard HuggingFace model."""
-        self.logger.info(f"Loading standard model: {model_name} on {device}")
-        try:
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_name, 
-                token=token,
-                cache_dir=os.path.join(self.models_dir, "transformers")
-            )
-            
-            model = AutoModel.from_pretrained(
-                model_name, 
-                trust_remote_code=trust_remote_code, 
-                revision="main", 
-                token=token,
-                device_map=device,
-                torch_dtype=torch.float16 if device != "cpu" else torch.float32,
-                cache_dir=os.path.join(self.models_dir, "transformers")
-            )
-            
-            model.eval()
-            
-            self.logger.info(f"Successfully loaded model: {model_name} on {device}")
-            return model, tokenizer
-        except Exception as e:
-            self.logger.error(f"Error loading model {model_name} on {device}: {e}")
-            self.logger.error(f"Error details: {traceback.format_exc()}")
-            raise
-            
     def get_model(self, 
                  model_name: str, 
                  model_type: ModelType,
@@ -355,127 +130,117 @@ class ModelCache:
         with self.model_locks[model_key]:
             self.last_used[model_key] = time.time()
             
-            # Check if model is already loaded on either device
-            if model_key in self.model_placement:
-                current_device = self.model_placement[model_key]
-                self.logger.debug(f"Model {model_key} is currently on {current_device}, requested device is {device}")
+            if model_key in self.models and model_key in self.tokenizers:
+                self.logger.debug(f"Using cached model: {model_key}")
+                return self.models[model_key], self.tokenizers[model_key]
+            
+            self.logger.info(f"Loading model: {model_name} ({model_type.value}) on {device}")
+            
+            try:
+                token = token or self.hf_token
+
+                offload_folder = os.path.join(self.models_dir, "offload", model_key)
+                os.makedirs(offload_folder, exist_ok=True)
                 
-                # If model is already on the requested device, return it
-                if current_device == device and ((device == "cuda" and model_key in self.gpu_models) or 
-                                               (device == "cpu" and model_key in self.cpu_models)):
-                    if device == "cuda":
-                        self.logger.debug(f"Using cached GPU model: {model_key}")
-                        self.models[model_key] = self.gpu_models[model_key]
-                    else:
-                        self.logger.debug(f"Using cached CPU model: {model_key}")
-                        self.models[model_key] = self.cpu_models[model_key]
-                    return self.models[model_key], self.tokenizers[model_key]
+                os.environ["HF_HOME"] = self.models_dir
+                os.environ["TRANSFORMERS_CACHE"] = os.path.join(self.models_dir, "transformers")
+                os.environ["HF_DATASETS_CACHE"] = os.path.join(self.models_dir, "datasets")
+                os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(self.models_dir, "hub")
                 
-                # Check if we need to fallback to CPU (if requested CUDA but only have CPU version)
-                if device == "cuda" and current_device == "cpu" and model_key in self.cpu_models:
-                    # Try to load on GPU now if memory permits
-                    cuda_available, _ = DeviceManager.check_cuda_availability_with_memory_threshold()
-                    if cuda_available:
-                        try:
-                            self.logger.info(f"Attempting to move model {model_key} from CPU to GPU")
-                            model, tokenizer = self._load_model_on_specific_device(
-                                model_name, model_type, "cuda", token, trust_remote_code
-                            )
-                            self.gpu_models[model_key] = model
-                            self.model_placement[model_key] = "cuda"
-                            self.models[model_key] = model
-                            return model, tokenizer
-                        except Exception as e:
-                            self.logger.warning(f"Failed to move model to GPU, will use CPU version: {e}")
-                            self.models[model_key] = self.cpu_models[model_key]
-                            return self.cpu_models[model_key], self.tokenizers[model_key]
-                    else:
-                        self.logger.warning(f"Using CPU model because GPU memory is insufficient for {model_key}")
-                        self.models[model_key] = self.cpu_models[model_key]
-                        return self.cpu_models[model_key], self.tokenizers[model_key]
-                
-                # Check if we're asking for CPU but have GPU version
-                if device == "cpu" and current_device == "cuda" and model_key in self.gpu_models:
-                    if model_key in self.cpu_models:
-                        self.logger.debug(f"Using cached CPU model as requested: {model_key}")
-                        self.models[model_key] = self.cpu_models[model_key]
-                        return self.cpu_models[model_key], self.tokenizers[model_key]
-                    else:
-                        # Need to load CPU version
-                        self.logger.info(f"Loading CPU version of model that was previously only on GPU: {model_key}")
-            
-            # If we get here, we need to load the model with our advanced device management
-            token = token or self.hf_token
-            
-            os.environ["HF_HOME"] = self.models_dir
-            os.environ["TRANSFORMERS_CACHE"] = os.path.join(self.models_dir, "transformers")
-            os.environ["HF_DATASETS_CACHE"] = os.path.join(self.models_dir, "datasets")
-            os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(self.models_dir, "hub")
-            
-            model, tokenizer = self._load_model_with_device_fallback(
-                model_name, model_type, device, token, trust_remote_code
-            )
-            
-            self.models[model_key] = model
-            self.tokenizers[model_key] = tokenizer
-            self.last_used[model_key] = time.time()
-            
-            return model, tokenizer
-            
-    def get_model_for_inference(self, model_key: str, batch_size: int = 1):
-        """
-        Get the appropriate model (GPU or CPU) for inference based on current memory usage.
-        This is called during inference to potentially switch from GPU to CPU if GPU memory is critical.
-        """
-        if model_key not in self.model_locks:
-            raise ValueError(f"Model {model_key} is not loaded")
-            
-        with self.model_locks[model_key]:
-            self.last_used[model_key] = time.time()
-            
-            # If we have GPU and CPU versions, decide which to use based on memory
-            if model_key in self.gpu_models and model_key in self.cpu_models:
-                if DeviceManager.is_gpu_memory_critical() or not DeviceManager.is_gpu_suitable_for_inference(batch_size):
-                    self.logger.warning(f"GPU memory critical or insufficient for batch size {batch_size}, using CPU model for {model_key}")
-                    self.models[model_key] = self.cpu_models[model_key]
-                    return self.cpu_models[model_key], "cpu"
+                if self._is_nomic_multimodal_model(model_name):
+                    self.logger.info(f"Loading Nomic multimodal model using colpali: {model_name}")
+                    try:
+                        from transformers.utils.import_utils import is_flash_attn_2_available
+                        
+                        ModelClass, ProcessorClass = self._get_colpali_class(model_name)
+                        
+                        model_kwargs = {
+                            "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                            "device_map": "auto",
+                            "cache_dir": os.path.join(self.models_dir, "transformers"),
+                            "local_files_only": False
+                        }
+                        
+                        if is_flash_attn_2_available():
+                            model_kwargs["attn_implementation"] = "flash_attention_2"
+                            
+                        model = ModelClass.from_pretrained(
+                            model_name,
+                            **model_kwargs
+                        ).eval()
+                        
+                        processor = ProcessorClass.from_pretrained(
+                            model_name, 
+                            cache_dir=os.path.join(self.models_dir, "transformers")
+                        )
+                        
+                        self.models[model_key] = model
+                        self.tokenizers[model_key] = processor
+                        self.last_used[model_key] = time.time()
+                        
+                        self.logger.info(f"Successfully loaded Nomic model with colpali: {model_name}")
+                        return model, processor
+                    
+                    except Exception as e:
+                        self.logger.error(f"Failed to load Nomic model with colpali: {e}")
+                        self.logger.error(f"Error details: {traceback.format_exc()}")
+                        raise
                 else:
-                    self.models[model_key] = self.gpu_models[model_key]
-                    return self.gpu_models[model_key], "cuda"
-            
-            # Otherwise return whatever we have
-            if model_key in self.gpu_models:
-                self.models[model_key] = self.gpu_models[model_key]
-                return self.gpu_models[model_key], "cuda"
-            elif model_key in self.cpu_models:
-                self.models[model_key] = self.cpu_models[model_key]
-                return self.cpu_models[model_key], "cpu"
-            else:
-                raise RuntimeError(f"Model {model_key} not found in either GPU or CPU cache")
+                    self.logger.info(f"Loading standard Hugging Face model: {model_name}")
+                    tokenizer = AutoTokenizer.from_pretrained(
+                        model_name, 
+                        token=token,
+                        cache_dir=os.path.join(self.models_dir, "transformers")
+                    )
+
+                    config = AutoConfig.from_pretrained(
+                        model_name,
+                        token=token,
+                        trust_remote_code=trust_remote_code,
+                        cache_dir=os.path.join(self.models_dir, "transformers")
+                    )
+
+                    with init_empty_weights():
+                        model = AutoModel.from_config(config)
+
+                    model = load_checkpoint_and_dispatch(
+                                model,
+                                model_name,
+                                device_map="auto",
+                                offload_folder=offload_folder,
+                                dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                            ).eval()
+                    
+                    self.models[model_key] = model
+                    self.tokenizers[model_key] = tokenizer
+                    self.last_used[model_key] = time.time()
+                    
+                    self.logger.info(f"Successfully loaded model: {model_name}")
+                    
+                    return model, tokenizer
+                
+            except Exception as e:
+                self.logger.error(f"Error loading model {model_name}: {e}")
+                self.logger.error(f"Error details: {traceback.format_exc()}")
+                raise
     
     def shutdown(self):
         self.running = False
         if self.cleanup_thread and self.cleanup_thread.is_alive():
             self.cleanup_thread.join(timeout=1.0)
         
-        # Clean up both GPU and CPU versions of all models
-        model_keys = list(set(list(self.gpu_models.keys()) + list(self.cpu_models.keys())))
-        
+        model_keys = list(self.models.keys())
         for model_key in model_keys:
             try:
                 with self.model_locks.get(model_key, threading.Lock()):
-                    if model_key in self.gpu_models:
-                        del self.gpu_models[model_key]
-                    if model_key in self.cpu_models:
-                        del self.cpu_models[model_key]
                     if model_key in self.models:
                         del self.models[model_key]
-                    if model_key in self.tokenizers:
-                        del self.tokenizers[model_key]
+                        if model_key in self.tokenizers:
+                            del self.tokenizers[model_key]
             except Exception as e:
                 self.logger.error(f"Error during shutdown, clearing model {model_key}: {e}")
         
         if torch.cuda.is_available():
-            DeviceManager.clear_gpu_memory()
+            torch.cuda.empty_cache()
         
         self.logger.info("Model cache shutdown complete")
