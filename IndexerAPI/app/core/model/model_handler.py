@@ -15,44 +15,63 @@ class ModelHandler:
         self.client = OpenAI(api_key=self.api_key, base_url=self.api_base)
         logger.info(f"ModelHandler initialized with API base: {self.api_base}")
 
-    def embed_text(self, texts: List[str], model: str = "nomic-ai/colnomic-embed-multimodal-3b") -> List[List[float]]:
+    def embed_text(self, texts: List[str], model: str = "nomic-ai/colnomic-embed-multimodal-3b", batch_size: int = 4) -> List[List[float]]:
         if not texts:
             logger.warning("Empty texts list provided for embedding")
             return []
 
+        all_embeddings = []
+        num_items = len(texts)
+        logger.info(f"Generating embeddings for {num_items} text items using model: {model} with batch size: {batch_size}")
+
         try:
-            logger.info(f"Generating embeddings for {len(texts)} text items using model: {model}")
-            response = self.client.embeddings.create(
-                input=texts,
-                model=model,
-                encoding_format="float"
-            )
-            
-            embeddings = [item.embedding for item in response.data]
-            logger.info(f"Successfully generated {len(embeddings)} text embeddings")
-            return embeddings
+            for i in range(0, num_items, batch_size):
+                batch = texts[i:min(i + batch_size, num_items)]
+                logger.info(f"Processing batch {i // batch_size + 1}/{(num_items + batch_size - 1) // batch_size} with {len(batch)} items")
+                
+                response = self.client.embeddings.create(
+                    input=batch,
+                    model=model,
+                    encoding_format="float"
+                )
+                
+                batch_embeddings = [item.embedding for item in response.data]
+                all_embeddings.extend(batch_embeddings)
+                logger.info(f"Successfully generated {len(batch_embeddings)} embeddings for this batch")
+
+            logger.info(f"Successfully generated a total of {len(all_embeddings)} text embeddings")
+            return all_embeddings
             
         except Exception as e:
             logger.error(f"Error generating text embeddings: {str(e)}")
             raise
 
-    def embed_image(self, image_texts: List[Dict[str, str]], model: str = "nomic-ai/colnomic-embed-multimodal-3b") -> List[List[float]]:
+    def embed_image(self, image_texts: List[Dict[str, str]], model: str = "nomic-ai/colnomic-embed-multimodal-3b", batch_size: int = 4) -> List[List[float]]:
         if not image_texts:
             logger.warning("Empty image_texts list provided for embedding")
             return []
 
+        all_embeddings = []
+        num_items = len(image_texts)
+        logger.info(f"Generating embeddings for {num_items} image-text pairs using model: {model} with batch size: {batch_size}")
+
         try:
-            logger.info(f"Generating embeddings for {len(image_texts)} image-text pairs using model: {model}")
-            
-            response = self.client.embeddings.create(
-                input=image_texts,
-                model=model,
-                encoding_format="float"
-            )
-            
-            embeddings = [item.embedding for item in response.data]
-            logger.info(f"Successfully generated {len(embeddings)} image embeddings")
-            return embeddings
+            for i in range(0, num_items, batch_size):
+                batch = image_texts[i:min(i + batch_size, num_items)]
+                logger.info(f"Processing batch {i // batch_size + 1}/{(num_items + batch_size - 1) // batch_size} with {len(batch)} items")
+                
+                response = self.client.embeddings.create(
+                    input=batch,
+                    model=model,
+                    encoding_format="float"
+                )
+                
+                batch_embeddings = [item.embedding for item in response.data]
+                all_embeddings.extend(batch_embeddings)
+                logger.info(f"Successfully generated {len(batch_embeddings)} embeddings for this batch")
+
+            logger.info(f"Successfully generated a total of {len(all_embeddings)} image embeddings")
+            return all_embeddings
             
         except Exception as e:
             logger.error(f"Error generating image embeddings: {str(e)}")

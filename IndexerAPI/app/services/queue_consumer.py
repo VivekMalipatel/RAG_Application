@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.queue.queue_handler import QueueHandler
 from app.core.model.model_handler import ModelHandler
 from app.models.queue_item import QueueItem
+from app.services.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,9 @@ class QueueConsumer:
         self.model_handler = model_handler or ModelHandler()
         self.running = False
         self.processors = {}
-        logger.info("QueueConsumer initialized")
+        self.vector_store = VectorStore()
+        self.vector_store.load()
+        logger.info("QueueConsumer initialized with FAISS vector store")
     
     def register_processor(self, item_type: str, processor):
         self.processors[item_type] = processor
@@ -115,11 +118,36 @@ class QueueConsumer:
                     self._handle_processed_data(result)
                 else:
                     logger.debug(f"No items in queue, waiting {poll_interval} seconds")
-                    await asyncio.sleep(poll_interval)
+                    try:
+                        await asyncio.sleep(poll_interval)
+                    except asyncio.CancelledError:
+                        logger.info("Processing task cancelled during sleep")
+                        self._save_vector_store_if_needed()
+                        raise
                     
+            except asyncio.CancelledError:
+                logger.info("Processing task cancelled")
+                self.running = False
+                self._save_vector_store_if_needed()
+                raise
             except Exception as e:
                 logger.error(f"Error in processing loop: {str(e)}", exc_info=True)
-                await asyncio.sleep(poll_interval)
+                try:
+                    await asyncio.sleep(poll_interval)
+                except asyncio.CancelledError:
+                    logger.info("Processing task cancelled during error recovery")
+                    self._save_vector_store_if_needed()
+                    raise
+    
+    def _save_vector_store_if_needed(self):
+        try:
+            if hasattr(self.vector_store, 'index') and self.vector_store.index is not None and self.vector_store.index.ntotal > 0:
+                logger.info("Saving vector store during shutdown")
+                self.vector_store.save()
+            else:
+                logger.info("No vector data to save during shutdown")
+        except Exception as e:
+            logger.error(f"Error saving vector store during shutdown: {str(e)}", exc_info=True)
     
     def stop_processing(self):
         logger.info("Stopping queue processing loop")
@@ -130,12 +158,55 @@ class QueueConsumer:
             logger.error(f"Failed to process item {result['id']}: {result.get('error')}")
             return
         
-        embedding_count = len(result.get("embeddings", []))
-        data_count = len(result.get("data", []))
+        embeddings = result.get("embeddings", [])
+        if not embeddings:
+            logger.warning(f"No embeddings found for item {result['id']}")
+            return
+            
+        data_items = result.get("data", [])
         
-        logger.info(f"Successfully processed item {result['id']} with {embedding_count} embeddings for {data_count} data items")
-
-        #TODO: Implement any additional logic for handling processed data (Sending it to vector DB, etc.)
+        logger.info(f"Processing item {result['id']} with embeddings for {len(embeddings)} items")
+        
+        try:
+            
+            metadata = {
+                "source": result.get("source"),
+                "queue_id": result.get("id"),
+                "timestamp": str(result.get("timestamp")),
+                "page_count": len(embeddings)
+            }
+            
+            first_item = data_items[0] if data_items else None
+            if first_item and isinstance(first_item, dict) and "image" in first_item:
+                metadata["content_type"] = "image"
+            else:
+                metadata["content_type"] = "text"
+                
+            if isinstance(result.get("metadata"), dict):
+                result_metadata = result.get("metadata")
+                reserved_keys = metadata.keys()
+                for key, value in result_metadata.items():
+                    if key in reserved_keys:
+                        new_key = f"file_{key}"
+                        metadata[new_key] = value
+                    else:
+                        metadata[key] = value
+            
+            doc_id = str(result.get("id"))
+            vectors_added = self.vector_store.add_document(
+                doc_id=doc_id,
+                embeddings=embeddings,
+                metadata=metadata
+            )
+            
+            logger.info(f"Added {vectors_added} vectors to FAISS index for document {doc_id} across {len(embeddings)} pages")
+            
+            if self.vector_store.index and self.vector_store.index.ntotal % 100 == 0:
+                logger.info("Saving FAISS index to disk...")
+                self.vector_store.save()
+            
+        except Exception as e:
+            logger.error(f"Error storing embeddings in vector database: {str(e)}", exc_info=True)
         
     async def list_failure_queue(self, limit: int = 100) -> List[Dict[str, Any]]:
         return await self.queue_handler.get_failure_queue_items(limit)

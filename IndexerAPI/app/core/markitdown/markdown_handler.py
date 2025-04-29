@@ -12,9 +12,9 @@ import base64
 class MarkDown:
     def __init__(self, enable_plugins: bool = False, api_key: str = None, api_base: str = None):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.api_base = api_base or os.getenv("OPENAI_API_BASE")
+        self.api_base = 'http://192.5.87.153:8000/v1'#api_base or os.getenv("OPENAI_API_BASE")
         self.cleint = OpenAI(api_key=self.api_key, base_url=self.api_base)
-        self.markitdown = MarkItDown(enable_plugins=enable_plugins, llm_client=self.cleint, llm_model="gemma3:4b-it-fp16")
+        self.markitdown = MarkItDown(enable_plugins=enable_plugins, llm_client=self.cleint, llm_model="gemma3:12b-it-q8_0")
 
     def convert_file(self, file_path: Union[str, Path]) -> str:
         result = self.markitdown.convert_local(file_path)

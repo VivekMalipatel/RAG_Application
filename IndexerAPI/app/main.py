@@ -6,7 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.api.routes import ingest, status
+from app.api.routes import ingest, status, vector
 from app.db.database import init_db, get_db
 from app.services.queue_consumer import QueueConsumer
 from app.core.model.model_handler import ModelHandler
@@ -44,6 +44,8 @@ async def lifespan(app: FastAPI):
     try:
         process_task.cancel()
         await asyncio.wait_for(process_task, timeout=5.0)
+    except asyncio.CancelledError:
+        logging.info("Queue processing task was cancelled during shutdown")
     except asyncio.TimeoutError:
         logging.warning("Queue processing task didn't terminate within timeout")
     except Exception as e:
@@ -66,6 +68,7 @@ app.add_middleware(
 
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
 app.include_router(status.router, tags=["status"])
+app.include_router(vector.router, prefix="/vector", tags=["vector"])
 
 @app.get("/health")
 def health_check():

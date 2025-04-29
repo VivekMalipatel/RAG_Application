@@ -10,6 +10,7 @@ import base64
 from magika import Magika
 import sys
 import asyncio
+import csv
 
 from app.processors.base_processor import BaseProcessor
 from app.core.markitdown.markdown_handler import MarkDown
@@ -201,12 +202,38 @@ class FileProcessor(BaseProcessor):
             markdown_text = self.markdown.convert_bytes(file_data)
 
             #TODO: Determine a strategy to proerly handle large files
-            MAX_CHARS = 8000 
-            if len(markdown_text) > MAX_CHARS:
-                logger.warning(f"Structured document markdown is too long ({len(markdown_text)} chars). Truncating to {MAX_CHARS} chars.")
-                markdown_text = markdown_text[:MAX_CHARS]
+            MAX_CHARS = 8000
+            batches = []
+            
+            if len(markdown_text) <= MAX_CHARS:
+                batches.append(markdown_text)
+            else:
+                lines = markdown_text.splitlines(True)
+                has_header = False
+                try:
+                    sample = ''.join(lines[:min(len(lines), 10)])
+                    has_header = csv.Sniffer().has_header(sample)
+                except Exception as e:
+                    logger.debug(f"CSV header detection failed: {e}")
+                if has_header:
+                    logger.info("CSV header detected; applying to all batches")
+                header = lines[0] if lines else ''
+                data_lines = lines[1:] if len(lines) > 1 else []
+                current_batch = []
+                current_length = len(header)
+                for line in data_lines:
+                    if current_length + len(line) > MAX_CHARS and current_batch:
+                        batches.append(header + ''.join(current_batch))
+                        current_batch = [line]
+                        current_length = len(header) + len(line)
+                    else:
+                        current_batch.append(line)
+                        current_length += len(line)
+                if current_batch:
+                    batches.append(header + ''.join(current_batch))
+
             return {
-                "data": [markdown_text]
+                "data": batches
             }
         except Exception as e:
             logger.error(f"Error processing structured document: {e}")
