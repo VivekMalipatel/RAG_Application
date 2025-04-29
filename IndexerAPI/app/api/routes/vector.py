@@ -22,6 +22,10 @@ class SearchImageRequest(BaseModel):
     text: Optional[str] = None
     top_k: int = 10
 
+class SearchBatchTextRequest(BaseModel):
+    texts: List[str]
+    top_k: int = 10
+
 @router.post("/search/text", response_model=List[Dict[str, Any]])
 async def search_by_text(request: SearchTextRequest):
     try:
@@ -54,6 +58,19 @@ async def search_by_image(request: SearchImageRequest):
     except Exception as e:
         logger.error(f"Error during image search: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+@router.post("/search/text/batch", response_model=List[List[Dict[str, Any]]])
+async def search_text_batch(request: SearchBatchTextRequest):
+    try:
+        query_embeddings = model_handler.embed_text(request.texts)
+        results = vector_store.search_batch(
+            queries=query_embeddings,
+            k=request.top_k
+        )
+        return results
+    except Exception as e:
+        logger.error(f"Error during batch text search: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Batch search error: {str(e)}")
 
 @router.get("/stats")
 async def get_vector_stats():
