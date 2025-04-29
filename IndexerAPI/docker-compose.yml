@@ -9,9 +9,15 @@ services:
       - "8010:8010"
     depends_on:
       - unoserver
+    env_file:
+      - .env
     environment:
       - UNOSERVER_HOST=unoserver
       - UNOSERVER_PORT=2003
+      - DB_URL=${DB_URL}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE}
       
   unoserver:
     image: ghcr.io/unoconv/unoserver-docker
