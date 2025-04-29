@@ -152,7 +152,7 @@ class ModelCache:
                         
                         model_kwargs = {
                             "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-                            "device_map": "auto",
+                            "device_map": device,
                             "cache_dir": os.path.join(self.models_dir, "transformers"),
                             "local_files_only": False
                         }
