@@ -79,14 +79,14 @@ class VectorStore:
             return []
             
         try:
-            self.index.index.hnsw.efSearch = 128
+            self.index.index.hnsw.efSearch = 256
         except Exception:
             pass
             
         query_np = np.array(query_vectors).astype('float32')
         
         total = self.index.ntotal if hasattr(self.index, 'ntotal') else self.next_id
-        expanded_k = min(k * 5, total) if total > 0 else k
+        expanded_k = min(k * 10, total) if total > 0 else k
         distances, indices = self.index.search(query_np, expanded_k)
         
         doc_scores = {}
@@ -128,7 +128,10 @@ class VectorStore:
             
             with open(mapping_path, 'wb') as f:
                 pickle.dump(self.doc_to_vectors, f)
-                
+            id_map_path = os.path.join(self.index_dir, "id_mapping.pkl")
+            with open(id_map_path, 'wb') as f:
+                pickle.dump(self.id_to_doc, f)
+            
             logger.info(f"Saved index with {self.index.ntotal} vectors and {len(self.doc_to_vectors)} documents")
             return True
         except Exception as e:
@@ -148,17 +151,22 @@ class VectorStore:
             
             with open(mapping_path, 'rb') as f:
                 self.doc_to_vectors = pickle.load(f)
-            self.id_to_doc = {}
-            self.next_id = 0
-            for doc_id, info in self.doc_to_vectors.items():
-                for page_idx_str, page_info in info.get('pages', {}).items():
-                    page_idx = int(page_idx_str)
-                    start = page_info.get('start_idx', 0)
-                    end = page_info.get('end_idx', start)
-                    for vid in range(start, end):
-                        self.id_to_doc[vid] = (doc_id, page_idx)
-                        if vid >= self.next_id:
-                            self.next_id = vid + 1
+            id_map_path = os.path.join(self.index_dir, "id_mapping.pkl")
+            if os.path.exists(id_map_path):
+                with open(id_map_path, 'rb') as f:
+                    self.id_to_doc = pickle.load(f)
+                self.next_id = max(self.id_to_doc.keys(), default=-1) + 1
+            else:
+                self.id_to_doc = {}
+                self.next_id = 0
+                for doc_id, info in self.doc_to_vectors.items():
+                    for page_idx_str, page_info in info.get('pages', {}).items():
+                        start_id = page_info['start_id']
+                        end_id = page_info['end_id']
+                        for vid in range(start_id, end_id):
+                            self.id_to_doc[vid] = (doc_id, int(page_idx_str))
+                            if vid >= self.next_id:
+                                self.next_id = vid + 1
              
             logger.info(f"Loaded index with {self.index.ntotal} vectors and {len(self.doc_to_vectors)} documents")
             return True
@@ -181,3 +189,62 @@ class VectorStore:
             "embedding_dimension": self.embedding_dim,
             "index_type": type(self.index).__name__
         }
+
+    def remove_document(self, doc_id: str) -> bool:
+        doc_info = self.doc_to_vectors.pop(doc_id, None)
+        if not doc_info:
+            logger.warning(f"Document {doc_id} not found")
+            return False
+        ids_to_remove = []
+        for page_info in doc_info['pages'].values():
+            ids_to_remove.extend(range(page_info['start_id'], page_info['end_id']))
+        self.index.remove_ids(np.array(ids_to_remove, dtype='int64'))
+        for vid in ids_to_remove:
+            self.id_to_doc.pop(vid, None)
+        logger.info(f"Removed document {doc_id} with {len(ids_to_remove)} vectors")
+        return True
+
+    def search_batch(self, queries: List[List[float]], k: int = 10) -> List[List[Dict]]:
+        if self.index is None:
+            logger.error("Index not initialized")
+            return [[] for _ in queries]
+        query_np = np.array(queries, dtype='float32')
+        total = self.index.ntotal if hasattr(self.index, 'ntotal') else self.next_id
+        expanded_k = min(k * 10, total)
+        distances, indices = self.index.search(query_np, expanded_k)
+        batch_results = []
+        for q_i in range(len(queries)):
+            doc_scores = {}
+            for i, vid in enumerate(indices[q_i]):
+                if vid < 0:
+                    continue
+                distance = float(distances[q_i][i])
+                similarity = -distance
+                info = self.id_to_doc.get(int(vid))
+                if not info:
+                    continue
+                doc_id, page_num = info
+                if doc_id not in doc_scores or similarity > doc_scores[doc_id]['score']:
+                    meta = self.doc_to_vectors.get(doc_id, {}).get('metadata', {}).copy()
+                    res = {'doc_id': doc_id, 'score': similarity, 'metadata': meta}
+                    if page_num is not None:
+                        res['page'] = page_num
+                    doc_scores[doc_id] = res
+            results = sorted(doc_scores.values(), key=lambda x: x['score'], reverse=True)[:k]
+            batch_results.append(results)
+        return batch_results
+
+
+#TODO: HNSW Removal Limitations
+# python
+# def remove_document(self, doc_id: str) -> bool:
+#     ...
+#     self.index.remove_ids(np.array(ids_to_remove, dtype='int64'))
+# While functional, HNSW+IDMap removal leaves "holes" in graph structure
+# For high-churn systems, consider periodic index rebuilds
+
+#TODO :GPU-Persistence Edge Case
+# python
+# idx_to_save = faiss.index_gpu_to_cpu(self.index) if hasattr(self.index, 'getDevice') else self.index
+# Needs validation for multi-GPU sharded indices
+# Test with faiss.StandardGpuResources.setTempMemory(...) for large datasets
