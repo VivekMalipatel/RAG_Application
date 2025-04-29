@@ -248,3 +248,35 @@ class VectorStore:
 # idx_to_save = faiss.index_gpu_to_cpu(self.index) if hasattr(self.index, 'getDevice') else self.index
 # Needs validation for multi-GPU sharded indices
 # Test with faiss.StandardGpuResources.setTempMemory(...) for large datasets
+
+#TODO: ID Mapping Corruption
+# Scenario: Partial index load after failed save
+# Detection:
+# python
+# if os.path.exists(id_map_path):
+#     # Load proper mapping
+# else:
+#     # Rebuild from document metadata
+
+#TODO:GPU-CPU Compatibility
+# Solution:
+# python
+# idx_to_save = faiss.index_gpu_to_cpu(self.index)  # Before serialization
+
+#TODO:Sparse ID Handling
+# Approach:
+# python
+# self.next_id = max(self.id_to_doc.keys(), default=-1) + 1
+
+#TODO:Optimization Guidelines
+# Batch Size Tuning:
+# Add Documents: 1,000-10,000 vectors/batch
+# Search: 100-500 queries/batch
+# Memory Configuration:
+# python
+# # For GPU indices
+# faiss.StandardGpuResources.setTempMemory(1024*1024*1024)  # 1GB
+# Recall/Speed Tradeoff:
+# python
+# self.index.index.hnsw.efSearch = 256  # 64-512 range
+# This implementation provides production-grade vector search capabilities for multi-modal embeddings while maintaining flexibility for both small-scale and large-scale deployments.
