@@ -12,7 +12,7 @@ import base64
 class MarkDown:
     def __init__(self, enable_plugins: bool = False, api_key: str = None, api_base: str = None):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.api_base = 'http://192.5.87.153:8000/v1'#api_base or os.getenv("OPENAI_API_BASE")
+        self.api_base = 'http://192.5.87.174:8000/v1'#api_base or os.getenv("OPENAI_API_BASE")
         self.cleint = OpenAI(api_key=self.api_key, base_url=self.api_base)
         self.markitdown = MarkItDown(enable_plugins=enable_plugins, llm_client=self.cleint, llm_model="gemma3:12b-it-q8_0")
 
@@ -68,28 +68,63 @@ class MarkDown:
 
 def main():
     try:
-        image_path = "pre-tests/test.png"
+        # # Example: Convert an image file using base64 encoding
+        # image_path = "pre-tests/test.png" # Change this to your image file path
 
-        if not os.path.exists(image_path):
-            print(f"Error: File '{image_path}' not found. Please provide a valid path to a JPG file.")
+        # if not os.path.exists(image_path):
+        #     print(f"Error: File '{image_path}' not found. Please provide a valid path to an image file.")
+        #     return
+
+        # print(f"Converting '{image_path}' to markdown...")
+
+        # # Read the image file and convert to base64
+        # with open(image_path, "rb") as image_file:
+        #     image_bytes = image_file.read()
+        #     # Prepend the data URI scheme if needed by the specific implementation
+        #     # base64_encoded = f"data:image/png;base64,{base64.b64encode(image_bytes).decode('utf-8')}"
+        #     base64_encoded = base64.b64encode(image_bytes).decode('utf-8')
+
+
+        # md = MarkDown()
+
+        # # Determine the file extension from the path
+        # _, file_extension = os.path.splitext(image_path)
+
+        # # Use convert_binary_stream with the base64 string and correct extension
+        # markdown_text = md.convert_binary_stream(base64_encoded, file_extension=file_extension)
+
+        # print("\nConverted Markdown:")
+        # print("-" * 50)
+        # print(markdown_text)
+        # print("-" * 50)
+
+        # Example: Convert a PDF file to Markdown and save it
+        pdf_path = "pre-tests/1744918052438.pdf" # Change this to your PDF file path
+
+        if not os.path.exists(pdf_path):
+            print(f"Error: File '{pdf_path}' not found. Please provide a valid path to a PDF file.")
             return
-        
-        print(f"Converting '{image_path}' to markdown...")
 
-        # Read the image file and convert to base64
-        with open(image_path, "rb") as image_file:
-            image_bytes = image_file.read()
-            base64_encoded = base64.b64encode(image_bytes).decode('utf-8')
+        print(f"Converting '{pdf_path}' to markdown...")
 
         md = MarkDown()
 
-        # Use convert_binary_stream with the base64 string
-        markdown_text = md.convert_binary_stream(base64_encoded, file_extension='.jpeg')
+        # Convert the PDF file to markdown text
+        markdown_text = md.convert_file(pdf_path)
 
-        print("\nConverted Markdown:")
+        # Determine the output markdown file path
+        base_name, _ = os.path.splitext(pdf_path)
+        markdown_output_path = f"{base_name}.md"
+
+        # Save the markdown text to the output file
+        with open(markdown_output_path, "w", encoding="utf-8") as md_file:
+            md_file.write(markdown_text)
+
+        print(f"\nConverted Markdown saved to: '{markdown_output_path}'")
         print("-" * 50)
-        print(markdown_text)
-        print("-" * 50)
+        # Optionally print the markdown content as well
+        # print(markdown_text)
+        # print("-" * 50)
         
     except Exception as e:
         print(f"An error occurred: {e}")

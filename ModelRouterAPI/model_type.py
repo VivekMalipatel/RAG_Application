@@ -5,3 +5,4 @@ class ModelType(Enum):
     TEXT_EMBEDDING = "text_embedding"
     IMAGE_EMBEDDING = "image_embedding"
     RERANKER = "reranker"
+    AUDIO_GENERATION = "audio_generation"

@@ -32,3 +32,5 @@ IndexerAPI/app.db
 ModelRouterAPI/modelrouter.db
 IndexerAPI/storage
 .DS_Store
+AgentAPI/.agent
+AgentAPI/agent.db

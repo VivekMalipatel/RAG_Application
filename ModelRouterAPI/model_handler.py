@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Dict, List, Union, AsyncGenerator, Any, Type
+from typing import Optional, Dict, List, Union, AsyncGenerator, Any, Type, Tuple
 from pydantic import BaseModel
 
 from openai_client import OpenAIClient
@@ -169,6 +169,37 @@ class ModelRouter:
             )
         except Exception as e:
             self.logger.error(f"Error generating structured output with {self.provider.value}: {str(e)}")
+            raise
+
+    async def generate_audio_and_text(
+        self, 
+        prompt: Union[str, List], 
+        max_tokens: Optional[int] = None, 
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        stream: Optional[bool] = None,
+        speaker: Optional[str] = "Chelsie",
+        use_audio_in_video: bool = True,
+        return_audio: bool = True
+    ) -> Union[Tuple[str, Any], AsyncGenerator[Tuple[str, Optional[Any]], None]]:
+        if not hasattr(self.client, "generate_audio_and_text"):
+            raise UnsupportedFeatureError(f"Provider {self.provider} does not support audio generation")
+            
+        try:
+            return await self.client.generate_audio_and_text(
+                prompt, 
+                max_tokens=max_tokens, 
+                temperature=temperature, 
+                top_p=top_p,
+                stop=stop,
+                stream=stream if stream is not None else self.stream,
+                speaker=speaker,
+                use_audio_in_video=use_audio_in_video,
+                return_audio=return_audio
+            )
+        except Exception as e:
+            self.logger.error(f"Error generating audio and text with {self.provider.value}: {str(e)}")
             raise
 
     def set_system_prompt(self, system_prompt: str) -> None:

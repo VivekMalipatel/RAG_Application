@@ -114,6 +114,14 @@ class ModelSelector:
         if model_type == ModelType.RERANKER:
             return Provider.HUGGINGFACE, "jinaai/jina-colbert-v2"
         
+        if model_type == ModelType.AUDIO_GENERATION:
+            # Check if the requested model name contains Qwen Omni
+            if "qwen" in model_name.lower() and "omni" in model_name.lower():
+                return Provider.HUGGINGFACE, model_name
+            else:
+                # Default Qwen Omni model if user just requests audio generation without specifying a model
+                return Provider.HUGGINGFACE, "Qwen/Qwen2.5-Omni-7B"
+        
         await self.refresh_models()
         
         openai_match, openai_score = self._get_best_matching_model(
@@ -147,6 +155,9 @@ class ModelSelector:
                     
         if model_type == ModelType.RERANKER:
             return Provider.HUGGINGFACE
+            
+        if model_type == ModelType.AUDIO_GENERATION:
+            return Provider.HUGGINGFACE
         
         openai_patterns = ["gpt-", "text-davinci", "text-embedding", "dall-e", "claude", "command-r"]
         if any(pattern in model_name_lower for pattern in openai_patterns):
@@ -155,6 +166,10 @@ class ModelSelector:
         ollama_patterns = ["llama", "mistral", "mixtral", "phi", "falcon", "gemma"]
         if any(pattern in model_name_lower for pattern in ollama_patterns):
             return Provider.OLLAMA
+        
+        qwen_patterns = ["qwen", "omni"]
+        if all(pattern in model_name_lower for pattern in qwen_patterns):
+            return Provider.HUGGINGFACE
             
         if "/" in model_name:
             return Provider.HUGGINGFACE

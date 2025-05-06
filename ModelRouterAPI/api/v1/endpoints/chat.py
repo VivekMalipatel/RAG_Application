@@ -3,10 +3,11 @@ import json
 import time
 import uuid
 import tiktoken
+import base64
 from typing import List, Dict, Any, Optional, Union, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from db.session import get_db
@@ -393,6 +394,198 @@ async def generate_chat_stream(
         }
         yield f"data: {json.dumps(error_chunk)}\n\n"
         yield "data: [DONE]\n\n"
+
+@router.post("/audio/speech", response_model=None)
+async def create_audio_speech(
+    request: ChatCompletionRequest,
+    background_tasks: BackgroundTasks,
+    speaker: str = Query("Chelsie", description="Voice to use for audio generation"),
+    api_key: ApiKey = Depends(get_api_key),
+    db: Session = Depends(get_db)
+):
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+    created_time = int(time.time())
+    system_fingerprint = f"fp_{uuid.uuid4().hex[:10]}"
+    
+    try:
+        prompt_tokens = sum(count_tokens(msg.content or "", request.model) for msg in request.messages)
+        
+        max_tokens = request.max_tokens
+        model_router = await ModelRouter.initialize_from_model_name(
+            model_name=request.model,
+            model_type=ModelType.AUDIO_GENERATION,  # This will automatically select the Qwen Omni models
+            temperature=request.temperature,
+            top_p=request.top_p,
+            max_tokens=max_tokens,
+            frequency_penalty=request.frequency_penalty,
+            presence_penalty=request.presence_penalty,
+            stop=request.stop
+        )
+        
+        # Generate both text and audio
+        text_output, audio_data = await model_router.generate_audio_and_text(
+            prompt=request.messages,
+            max_tokens=max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            stop=request.stop,
+            speaker=speaker,
+            return_audio=True
+        )
+        
+        # Calculate tokens
+        completion_tokens = count_tokens(text_output, request.model)
+        total_tokens = prompt_tokens + completion_tokens
+        
+        # Log usage
+        completion_time = time.time() - start_time
+        background_tasks.add_task(
+            log_usage,
+            db=db,
+            api_key_id=getattr(api_key, "id", None),
+            request_id=request_id,
+            endpoint="audio/speech",
+            model=request.model,
+            provider=model_router.provider.value,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            processing_time=completion_time,
+            request_data=request.model_dump_json()
+        )
+        
+        # Encode audio to base64
+        audio_base64 = base64.b64encode(audio_data.tobytes()).decode("utf-8")
+        
+        # Return response with both text and audio
+        return {
+            "id": f"speechgen-{request_id}",
+            "created": created_time,
+            "model": request.model,
+            "text": text_output,
+            "audio": audio_base64,
+            "audio_format": "wav",
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens
+            },
+            "system_fingerprint": system_fingerprint,
+            "object": "audio.speech"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/audio/speech/stream", response_model=None)
+async def stream_audio_speech(
+    request: ChatCompletionRequest,
+    background_tasks: BackgroundTasks,
+    speaker: str = Query("Chelsie", description="Voice to use for audio generation"),
+    api_key: ApiKey = Depends(get_api_key),
+    db: Session = Depends(get_db)
+):
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+    
+    async def audio_stream_generator():
+        try:
+            prompt_tokens = sum(count_tokens(msg.content or "", request.model) for msg in request.messages)
+            
+            max_tokens = request.max_tokens
+            model_router = await ModelRouter.initialize_from_model_name(
+                model_name=request.model,
+                model_type=ModelType.AUDIO_GENERATION,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                max_tokens=max_tokens,
+                frequency_penalty=request.frequency_penalty,
+                presence_penalty=request.presence_penalty,
+                stop=request.stop
+            )
+            
+            # Qwen models don't support true streaming for audio yet,
+            # so we'll generate the full response and then simulate streaming
+            text_output, audio_data = await model_router.generate_audio_and_text(
+                prompt=request.messages,
+                max_tokens=max_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                stop=request.stop,
+                speaker=speaker,
+                return_audio=True
+            )
+            
+            # Calculate tokens and log usage
+            completion_tokens = count_tokens(text_output, request.model)
+            total_tokens = prompt_tokens + completion_tokens
+            
+            completion_time = time.time() - start_time
+            background_tasks.add_task(
+                log_usage,
+                db=db,
+                api_key_id=getattr(api_key, "id", None),
+                request_id=request_id,
+                endpoint="audio/speech/stream",
+                model=request.model,
+                provider=model_router.provider.value,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                processing_time=completion_time,
+                request_data=request.model_dump_json()
+            )
+            
+            # First yield the text response
+            text_chunk = json.dumps({
+                "type": "text",
+                "text": text_output,
+                "id": f"speechgen-{request_id}"
+            })
+            yield f"data: {text_chunk}\n\n"
+            
+            # Then stream the audio in chunks
+            if audio_data is not None:
+                # Split audio into chunks (e.g., 1 second each)
+                sample_rate = 24000  # Typical sample rate for Qwen Omni audio
+                chunk_size = sample_rate * 1  # 1 second chunks
+                audio_array = audio_data
+                
+                for i in range(0, len(audio_array), chunk_size):
+                    chunk = audio_array[i:i + chunk_size]
+                    if len(chunk) > 0:
+                        # Convert chunk to bytes and base64 encode
+                        chunk_bytes = chunk.tobytes()
+                        chunk_base64 = base64.b64encode(chunk_bytes).decode("utf-8")
+                        
+                        audio_chunk = json.dumps({
+                            "type": "audio_chunk",
+                            "audio": chunk_base64,
+                            "format": "wav",
+                            "chunk_index": i // chunk_size,
+                            "id": f"speechgen-{request_id}"
+                        })
+                        yield f"data: {audio_chunk}\n\n"
+                        await asyncio.sleep(0.5)  # Small delay between chunks
+            
+            # Signal completion
+            end_chunk = json.dumps({"type": "done", "id": f"speechgen-{request_id}"})
+            yield f"data: {end_chunk}\n\n"
+            
+        except Exception as e:
+            error_chunk = json.dumps({
+                "type": "error",
+                "error": {
+                    "message": str(e),
+                    "type": "server_error"
+                }
+            })
+            yield f"data: {error_chunk}\n\n"
+    
+    return StreamingResponse(
+        audio_stream_generator(),
+        media_type="text/event-stream"
+    )
 
 def log_usage(
     db: Session,

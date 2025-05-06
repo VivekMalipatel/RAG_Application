@@ -112,6 +112,9 @@ class ModelCache:
             self.logger.error(f"Failed to import colpali: {e}")
             raise
     
+    def _is_qwen_omni_model(self, model_name: str) -> bool:
+        return "qwen2.5-omni" in model_name.lower() or "qwen2_5-omni" in model_name.lower()
+        
     def get_model(self, 
                  model_name: str, 
                  model_type: ModelType,
@@ -143,7 +146,47 @@ class ModelCache:
                 os.environ["HF_DATASETS_CACHE"] = os.path.join(self.models_dir, "datasets")
                 os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(self.models_dir, "hub")
                 
-                if self._is_nomic_multimodal_model(model_name):
+                if model_type == ModelType.AUDIO_GENERATION or self._is_qwen_omni_model(model_name):
+                    self.logger.info(f"Loading Qwen Omni model: {model_name}")
+                    try:
+                        # Import needed classes for Qwen Omni models
+                        from transformers import Qwen2_5OmniForConditionalGeneration
+                        
+                        model_kwargs = {
+                            "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                            "device_map": device if torch.cuda.is_available() else "auto",
+                            "trust_remote_code": trust_remote_code,
+                            "cache_dir": os.path.join(self.models_dir, "transformers"),
+                            "token": token
+                        }
+                        
+                        # Check for Flash Attention and use it if available
+                        try:
+                            from transformers.utils.import_utils import is_flash_attn_2_available
+                            if is_flash_attn_2_available():
+                                model_kwargs["attn_implementation"] = "flash_attention_2"
+                                self.logger.info("Using Flash Attention 2 for Qwen Omni model")
+                        except ImportError:
+                            pass
+                        
+                        model = Qwen2_5OmniForConditionalGeneration.from_pretrained(
+                            model_name,
+                            **model_kwargs
+                        ).eval()
+                        
+                        self.models[model_key] = model
+                        self.tokenizers[model_key] = None  # Processor is loaded separately
+                        self.last_used[model_key] = time.time()
+                        
+                        self.logger.info(f"Successfully loaded Qwen Omni model: {model_name}")
+                        return model, None
+                    
+                    except Exception as e:
+                        self.logger.error(f"Failed to load Qwen Omni model: {e}")
+                        self.logger.error(f"Error details: {traceback.format_exc()}")
+                        raise
+                
+                elif self._is_nomic_multimodal_model(model_name):
                     self.logger.info(f"Loading Nomic multimodal model using colpali: {model_name}")
                     try:
                         from transformers.utils.import_utils import is_flash_attn_2_available
