@@ -28,7 +28,7 @@ class HuggingFaceClient:
             device
             if device
             #TODO : Forced CPU for now
-            else ("cpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+            else ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         )
         self.model_name = model_name
         self.model_type = model_type
@@ -56,20 +56,6 @@ class HuggingFaceClient:
                 "device_map": self.device
             }
 
-            if model_type == ModelType.TEXT_GENERATION or model_type == ModelType.TEXT_EMBEDDING or model_type == ModelType.IMAGE_EMBEDDING:
-                self._load_text_model(**kwargs)
-            elif model_type == ModelType.RERANKER:
-                self._load_reranker_model(**kwargs)
-            elif model_type == ModelType.AUDIO_GENERATION:
-                self._load_qwen_omni_model(**kwargs)
-            else:
-                raise ValueError(f"Unsupported model task: {model_type}")
-        except Exception as e:
-            self.logger.error(f"Failed to load Hugging Face model {model_name}: {str(e)}")
-            raise RuntimeError(f"Model initialization failed: {model_name}")
-
-    def _load_text_model(self, **kwargs):
-        try:
             model_cache = ModelCache()
             
             is_nomic_multimodal = any(model_id in self.model_name for model_id in [
@@ -77,9 +63,8 @@ class HuggingFaceClient:
                 "nomic-ai/nomic-embed-multimodal"
             ])
             
-            if is_nomic_multimodal:
-                self.logger.info(f"Loading Nomic multimodal model: {self.model_name}")
-                
+            is_qwen_omni = "qwen2.5-omni" in self.model_name.lower() or "qwen2_5-omni" in self.model_name.lower()
+            
             self.model, self.tokenizer = model_cache.get_model(
                 model_name=self.model_name,
                 model_type=self.model_type,
@@ -88,9 +73,34 @@ class HuggingFaceClient:
                 trust_remote_code=self.trust_remote_code
             )
             
+            if is_nomic_multimodal or is_qwen_omni:
+                self.processor = self.tokenizer
+                self.logger.info(f"Loaded multimodal model: {self.model_name} on {self.device}")
+            else:
+                self.logger.info(f"Loaded model: {self.model_name} on {self.device}")
+        except Exception as e:
+            self.logger.error(f"Failed to load Hugging Face model {model_name}: {str(e)}")
+            raise RuntimeError(f"Model initialization failed: {model_name}")
+
+    def _load_text_model(self, **kwargs):
+        try:
+            model_cache = ModelCache()
+
+            is_nomic_multimodal = any(model_id in self.model_name for model_id in [
+                "nomic-ai/colnomic-embed-multimodal",
+                "nomic-ai/nomic-embed-multimodal"
+            ])
+            
+            self.model, self.tokenizer = model_cache.get_model(
+                model_name=self.model_name,
+                model_type=self.model_type,
+                device=self.device,
+                token=self.hf_token,
+                trust_remote_code=self.trust_remote_code
+            )
+
             if is_nomic_multimodal:
                 self.processor = self.tokenizer
-                self.logger.info(f"Stored processor for Nomic multimodal model: {self.model_name}")
                 
             self.logger.info(f"Loaded text model: {self.model_name} on {self.device}")
         except Exception as e:
@@ -159,23 +169,20 @@ class HuggingFaceClient:
         effective_top_p = top_p if top_p is not None else self.top_p
         stream_mode = stream if stream is not None else self.stream
         
-        # Check if this is a Qwen Omni model
         is_qwen_omni = "Qwen2.5-Omni" in self.model_name
 
         if is_qwen_omni:
-            # Handle Qwen Omni models - leverage generate_audio_and_text but without audio
             text_output, _ = await self.generate_audio_and_text(
                 prompt=prompt,
                 max_tokens=effective_max_tokens,
                 temperature=effective_temperature,
                 top_p=effective_top_p,
                 stop=stop,
-                stream=False,  # Stream not supported for audio generation
-                return_audio=False  # No audio needed for text-only generation
+                stream=False,
+                return_audio=False
             )
             
             if stream_mode:
-                # Simulated streaming for Qwen models
                 async def stream_generator():
                     words = text_output.split()
                     for i, word in enumerate(words):
@@ -186,14 +193,11 @@ class HuggingFaceClient:
             else:
                 return text_output
         else:
-            # Handle standard text generation models
             if isinstance(prompt, str):
                 full_prompt = prompt
                 if self.system_prompt:
                     full_prompt = f"{self.system_prompt}\n\n{prompt}"
             else:
-                # Handle list of messages (chat format)
-                # We'll construct a prompt string from the messages
                 full_prompt = ""
                 for message in prompt:
                     role = message.get("role", "")
@@ -201,7 +205,6 @@ class HuggingFaceClient:
                     if isinstance(content, str):
                         full_prompt += f"{role}: {content}\n"
                     elif isinstance(content, list):
-                        # Handle multimodal messages (skip non-text parts)
                         text_parts = [item.get("text", "") for item in content if item.get("type") == "text"]
                         full_prompt += f"{role}: {' '.join(text_parts)}\n"
                 

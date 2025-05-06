@@ -150,7 +150,7 @@ class ModelCache:
                     self.logger.info(f"Loading Qwen Omni model: {model_name}")
                     try:
                         # Import needed classes for Qwen Omni models
-                        from transformers import Qwen2_5OmniForConditionalGeneration
+                        from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor
                         
                         model_kwargs = {
                             "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
@@ -160,7 +160,6 @@ class ModelCache:
                             "token": token
                         }
                         
-                        # Check for Flash Attention and use it if available
                         try:
                             from transformers.utils.import_utils import is_flash_attn_2_available
                             if is_flash_attn_2_available():
@@ -174,12 +173,18 @@ class ModelCache:
                             **model_kwargs
                         ).eval()
                         
+                        processor = Qwen2_5OmniProcessor.from_pretrained(
+                            model_name,
+                            token=token,
+                            cache_dir=os.path.join(self.models_dir, "transformers")
+                        )
+                        
                         self.models[model_key] = model
-                        self.tokenizers[model_key] = None  # Processor is loaded separately
+                        self.tokenizers[model_key] = processor
                         self.last_used[model_key] = time.time()
                         
-                        self.logger.info(f"Successfully loaded Qwen Omni model: {model_name}")
-                        return model, None
+                        self.logger.info(f"Successfully loaded Qwen Omni model and processor: {model_name}")
+                        return model, processor
                     
                     except Exception as e:
                         self.logger.error(f"Failed to load Qwen Omni model: {e}")
@@ -189,7 +194,13 @@ class ModelCache:
                 elif self._is_nomic_multimodal_model(model_name):
                     self.logger.info(f"Loading Nomic multimodal model using colpali: {model_name}")
                     try:
-                        from transformers.utils.import_utils import is_flash_attn_2_available
+                        try:
+                            from transformers.utils.import_utils import is_flash_attn_2_available
+                            if is_flash_attn_2_available():
+                                model_kwargs["attn_implementation"] = "flash_attention_2"
+                                self.logger.info("Using Flash Attention 2 for Qwen Omni model")
+                        except ImportError:
+                            pass
                         
                         ModelClass, ProcessorClass = self._get_colpali_class(model_name)
                         
@@ -199,9 +210,6 @@ class ModelCache:
                             "cache_dir": os.path.join(self.models_dir, "transformers"),
                             "local_files_only": False
                         }
-                        
-                        if is_flash_attn_2_available():
-                            model_kwargs["attn_implementation"] = "flash_attention_2"
                             
                         model = ModelClass.from_pretrained(
                             model_name,

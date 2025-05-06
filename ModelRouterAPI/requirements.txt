@@ -8,10 +8,11 @@ httpx
 python-dotenv
 asyncio
 openai
-transformers
+# transformers - Removed to avoid conflicts
 torch
 torchvision
 torchaudio
+flash-attn
 # Install the above PyTorch packages with: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 requests
 pytest
@@ -28,7 +29,7 @@ bcrypt
 safetensors
 nest_asyncio
 scikit-learn
-git+https://github.com/illuin-tech/colpali.git
-git+https://github.com/huggingface/transformers@v4.51.3-Qwen2.5-Omni-preview
-qwen-omni-utils[decord] -U
+#git+https://github.com/huggingface/transformers@v4.51.3-Qwen2.5-Omni-preview
+#git+https://github.com/illuin-tech/colpali.git
 soundfile
+qwen-omni-utils[decord]
