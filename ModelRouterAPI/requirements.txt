@@ -12,7 +12,7 @@ transformers
 torch
 torchvision
 torchaudio
-flash-attn
+#flash-attn
 # Install the above PyTorch packages with: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 requests
 pytest
