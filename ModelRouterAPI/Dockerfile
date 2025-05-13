@@ -18,7 +18,7 @@ COPY requirements.txt .
 # Create required directories
 RUN mkdir -p ollama/llama.cpp
 
-RUN pip install --no-cache-dir packaging
+RUN pip install --no-cache-dir torch torchvision torchaudio packaging
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
