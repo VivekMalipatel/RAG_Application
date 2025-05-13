@@ -162,16 +162,18 @@ class ModelSelector:
         openai_patterns = ["gpt-", "text-davinci", "text-embedding", "dall-e", "claude", "command-r"]
         if any(pattern in model_name_lower for pattern in openai_patterns):
             return Provider.OPENAI
-            
+        
         ollama_patterns = ["llama", "mistral", "mixtral", "phi", "falcon", "gemma"]
         if any(pattern in model_name_lower for pattern in ollama_patterns):
             return Provider.OLLAMA
         
-        qwen_patterns = ["qwen", "omni"]
-        if all(pattern in model_name_lower for pattern in qwen_patterns):
-            return Provider.HUGGINGFACE
-            
-        if "/" in model_name:
+        if "qwen2.5-omni" in model_name.lower() or "qwen2_5-omni" in model_name.lower():
+            if model_type == ModelType.AUDIO_GENERATION:
+                return Provider.HUGGINGFACE
+            elif model_type == ModelType.TEXT_GENERATION:
+                return Provider.HUGGINGFACE
+        
+        if "qwen2.5-vl" in model_name.lower() or "qwen2_5-vl" in model_name.lower():
             return Provider.HUGGINGFACE
             
         return Provider.OPENAI

@@ -114,6 +114,9 @@ class ModelCache:
     
     def _is_qwen_omni_model(self, model_name: str) -> bool:
         return "qwen2.5-omni" in model_name.lower() or "qwen2_5-omni" in model_name.lower()
+    
+    def _is_qwen_vl_model(self, model_name: str) -> bool:
+        return "qwen2.5-vl" in model_name.lower() or "qwen2_5-vl" in model_name.lower()
         
     def get_model(self, 
                  model_name: str, 
@@ -188,6 +191,51 @@ class ModelCache:
                     
                     except Exception as e:
                         self.logger.error(f"Failed to load Qwen Omni model: {e}")
+                        self.logger.error(f"Error details: {traceback.format_exc()}")
+                        raise
+                
+                elif self._is_qwen_vl_model(model_name):
+                    self.logger.info(f"Loading Qwen VL model: {model_name}")
+                    try:
+                        # Import needed classes for Qwen VL models
+                        from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+                        
+                        model_kwargs = {
+                            "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                            "device_map": device if torch.cuda.is_available() else "auto",
+                            "trust_remote_code": trust_remote_code,
+                            "cache_dir": os.path.join(self.models_dir, "transformers"),
+                            "token": token
+                        }
+                        
+                        try:
+                            from transformers.utils.import_utils import is_flash_attn_2_available
+                            if is_flash_attn_2_available():
+                                model_kwargs["attn_implementation"] = "flash_attention_2"
+                                self.logger.info("Using Flash Attention 2 for Qwen VL model")
+                        except ImportError:
+                            pass
+                        
+                        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                            model_name,
+                            **model_kwargs
+                        ).eval()
+                        
+                        processor = AutoProcessor.from_pretrained(
+                            model_name,
+                            token=token,
+                            cache_dir=os.path.join(self.models_dir, "transformers")
+                        )
+                        
+                        self.models[model_key] = model
+                        self.tokenizers[model_key] = processor
+                        self.last_used[model_key] = time.time()
+                        
+                        self.logger.info(f"Successfully loaded Qwen VL model and processor: {model_name}")
+                        return model, processor
+                    
+                    except Exception as e:
+                        self.logger.error(f"Failed to load Qwen VL model: {e}")
                         self.logger.error(f"Error details: {traceback.format_exc()}")
                         raise
                 

@@ -28,7 +28,7 @@ class HuggingFaceClient:
             device
             if device
             #TODO : Forced CPU for now
-            else ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+            else ("cpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         )
         self.model_name = model_name
         self.model_type = model_type
@@ -42,7 +42,6 @@ class HuggingFaceClient:
 
         self.model = None
         self.tokenizer = None
-        self.processor = None
         self.logger = logging.getLogger(__name__)
 
         if not self.is_model_available():
@@ -56,28 +55,12 @@ class HuggingFaceClient:
                 "device_map": self.device
             }
 
-            model_cache = ModelCache()
-            
-            is_nomic_multimodal = any(model_id in self.model_name for model_id in [
-                "nomic-ai/colnomic-embed-multimodal",
-                "nomic-ai/nomic-embed-multimodal"
-            ])
-            
-            is_qwen_omni = "qwen2.5-omni" in self.model_name.lower() or "qwen2_5-omni" in self.model_name.lower()
-            
-            self.model, self.tokenizer = model_cache.get_model(
-                model_name=self.model_name,
-                model_type=self.model_type,
-                device=self.device,
-                token=self.hf_token,
-                trust_remote_code=self.trust_remote_code
-            )
-            
-            if is_nomic_multimodal or is_qwen_omni:
-                self.processor = self.tokenizer
-                self.logger.info(f"Loaded multimodal model: {self.model_name} on {self.device}")
+            if model_type == ModelType.TEXT_GENERATION or model_type == ModelType.TEXT_EMBEDDING or model_type == ModelType.IMAGE_EMBEDDING or model_type == ModelType.AUDIO_GENERATION:
+                self._load_text_model(**kwargs)
+            elif model_type == ModelType.RERANKER:
+                self._load_reranker_model(**kwargs)
             else:
-                self.logger.info(f"Loaded model: {self.model_name} on {self.device}")
+                raise ValueError(f"Unsupported model task: {model_type}")
         except Exception as e:
             self.logger.error(f"Failed to load Hugging Face model {model_name}: {str(e)}")
             raise RuntimeError(f"Model initialization failed: {model_name}")
@@ -85,11 +68,6 @@ class HuggingFaceClient:
     def _load_text_model(self, **kwargs):
         try:
             model_cache = ModelCache()
-
-            is_nomic_multimodal = any(model_id in self.model_name for model_id in [
-                "nomic-ai/colnomic-embed-multimodal",
-                "nomic-ai/nomic-embed-multimodal"
-            ])
             
             self.model, self.tokenizer = model_cache.get_model(
                 model_name=self.model_name,
@@ -99,9 +77,6 @@ class HuggingFaceClient:
                 trust_remote_code=self.trust_remote_code
             )
 
-            if is_nomic_multimodal:
-                self.processor = self.tokenizer
-                
             self.logger.info(f"Loaded text model: {self.model_name} on {self.device}")
         except Exception as e:
             self.logger.error(f"Text model loading failed: {str(e)}")
@@ -120,29 +95,6 @@ class HuggingFaceClient:
             self.logger.info(f"Loaded reranker model: {self.model_name} on {self.device}")
         except Exception as e:
             self.logger.error(f"Reranker model loading failed: {str(e)}")
-            raise
-
-    def _load_qwen_omni_model(self, **kwargs):
-        try:
-            from transformers import Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor
-            
-            model_cache = ModelCache()
-            self.model, _ = model_cache.get_model(
-                model_name=self.model_name,
-                model_type=self.model_type,
-                device=self.device,
-                token=self.hf_token,
-                trust_remote_code=self.trust_remote_code
-            )
-            
-            self.processor = Qwen2_5OmniProcessor.from_pretrained(
-                self.model_name,
-                token=self.hf_token
-            )
-            
-            self.logger.info(f"Loaded Qwen Omni model: {self.model_name} on {self.device}")
-        except Exception as e:
-            self.logger.error(f"Qwen Omni model loading failed: {str(e)}")
             raise
 
     def is_model_available(self) -> bool:
@@ -170,7 +122,8 @@ class HuggingFaceClient:
         stream_mode = stream if stream is not None else self.stream
         
         is_qwen_omni = "Qwen2.5-Omni" in self.model_name
-
+        is_qwen_vl = "Qwen2.5-VL" in self.model_name
+        
         if is_qwen_omni:
             text_output, _ = await self.generate_audio_and_text(
                 prompt=prompt,
@@ -192,6 +145,64 @@ class HuggingFaceClient:
                 return stream_generator()
             else:
                 return text_output
+                
+        elif is_qwen_vl:
+            try:
+                from qwen_vl_utils import process_vision_info
+            except ImportError:
+                self.logger.warning("qwen_vl_utils not found. Using basic processing for Qwen VL models.")
+                process_vision_info = None
+                
+            if isinstance(prompt, list):
+                messages = prompt
+                text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+                
+                if process_vision_info:
+                    image_inputs, video_inputs, video_kwargs = process_vision_info(messages, return_video_kwargs=True)
+                    inputs = self.tokenizer(
+                        text=[text],
+                        images=image_inputs,
+                        videos=video_inputs,
+                        return_tensors="pt",
+                        padding=True,
+                        **video_kwargs
+                    )
+                else:
+                    # Simplified handling without qwen_vl_utils
+                    inputs = self.tokenizer(
+                        text=[text],
+                        return_tensors="pt",
+                        padding=True
+                    )
+                
+                inputs = inputs.to(self.model.device).to(self.model.dtype)
+                
+                if stream_mode:
+                    # Since streaming with video/image input is complex, fallback to non-streaming
+                    self.logger.warning("Streaming not fully supported for Qwen VL models with multimedia input. Falling back to non-streaming.")
+                
+                with torch.no_grad():
+                    outputs = self.model.generate(
+                        **inputs,
+                        max_new_tokens=effective_max_tokens,
+                        temperature=effective_temperature if effective_temperature > 0 else 1.0,
+                        top_p=effective_top_p,
+                        do_sample=effective_temperature > 0
+                    )
+                
+                generated_ids_trimmed = [
+                    out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, outputs)
+                ]
+                output_text = self.tokenizer.batch_decode(
+                    generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+                )[0]
+                
+                return output_text
+            else:
+                # For string prompts, handle as regular text
+                messages = [{"role": "user", "content": prompt}]
+                return await self.generate_text(messages, effective_max_tokens, effective_temperature, 
+                                               effective_top_p, stop, stream_mode)
         else:
             if isinstance(prompt, str):
                 full_prompt = prompt
@@ -244,11 +255,97 @@ class HuggingFaceClient:
                 
                 return self.tokenizer.decode(output[0], skip_special_tokens=True)
     
+    async def generate_audio_and_text(
+        self, 
+        prompt: Union[str, List], 
+        max_tokens: Optional[int] = None, 
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        stream: Optional[bool] = None,
+        speaker: Optional[str] = "Chelsie",
+        use_audio_in_video: bool = True,
+        return_audio: bool = True
+    ) -> Union[Tuple[str, Any], AsyncGenerator[Tuple[str, Optional[Any]], None]]:
+        from qwen_omni_utils import process_mm_info
+        
+        if "Qwen2.5-Omni" not in self.model_name:
+            raise ValueError(f"Audio generation is only supported for Qwen2.5-Omni models, not {self.model_name}")
+        
+        stream = stream if stream is not None else self.stream
+        
+        if isinstance(prompt, str):
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        else:
+            has_system = False
+            for message in prompt:
+                if message.get("role") == "system":
+                    has_system = True
+                    system_content = message.get("content", "")
+                    if isinstance(system_content, str) and "generating text and speech" not in system_content:
+                        message["content"] = "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."
+                    break
+            
+            if not has_system:
+                prompt.insert(0, {
+                    "role": "system",
+                    "content": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."
+                })
+            
+            messages = prompt
+            
+        text = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+        audios, images, videos = process_mm_info(messages, use_audio_in_video=use_audio_in_video)
+        
+        inputs = self.tokenizer(
+            text=text, 
+            audio=audios, 
+            images=images, 
+            videos=videos, 
+            return_tensors="pt", 
+            padding=True, 
+            use_audio_in_video=use_audio_in_video
+        )
+        
+        inputs = inputs.to(self.model.device).to(self.model.dtype)
+        
+        if stream:
+            self.logger.warning("Streaming generation is not currently supported for Qwen Omni models")
+            
+        generation_kwargs = {
+            "use_audio_in_video": use_audio_in_video,
+            "speaker": speaker,
+            "max_new_tokens": max_tokens if max_tokens else self.max_tokens,
+            "temperature": temperature if temperature is not None else self.temperature,
+            "top_p": top_p if top_p is not None else self.top_p,
+        }
+        
+        if not return_audio:
+            text_ids = self.model.generate(**inputs, return_audio=False, **generation_kwargs)
+            text_output = self.tokenizer.batch_decode(text_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+            return text_output, None
+        else:
+            text_ids, audio = self.model.generate(**inputs, **generation_kwargs)
+            text_output = self.tokenizer.batch_decode(text_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+            
+            audio_np = audio.reshape(-1).detach().cpu().numpy()
+            
+            return text_output, audio_np
+    
     async def embed_text(self, texts: List[str]) -> List[List[float]]:
         if "colnomic-embed-multimodal" in self.model_name or "nomic-embed-multimodal" in self.model_name:
             self.logger.info(f"Using specialized processing for Nomic multimodal model: {self.model_name}")
             try:
-                batch_queries = self.processor.process_queries(texts)
+                batch_queries = self.tokenizer.process_queries(texts)
                 
                 batch_queries = batch_queries.to(device=self.device, dtype=torch.float32 if self.device == 'cpu' else None)
 
@@ -290,7 +387,7 @@ class HuggingFaceClient:
                 wait_time = 0
                 check_interval = 0.5 
 
-                while self.processor is None and wait_time < max_wait_time:
+                while self.tokenizer is None and wait_time < max_wait_time:
                     self.logger.warning(f"Processor not yet initialized, waiting... ({wait_time}s/{max_wait_time}s)")
                     await asyncio.sleep(check_interval)
                     wait_time += check_interval
@@ -307,7 +404,7 @@ class HuggingFaceClient:
                     
                     context_prompts.append(image_data["text"])
                 
-                batch_images = self.processor.process_images(
+                batch_images = self.tokenizer.process_images(
                     images=processed_images, 
                     context_prompts=context_prompts
                 )
@@ -348,99 +445,6 @@ class HuggingFaceClient:
             scores = torch.matmul(query_embedding, doc_embeddings.T).squeeze().cpu().numpy()
 
         return np.argsort(scores)[::-1].tolist()
-
-    async def generate_audio_and_text(
-        self, 
-        prompt: Union[str, List], 
-        max_tokens: Optional[int] = None, 
-        temperature: Optional[float] = None,
-        top_p: Optional[float] = None,
-        stop: Optional[Union[str, List[str]]] = None,
-        stream: Optional[bool] = None,
-        speaker: Optional[str] = "Chelsie",
-        use_audio_in_video: bool = True,
-        return_audio: bool = True
-    ) -> Union[Tuple[str, Any], AsyncGenerator[Tuple[str, Optional[Any]], None]]:
-        from qwen_omni_utils import process_mm_info
-        import torch
-        
-        if "Qwen2.5-Omni" not in self.model_name:
-            raise ValueError(f"Audio generation is only supported for Qwen2.5-Omni models, not {self.model_name}")
-        
-        stream = stream if stream is not None else self.stream
-        
-        if isinstance(prompt, str):
-            # Convert text prompt to a conversation format
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
-        else:
-            # Ensure the system prompt is set for audio generation
-            has_system = False
-            for message in prompt:
-                if message.get("role") == "system":
-                    has_system = True
-                    system_content = message.get("content", "")
-                    if isinstance(system_content, str) and "generating text and speech" not in system_content:
-                        message["content"] = "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."
-                    break
-            
-            if not has_system:
-                prompt.insert(0, {
-                    "role": "system",
-                    "content": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."
-                })
-            
-            messages = prompt
-            
-        # Process the conversation for multimodal inputs
-        text = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-        audios, images, videos = process_mm_info(messages, use_audio_in_video=use_audio_in_video)
-        
-        inputs = self.processor(
-            text=text, 
-            audio=audios, 
-            images=images, 
-            videos=videos, 
-            return_tensors="pt", 
-            padding=True, 
-            use_audio_in_video=use_audio_in_video
-        )
-        
-        inputs = inputs.to(self.model.device).to(self.model.dtype)
-        
-        if stream:
-            # Streaming generation is not currently supported
-            self.logger.warning("Streaming generation is not currently supported for Qwen Omni models")
-            
-        # Generate text and audio
-        generation_kwargs = {
-            "use_audio_in_video": use_audio_in_video,
-            "speaker": speaker,
-            "max_new_tokens": max_tokens if max_tokens else self.max_tokens,
-            "temperature": temperature if temperature is not None else self.temperature,
-            "top_p": top_p if top_p is not None else self.top_p,
-        }
-        
-        if not return_audio:
-            text_ids = self.model.generate(**inputs, return_audio=False, **generation_kwargs)
-            text_output = self.processor.batch_decode(text_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-            return text_output, None
-        else:
-            text_ids, audio = self.model.generate(**inputs, **generation_kwargs)
-            text_output = self.processor.batch_decode(text_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-            
-            # Convert audio tensor to numpy array
-            audio_np = audio.reshape(-1).detach().cpu().numpy()
-            
-            return text_output, audio_np
 
     def set_system_prompt(self, system_prompt: str):
         self.system_prompt = system_prompt
