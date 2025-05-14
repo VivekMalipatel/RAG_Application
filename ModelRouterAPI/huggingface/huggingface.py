@@ -28,7 +28,7 @@ class HuggingFaceClient:
             device
             if device
             #TODO : Forced CPU for now
-            else ("cpu" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+            else ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         )
         self.model_name = model_name
         self.model_type = model_type
@@ -385,7 +385,7 @@ class HuggingFaceClient:
         
         return all_embeddings
     
-    async def embed_image(self, images: List[dict], batch_size: int = 4) -> List[List[float]]:
+    async def embed_image(self, images: List[dict], batch_size: int = 1) -> List[List[float]]:
         if len(images) == 0:
             return []
             
