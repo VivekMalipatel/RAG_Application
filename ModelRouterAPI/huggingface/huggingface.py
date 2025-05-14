@@ -385,7 +385,7 @@ class HuggingFaceClient:
         
         return all_embeddings
     
-    async def embed_image(self, images: List[dict], batch_size: int = 1) -> List[List[float]]:
+    async def embed_image(self, images: List[dict], batch_size: int = 2) -> List[List[float]]:
         if len(images) == 0:
             return []
             
