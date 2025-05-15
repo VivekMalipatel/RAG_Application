@@ -1,5 +1,6 @@
 import logging
 import json
+import hashlib
 from typing import Dict, Any, List, Optional, Union
 import asyncio
 from datetime import datetime
@@ -65,7 +66,7 @@ class QueueConsumer:
                     if first_item and isinstance(first_item, dict) and "image" in first_item:
                         logger.info(f"Generating image embeddings for {queue_item.id}")
                         try:
-                            embeddings = self.model_handler.embed_image(processed_data["data"])
+                            embeddings = await self.model_handler.embed_image(processed_data["data"])
                         except Exception as e:
                             logger.error(f"Error generating image embeddings: {str(e)}", exc_info=True)
                             error_msg = f"Error generating embeddings: {str(e)}"
@@ -74,7 +75,7 @@ class QueueConsumer:
                     elif first_item and isinstance(first_item, str):
                         logger.info(f"Generating text embeddings for {queue_item.id}")
                         try:
-                            embeddings = self.model_handler.embed_text(processed_data["data"])
+                            embeddings = await self.model_handler.embed_text(processed_data["data"])
                         except Exception as e:
                             logger.error(f"Error generating text embeddings: {str(e)}", exc_info=True)
                             error_msg = f"Error generating embeddings: {str(e)}"
@@ -187,19 +188,30 @@ class QueueConsumer:
                 reserved_keys = metadata.keys()
                 for key, value in result_metadata.items():
                     if key in reserved_keys:
-                        new_key = f"file_{key}"
+                        new_key = f"data_{key}"
                         metadata[new_key] = value
                     else:
                         metadata[key] = value
             
-            doc_id = str(result.get("id"))
+            filename = metadata.get('filename', f"item_{result['id']}")
+            stable_doc_id_str = f"{result.get('source')}:{filename}"
+            stable_doc_id = hashlib.sha256(stable_doc_id_str.encode()).hexdigest()
+            
+            logger.info(f"Generated stable document ID: {stable_doc_id} for {result.get('source')}/{filename}")
+            
+            removed = self.vector_store.remove_document(stable_doc_id)
+            if removed:
+                logger.info(f"Removed existing document version for {stable_doc_id} ({result.get('source')}/{filename})")
+            else:
+                logger.info(f"No existing document found for {stable_doc_id} ({result.get('source')}/{filename})")
+            
             vectors_added = self.vector_store.add_document(
-                doc_id=doc_id,
+                doc_id=stable_doc_id,
                 embeddings=embeddings,
                 metadata=metadata
             )
             
-            logger.info(f"Added {vectors_added} vectors to FAISS index for document {doc_id} across {len(embeddings)} pages")
+            logger.info(f"Added {vectors_added} vectors to FAISS index for document {stable_doc_id} across {len(embeddings)} pages")
             
             if self.vector_store.index and self.vector_store.index.ntotal % 100 == 0:
                 logger.info("Saving FAISS index to disk...")

@@ -91,47 +91,59 @@ class FileProcessor(BaseProcessor):
         else:
             raise ValueError(f"Unsupported File type: {file_type}")
     
-    def convert_to_images(self, file_data: bytes) -> List[Dict[str, Any]]:
-        result = []
-        
+    async def process_single_page(self, page_data: bytes, page_num: int) -> Dict[str, Any]:
+        try:
+            images = convert_from_bytes(page_data, dpi=300)
+            img = images[0]
+            
+            image_bytes = io.BytesIO()
+            img.save(image_bytes, format='JPEG')
+            image_bytes.seek(0)
+            image_base64 = base64.b64encode(image_bytes.read()).decode('utf-8')
+
+            text = "Text not extracted"#self.markdown.convert_binary_stream(image_base64)
+            
+            logger.debug(f"Processed page {page_num + 1}")
+            
+            return {
+                "image": image_base64,
+                "text": text or f"No text extracted from page {page_num + 1}"
+            }
+        except Exception as e:
+            logger.error(f"Error processing page {page_num + 1}: {e}")
+            return {
+                "image": "",
+                "text": f"Error processing page {page_num + 1}: {str(e)}"
+            }
+
+    async def convert_to_images(self, file_data: bytes) -> List[Dict[str, Any]]:
         try:
             pdf_stream = io.BytesIO(file_data)
             pdf_reader = pypdf.PdfReader(pdf_stream)
             total_pages = len(pdf_reader.pages)
             logger.info(f"Processing PDF with {total_pages} pages")
     
+            page_tasks = []
             for page_num in range(total_pages):
                 writer = pypdf.PdfWriter()
                 writer.add_page(pdf_reader.pages[page_num])
                 single_page_pdf = io.BytesIO()
                 writer.write(single_page_pdf)
                 single_page_pdf.seek(0)
-    
-                images = convert_from_bytes(single_page_pdf.getvalue(), dpi=300)
-                img = images[0]
                 
-                image_bytes = io.BytesIO()
-                img.save(image_bytes, format='JPEG')
-                image_bytes.seek(0)
-                image_base64 = base64.b64encode(image_bytes.read()).decode('utf-8')
-    
-                text = self.markdown.convert_binary_stream(image_base64)
-                
-                result.append({
-                    "image": image_base64,
-                    "text": text or f"No text extracted from page {page_num + 1}"
-                })
-                
-                logger.debug(f"Processed page {page_num + 1}/{total_pages}")
+                task = self.process_single_page(single_page_pdf.getvalue(), page_num)
+                page_tasks.append(task)
+            
+            result = await asyncio.gather(*page_tasks)
+            
+            return result
                 
         except Exception as e:
             logger.error(f"Error converting file to images: {e}")
-            result = [{
+            return [{
                 "image": "",
                 "text": f"Error converting file: {str(e)}"
             }]
-        
-        return result
     
     def convert_to_pdf(self, file_data: bytes, file_type: str) -> bytes:
         if file_type == 'pdf':
@@ -183,7 +195,7 @@ class FileProcessor(BaseProcessor):
             logger.error(f"Error converting file to PDF: {e}")
             raise ValueError(f"Failed to convert file to PDF: {str(e)}")
     
-    def process_unstructured_document(self, file_data: bytes, file_type: str) -> Dict[str, Any]:
+    async def process_unstructured_document(self, file_data: bytes, file_type: str) -> Dict[str, Any]:
         file_data = self.convert_to_pdf(file_data, file_type)
 
         if self.detect_file_type(file_data) != 'pdf':
@@ -191,7 +203,7 @@ class FileProcessor(BaseProcessor):
             logger.error(error_msg)
             raise ValueError(error_msg)
 
-        images_with_text = self.convert_to_images(file_data)
+        images_with_text = await self.convert_to_images(file_data)
         
         return {
             "data": images_with_text
@@ -242,7 +254,6 @@ class FileProcessor(BaseProcessor):
     def process_direct_document(self, file_data: bytes, file_type: str) -> Dict[str, Any]:
         try:
             text = file_data.decode('utf-8', errors='replace')
-            
             if file_type == 'markdown':
                 return {
                     "data": [text]
@@ -272,7 +283,7 @@ class FileProcessor(BaseProcessor):
             logger.debug(f"File category: {category}")
             
             if category == 'unstructured':
-                result = self.process_unstructured_document(data, file_type)
+                result = await self.process_unstructured_document(data, file_type)
             elif category == 'structured':
                 result = self.process_structured_document(data, file_type)
             elif category == 'direct':
@@ -302,7 +313,7 @@ async def main():
     import json
     from pathlib import Path
     
-    file_path = Path('pre-tests/Vivek Malipatel - Resume.docx')
+    file_path = Path('pre-tests/Vivek Malipatel - Resu me.docx')
     if not file_path.exists():
         print(f"Error: File '{file_path}' not found.")
         sys.exit(1)
@@ -316,7 +327,7 @@ async def main():
     print(f"Detected file type: {file_type}")
     
     try:
-        result = processor.process_unstructured_document(file_data, file_type)
+        result = await processor.process_unstructured_document(file_data, file_type)
 
         print("\n--- Processing Results ---")
         print(f"Processed {len(result['data'])} pages/images")

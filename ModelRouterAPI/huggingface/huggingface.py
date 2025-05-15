@@ -349,7 +349,6 @@ class HuggingFaceClient:
             self.logger.info(f"Processing text batch {i//batch_size + 1}/{(len(texts)-1)//batch_size + 1} with {len(batch_texts)} items")
             
             if "colnomic-embed-multimodal" in self.model_name or "nomic-embed-multimodal" in self.model_name:
-                self.logger.info(f"Using specialized processing for Nomic multimodal model: {self.model_name}")
                 try:
                     batch_queries = self.tokenizer.process_queries(batch_texts)
                     
@@ -396,7 +395,6 @@ class HuggingFaceClient:
             self.logger.info(f"Processing image batch {i//batch_size + 1}/{(len(images)-1)//batch_size + 1} with {len(batch_images)} items")
             
             if "colnomic-embed-multimodal" in self.model_name or "nomic-embed-multimodal" in self.model_name:
-                self.logger.info(f"Using specialized processing for Nomic multimodal model: {self.model_name}")
                 try:
                     processed_images = []
                     context_prompts = []

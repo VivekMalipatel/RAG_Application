@@ -446,21 +446,34 @@ if __name__ == "__main__":
         
         result = await agent.invoke(test_message, "test-thread-1")
 
-        print(result)
-        
-        if result and "messages" in result:
-            print("\n=== TEST RESULTS ===")
-            for msg in result["messages"]:
-                print(f"\n[{msg['role'].upper()}]:")
-                print(msg['content'])
-            print("\n=== REASONING ===")
-            if "reasoning" in result:
-                print(result["reasoning"])
-            print("\n=== ACTION PLAN ===")
-            if "action_plan" in result:
-                for step in result["action_plan"]:
-                    print(f"- {step['description']}")
-        else:
+        # Display result details
+        print("Result:", result)
+        if not result:
             print("Test failed or returned incomplete results:", result)
-    
+            return
+
+        # Print messages if present
+        if "messages" in result:
+            print("\n=== MESSAGES ===")
+            for msg in result["messages"]:
+                print(f"[{msg['role'].upper()}]: {msg['content']}")
+
+        # Print final answer
+        if "answer" in result:
+            print("\n=== ANSWER ===")
+            print(result["answer"])
+
+        # Print reasoning steps if present
+        if "reasoning" in result:
+            print("\n=== REASONING ===")
+            for idx, reasoning in enumerate(result["reasoning"], start=1):
+                print(f"Step {idx} reasoning: {reasoning}")
+
+        # Print action plan if present
+        if "action_plan" in result:
+            print("\n=== ACTION PLAN ===")
+            for idx, step in enumerate(result["action_plan"], start=1):
+                desc = step.get('description', '')
+                print(f"Step {idx}: {desc}")
+
     asyncio.run(test_agent())

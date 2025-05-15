@@ -16,7 +16,6 @@ class URLProcessor(BaseProcessor):
         logger.info("URLProcessor initialized")
     
     def is_youtube_url(self, url: str) -> bool:
-        """Check if the URL is a YouTube URL."""
         youtube_patterns = [
             r'^(https?://)?(www\.)?(youtube\.com|youtu\.?be)/.+$',
         ]
@@ -35,25 +34,30 @@ class URLProcessor(BaseProcessor):
             raise ValueError(error_msg)
         
         try:
-            parsed_url = urllib.parse.urlparse(data)
-            if not all([parsed_url.scheme, parsed_url.netloc]):
-                raise ValueError(f"Invalid URL format: {data}")
+            is_youtube = self.is_youtube_url(data)
             
-            if self.is_youtube_url(data):
-                logger.info(f"Processing YouTube URL: {data}")
-                markdown_text = self.markdown.convert_url(data)
-                logger.debug(f"Converted YouTube URL to markdown (length: {len(markdown_text)} chars)")
-                
-                return {
-                    "data": [markdown_text],
-                    "metadata": metadata or {}
-                }
+            if is_youtube:
+                result = await self.process_youtube_url(data)
             else:
-                error_msg = "Non-YouTube URLs are not supported at this time"
-                logger.warning(f"{error_msg}: {data}")
-                raise NotImplementedError(error_msg)
-                
+                result = {
+                    "data": [self.markdown.convert_url(data)],
+                }
+            
+            result["metadata"] = metadata or {}
+            logger.info(f"Successfully processed URL: {data}")
+            return result
+            
         except Exception as e:
             error_msg = f"Error processing URL: {str(e)}"
             logger.error(error_msg, exc_info=True)
+            raise
+            
+    async def process_youtube_url(self, url: str) -> Dict[str, Any]:
+        try:
+            markdown_text = self.markdown.convert_url(url)
+            return {
+                "data": [markdown_text]
+            }
+        except Exception as e:
+            logger.error(f"Error processing YouTube URL: {e}")
             raise

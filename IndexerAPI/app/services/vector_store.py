@@ -19,9 +19,14 @@ class VectorStore:
         os.makedirs(index_dir, exist_ok=True)
         logger.info(f"VectorStore initialized with index directory: {index_dir}")
         
+    def _normalize_vectors(self, vectors: np.ndarray) -> np.ndarray:
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return vectors / norms
+        
     def initialize_index(self, use_gpu: bool = False):
         if self.index is None:
-            hnsw = faiss.IndexHNSWFlat(self.embedding_dim, 32)
+            hnsw = faiss.IndexHNSWFlat(self.embedding_dim, 32, faiss.METRIC_INNER_PRODUCT)
             hnsw.hnsw.efConstruction = 128
             hnsw.hnsw.efSearch = 128
             idmap = faiss.IndexIDMap(hnsw)
@@ -31,7 +36,7 @@ class VectorStore:
                 co.shard = True
                 self.index = faiss.index_cpu_to_all_gpus(self.index, co)
                 logger.info("Using multi-GPU for FAISS")
-            logger.info(f"Initialized FAISS IDMap(HNSW) with dimension {self.embedding_dim}")
+            logger.info(f"Initialized FAISS IDMap(HNSW) with dimension {self.embedding_dim} for cosine similarity")
         return self.index
     
     def add_document(self, doc_id: str, embeddings: List[List[List[float]]], metadata: Dict[str, Any] = None):
@@ -46,6 +51,8 @@ class VectorStore:
                 continue
                 
             page_embeddings_np = np.array(page_embeddings, dtype='float32')
+            page_embeddings_np = self._normalize_vectors(page_embeddings_np)
+            
             n = page_embeddings_np.shape[0]
             ids = np.arange(self.next_id, self.next_id + n, dtype='int64')
             self.index.add_with_ids(page_embeddings_np, ids)
@@ -79,39 +86,51 @@ class VectorStore:
             return []
             
         try:
-            self.index.index.hnsw.efSearch = 256
-        except Exception:
-            pass
+            try:
+                self.index.index.hnsw.efSearch = 256
+            except AttributeError:
+                logger.debug("efSearch tuning skipped; index might not be HNSW type")
+                pass
+                
+            query_np = np.array(query_vectors).astype('float32')
+            query_np = self._normalize_vectors(query_np)
             
-        query_np = np.array(query_vectors).astype('float32')
-        
-        total = self.index.ntotal if hasattr(self.index, 'ntotal') else self.next_id
-        expanded_k = min(k * 10, total) if total > 0 else k
-        distances, indices = self.index.search(query_np, expanded_k)
-        
-        doc_scores = {}
-        
-        for q_idx in range(len(query_vectors)):
-            for i in range(expanded_k):
-                vid = int(indices[q_idx][i])
-                if vid < 0:
-                    continue
-                distance = float(distances[q_idx][i])
-                info = self.id_to_doc.get(vid)
-                if not info:
-                    continue
-                doc_id, page_num = info
-                similarity = -distance
-                if doc_id not in doc_scores or similarity > doc_scores[doc_id]['score']:
-                    meta = self.doc_to_vectors.get(doc_id, {}).get('metadata', {}).copy()
-                    result = {'doc_id': doc_id, 'score': similarity, 'metadata': meta}
-                    if page_num is not None:
-                        result['page'] = page_num
-                    doc_scores[doc_id] = result
-        
-        results = list(doc_scores.values())
-        results.sort(key=lambda x: x['score'], reverse=True)
-        return results[:k]
+            total = self.index.ntotal if hasattr(self.index, 'ntotal') else self.next_id
+            expanded_k = min(k * 10, total) if total > 0 else k
+
+            distances, indices = self.index.search(query_np, expanded_k)
+            
+            doc_scores = {}
+            
+            for q_idx in range(len(query_vectors)):
+                for i in range(min(expanded_k, len(indices[q_idx]))):
+                    vid = int(indices[q_idx][i])
+                    if vid < 0:
+                        continue
+                    similarity = float(distances[q_idx][i])
+                    info = self.id_to_doc.get(vid)
+                    if not info:
+                        continue
+                        
+                    doc_id, page_num = info
+                    if doc_id not in doc_scores or similarity > doc_scores[doc_id]['score']:
+                        meta = self.doc_to_vectors.get(doc_id, {}).get('metadata', {}).copy()
+                        result = {
+                            'doc_id': doc_id, 
+                            'score': similarity, 
+                            'metadata': meta
+                        }
+                        if page_num is not None:
+                            result['page'] = page_num
+                        doc_scores[doc_id] = result
+            
+            results = list(doc_scores.values())
+            results.sort(key=lambda x: x['score'], reverse=True)
+            
+            return results[:k]
+        except Exception as e:
+            logger.error(f"Error during vector search: {str(e)}", exc_info=True)
+            return []
     
     def save(self):
         if self.index is None:

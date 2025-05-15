@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8010:8010"
+      - "8009:8009"
     depends_on:
       - unoserver
     env_file:
@@ -17,10 +17,24 @@ services:
       - DB_URL=${DB_URL}
       - LOG_LEVEL=${LOG_LEVEL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_API_BASE=${OPENAI_API_BASE}
-      
+      - OPENAI_API_BASE=http://modelrouter-api:8000/v1
+    volumes:
+      - indexer-data:/app/storage/faiss_indexes
+      - indexer-db:/app/app.db
+    networks:
+      - model-router-network
   unoserver:
     image: ghcr.io/unoconv/unoserver-docker
     ports:
       - "2003:2003"
     restart: unless-stopped
+    networks:
+      - model-router-network
+
+volumes:
+  indexer-data:
+  indexer-db:
+
+networks:
+  model-router-network:
+    external: true

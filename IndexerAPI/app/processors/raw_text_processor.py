@@ -17,18 +17,19 @@ class RawTextProcessor(BaseProcessor):
         logger.info("Processing raw text")
         
         if not data or not isinstance(data, str):
-            error_msg = f"Invalid data type for raw text processing: {type(data)}"
+            error_msg = f"Invalid data type for text processing: {type(data)}"
             logger.error(error_msg)
             raise ValueError(error_msg)
         
         try:
-            markdown_text = self.markdown.convert_text(data)
-            logger.debug(f"Converted raw text to markdown (length: {len(markdown_text)} chars)")
-            
-            return {
-                "data": [markdown_text],
+            result = {
+                "data": [self.markdown.convert_text(data)],
                 "metadata": metadata or {}
             }
+            
+            logger.info(f"Successfully processed raw text of {len(data)} characters")
+            return result
+            
         except Exception as e:
             error_msg = f"Error processing raw text: {str(e)}"
             logger.error(error_msg, exc_info=True)
