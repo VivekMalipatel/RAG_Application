@@ -16,3 +16,4 @@ magika
 pypdf
 faiss-cpu
 aiohttp
+pdf2image
