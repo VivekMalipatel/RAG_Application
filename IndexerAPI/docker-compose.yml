@@ -19,8 +19,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_API_BASE=http://modelrouter-api:8000/v1
     volumes:
-      - indexer-data:/app/storage/faiss_indexes
-      - indexer-db:/app/app.db
+      - ./:/app
     networks:
       - model-router-network
   unoserver:
@@ -31,9 +30,7 @@ services:
     networks:
       - model-router-network
 
-volumes:
-  indexer-data:
-  indexer-db:
+volumes: {}
 
 networks:
   model-router-network:
