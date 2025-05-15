@@ -37,4 +37,5 @@ volumes:
 
 networks:
   model-router-network:
-    external: true
+    name: model-router-network
+    driver: bridge
