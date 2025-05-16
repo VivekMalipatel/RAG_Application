@@ -29,6 +29,7 @@ services:
       - ollama
 
   ollama:
+    container_name: ollama
     image: ollama/ollama:latest
     volumes:
       - ollama-data:/root/.ollama
