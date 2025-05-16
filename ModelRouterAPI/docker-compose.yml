@@ -54,3 +54,4 @@ networks:
   model-router-network:
     name: model-router-network
     driver: bridge
+    external: true
