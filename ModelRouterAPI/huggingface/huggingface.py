@@ -342,6 +342,20 @@ class HuggingFaceClient:
         if len(texts) == 0:
             return []
             
+        if texts and len(texts[0]) > 0:
+            text_length = len(texts[0])
+            if text_length > 5000:
+                adaptive_batch_size = 1
+            elif text_length > 2000:
+                adaptive_batch_size = 2
+            elif text_length > 1000:
+                adaptive_batch_size = 4
+            else:
+                adaptive_batch_size = 8
+            
+            batch_size = min(batch_size, adaptive_batch_size)
+            self.logger.info(f"Using adaptive batch size of {batch_size} based on text length of {text_length}")
+            
         all_embeddings = []
         
         for i in range(0, len(texts), batch_size):
