@@ -17,3 +17,4 @@ pypdf
 faiss-cpu
 aiohttp
 pdf2image
+unoserver>=3.0
