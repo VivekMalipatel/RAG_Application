@@ -25,6 +25,7 @@ services:
     networks:
       - model-router-network
   unoserver:
+    container_name: unoserver
     image: ghcr.io/unoconv/unoserver-docker
     ports:
       - "2003:2003"
