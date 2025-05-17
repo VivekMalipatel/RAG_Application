@@ -351,14 +351,14 @@ class HuggingFaceClient:
             if "colnomic-embed-multimodal" in self.model_name or "nomic-embed-multimodal" in self.model_name:
                 try:
                     batch_queries = self.tokenizer.process_queries(batch_texts)
-                    
-                    batch_queries = batch_queries.to(device=self.device, dtype=torch.float32 if self.device == 'cpu' else None)
+                    batch_queries = {k: v.to(self.model.device) for k, v in batch_queries.items()}
 
                     if self.device == 'cpu' and hasattr(self.model, 'to'):
                         self.model = self.model.to(dtype=torch.float32)
                     
                     with torch.no_grad():
                         query_embeddings = self.model(**batch_queries)
+                        query_embeddings = query_embeddings / torch.norm(query_embeddings, dim=1, keepdim=True)
                     
                     if query_embeddings.dtype != torch.float32:
                         query_embeddings = query_embeddings.to(torch.float32)
@@ -384,7 +384,7 @@ class HuggingFaceClient:
         
         return all_embeddings
     
-    async def embed_image(self, images: List[dict], batch_size: int = 2) -> List[List[float]]:
+    async def embed_image(self, images: List[dict], batch_size: int = 1) -> List[List[float]]:
         if len(images) == 0:
             return []
             
@@ -427,14 +427,15 @@ class HuggingFaceClient:
                         images=processed_images, 
                         context_prompts=context_prompts
                     )
-                    
-                    batch_processed = batch_processed.to(device=self.device, dtype=torch.float32 if self.device == 'cpu' else None)
 
-                    if self.device == 'cpu' and hasattr(self.model, 'to'):
+                    batch_processed = {k: v.to(self.model.device) for k, v in batch_processed.items()}
+
+                    if self.device == 'cpu':
                         self.model = self.model.to(dtype=torch.float32)
                     
                     with torch.no_grad():
                         image_embeddings = self.model(**batch_processed)
+                        image_embeddings = image_embeddings / torch.norm(image_embeddings, dim=1, keepdim=True)
                     
                     if image_embeddings.dtype != torch.float32:
                         image_embeddings = image_embeddings.to(torch.float32)
