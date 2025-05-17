@@ -106,10 +106,16 @@ class ModelSelector:
                               model_name: str,
                               threshold: float = 0.4) -> Tuple[Provider, str]:
         if model_type == ModelType.TEXT_EMBEDDING:
-            return Provider.HUGGINGFACE, "nomic-ai/colnomic-embed-multimodal-3b"
+            if "colnomic-embed-multimodal" in model_name.lower():
+                return Provider.HUGGINGFACE, "nomic-ai/colnomic-embed-multimodal-3b"
+            else:
+                return Provider.HUGGINGFACE, "nomic-ai/nomic-embed-multimodal-3b"
         
         if model_type == ModelType.IMAGE_EMBEDDING:
-            return Provider.HUGGINGFACE, "nomic-ai/colnomic-embed-multimodal-3b"
+            if "colnomic-embed-multimodal" in model_name.lower():
+                return Provider.HUGGINGFACE, "nomic-ai/colnomic-embed-multimodal-3b"
+            else:
+                return Provider.HUGGINGFACE, "nomic-ai/nomic-embed-multimodal-3b"
         
         if model_type == ModelType.RERANKER:
             return Provider.HUGGINGFACE, "jinaai/jina-colbert-v2"
