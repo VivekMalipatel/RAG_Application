@@ -16,8 +16,10 @@ services:
       - UNOSERVER_PORT=2003
       - DB_URL=${DB_URL}
       - LOG_LEVEL=${LOG_LEVEL}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_API_BASE=http://modelrouter-api:8000/v1
+      - INFERENCE_API_KEY=${INFERENCE_API_KEY}
+      - INFERENCE_API_BASE=${INFERENCE_API_BASE:-http://modelrouter-api:8000/v1}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY}
+      - EMBEDDING_API_BASE=${EMBEDDING_API_BASE:-http://modelrouter-api:8000/v1}
     volumes:
       - ./:/app
     networks:
@@ -34,4 +36,4 @@ volumes: {}
 
 networks:
   model-router-network:
-    external: true
+    external: false

@@ -14,7 +14,7 @@ import csv
 
 from app.processors.base_processor import BaseProcessor
 from app.core.markitdown.markdown_handler import MarkDown
-
+from app.config import settings
 logger = logging.getLogger(__name__)
 
 class FileProcessor(BaseProcessor):
@@ -23,10 +23,9 @@ class FileProcessor(BaseProcessor):
         self.markdown = MarkDown()
         self.magika = Magika()
         logger.info("FileProcessor initialized")
-        
-        #TODO: Replace with config.setting variable
-        self.unoserver_host = "localhost"
-        self.unoserver_port = "2003"
+
+        self.unoserver_host = settings.UNOSERVER_HOST
+        self.unoserver_port = settings.UNOSERVER_PORT
         
         #TODO: Decide on what all file can be processed depending on Markitdown and PDF Converion libraries
         self.unstructured_docs = [
@@ -101,7 +100,7 @@ class FileProcessor(BaseProcessor):
             image_bytes.seek(0)
             image_base64 = base64.b64encode(image_bytes.read()).decode('utf-8')
 
-            text = "Text not extracted"#self.markdown.convert_binary_stream(image_base64)
+            text = self.markdown.convert_binary_stream(image_base64)
             
             logger.debug(f"Processed page {page_num + 1}")
             

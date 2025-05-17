@@ -44,7 +44,7 @@ async def search_by_text(request: SearchTextRequest):
         query_embeddings = await model_handler.embed_text([request.text])
         
         results = vector_store.search(
-            query_vectors=query_embeddings[0],
+            query_vectors=query_embeddings,
             k=request.top_k
         )
         

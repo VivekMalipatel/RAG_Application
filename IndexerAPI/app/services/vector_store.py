@@ -74,13 +74,14 @@ class VectorStore:
         self.doc_to_vectors[doc_id] = {
             'count': int(total_vectors_added),
             'metadata': metadata or {},
-            'pages': page_indices
+            'pages': page_indices,
+            'raw_embeddings': embeddings
         }
         
         logger.info(f"Added document {doc_id} with {total_vectors_added} vectors across {len(page_indices)} pages")
         return total_vectors_added
     
-    def search(self, query_vectors: List[List[float]], k: int = 10) -> List[Dict]:
+    def search(self, query_vectors: List[List[List[float]]], k: int = 10) -> List[Dict]:
         if self.index is None:
             logger.error("Index not initialized")
             return []
@@ -91,18 +92,27 @@ class VectorStore:
             except AttributeError:
                 logger.debug("efSearch tuning skipped; index might not be HNSW type")
                 pass
+
+            arr = np.array(query_vectors, dtype='float32')
+            if arr.ndim != 3:
+                raise ValueError(f"Expected 3D input with shape [pages][chunks][dim], got {arr.ndim}D shape {arr.shape}")
+
+            if arr.shape[2] != self.embedding_dim:
+                raise ValueError(f"Expected embedding dimension {self.embedding_dim}, got {arr.shape[2]}")
+
+            pages, chunks, dim = arr.shape
+            arr = arr.reshape(pages * chunks, dim)
                 
-            query_np = np.array(query_vectors).astype('float32')
-            query_np = self._normalize_vectors(query_np)
+            arr = self._normalize_vectors(arr)
             
             total = self.index.ntotal if hasattr(self.index, 'ntotal') else self.next_id
             expanded_k = min(k * 10, total) if total > 0 else k
 
-            distances, indices = self.index.search(query_np, expanded_k)
-            
+            distances, indices = self.index.search(arr, expanded_k)
+
             doc_scores = {}
             
-            for q_idx in range(len(query_vectors)):
+            for q_idx in range(arr.shape[0]):
                 for i in range(min(expanded_k, len(indices[q_idx]))):
                     vid = int(indices[q_idx][i])
                     if vid < 0:
@@ -113,6 +123,10 @@ class VectorStore:
                         continue
                         
                     doc_id, page_num = info
+                    # If we've removed that document, skip it
+                    if doc_id not in self.doc_to_vectors:
+                        continue
+                        
                     if doc_id not in doc_scores or similarity > doc_scores[doc_id]['score']:
                         meta = self.doc_to_vectors.get(doc_id, {}).get('metadata', {}).copy()
                         result = {
@@ -124,8 +138,7 @@ class VectorStore:
                             result['page'] = page_num
                         doc_scores[doc_id] = result
             
-            results = list(doc_scores.values())
-            results.sort(key=lambda x: x['score'], reverse=True)
+            results = sorted(doc_scores.values(), key=lambda x: x['score'], reverse=True)
             
             return results[:k]
         except Exception as e:
@@ -162,8 +175,9 @@ class VectorStore:
         mapping_path = os.path.join(self.index_dir, "document_mapping.pkl")
         
         if not os.path.exists(index_path) or not os.path.exists(mapping_path):
-            logger.warning("No saved index found")
-            return False
+            logger.info("No saved index on disk; starting with an empty FAISS index")
+            self.initialize_index()
+            return True
             
         try:
             self.index = faiss.read_index(index_path, faiss.IO_FLAG_MMAP)
@@ -217,42 +231,126 @@ class VectorStore:
         ids_to_remove = []
         for page_info in doc_info['pages'].values():
             ids_to_remove.extend(range(page_info['start_id'], page_info['end_id']))
-        self.index.remove_ids(np.array(ids_to_remove, dtype='int64'))
+        
         for vid in ids_to_remove:
             self.id_to_doc.pop(vid, None)
-        logger.info(f"Removed document {doc_id} with {len(ids_to_remove)} vectors")
+            
+        logger.info(f"Lazy-removed document {doc_id} with {len(ids_to_remove)} vectors")
         return True
 
-    def search_batch(self, queries: List[List[float]], k: int = 10) -> List[List[Dict]]:
+    def search_batch(self, queries: List[List[List[float]]], k: int = 10) -> List[List[Dict]]:
         if self.index is None:
             logger.error("Index not initialized")
-            return [[] for _ in queries]
-        query_np = np.array(queries, dtype='float32')
-        total = self.index.ntotal if hasattr(self.index, 'ntotal') else self.next_id
-        expanded_k = min(k * 10, total)
-        distances, indices = self.index.search(query_np, expanded_k)
-        batch_results = []
-        for q_i in range(len(queries)):
-            doc_scores = {}
-            for i, vid in enumerate(indices[q_i]):
-                if vid < 0:
-                    continue
-                distance = float(distances[q_i][i])
-                similarity = -distance
-                info = self.id_to_doc.get(int(vid))
-                if not info:
-                    continue
-                doc_id, page_num = info
-                if doc_id not in doc_scores or similarity > doc_scores[doc_id]['score']:
-                    meta = self.doc_to_vectors.get(doc_id, {}).get('metadata', {}).copy()
-                    res = {'doc_id': doc_id, 'score': similarity, 'metadata': meta}
-                    if page_num is not None:
-                        res['page'] = page_num
-                    doc_scores[doc_id] = res
-            results = sorted(doc_scores.values(), key=lambda x: x['score'], reverse=True)[:k]
-            batch_results.append(results)
-        return batch_results
+            return []
+            
+        try:
+            arr = np.array(queries, dtype='float32')
+            if arr.ndim != 3:
+                raise ValueError(f"Expected 3D input with shape [pages][chunks][dim], got {arr.ndim}D shape {arr.shape}")
 
+            if arr.shape[2] != self.embedding_dim:
+                raise ValueError(f"Expected embedding dimension {self.embedding_dim}, got {arr.shape[2]}")
+
+            batch_results = []
+            for page_idx in range(arr.shape[0]):
+                page_embeddings = arr[page_idx]
+
+                page_embeddings = self._normalize_vectors(page_embeddings)
+
+                total = self.index.ntotal if hasattr(self.index, 'ntotal') else self.next_id
+                expanded_k = min(k * 10, total)
+                distances, indices = self.index.search(page_embeddings, expanded_k)
+
+                doc_scores = {}
+                for q_i in range(page_embeddings.shape[0]):
+                    for i, vid in enumerate(indices[q_i]):
+                        if vid < 0:
+                            continue
+                        similarity = float(distances[q_i][i])
+                        info = self.id_to_doc.get(int(vid))
+                        if not info:
+                            continue
+                        doc_id, page_num = info
+                        if doc_id not in self.doc_to_vectors:
+                            continue
+                            
+                        if doc_id not in doc_scores or similarity > doc_scores[doc_id]['score']:
+                            meta = self.doc_to_vectors.get(doc_id, {}).get('metadata', {}).copy()
+                            res = {'doc_id': doc_id, 'score': similarity, 'metadata': meta}
+                            if page_num is not None:
+                                res['page'] = page_num
+                            doc_scores[doc_id] = res
+                
+                results = sorted(doc_scores.values(), key=lambda x: x['score'], reverse=True)[:k]
+                batch_results.append(results)
+            
+            return batch_results
+        except Exception as e:
+            logger.error(f"Error during batch vector search: {str(e)}", exc_info=True)
+            raise
+
+    def rebuild_index(self, use_gpu: bool = False):
+        if not self.doc_to_vectors:
+            logger.warning("No documents in store to rebuild index")
+            return False
+            
+        try:
+            logger.info("Starting index rebuild...")
+            
+            current_docs = list(self.doc_to_vectors.items())
+            
+            old_index = self.index
+            self.index = None
+            self.initialize_index(use_gpu=use_gpu)
+            
+            self.id_to_doc = {}
+            self.next_id = 0
+            
+            saved_docs = self.doc_to_vectors.copy()
+            self.doc_to_vectors = {}
+            
+            skipped_docs = []
+            successful_docs = 0
+            
+            for doc_id, doc_info in current_docs:
+                if 'raw_embeddings' not in doc_info:
+                    skipped_docs.append(doc_id)
+                    logger.warning(f"Cannot rebuild document {doc_id} - missing raw embeddings")
+                    continue
+                
+                embeddings = doc_info['raw_embeddings']
+                metadata = doc_info['metadata']
+                
+                self.add_document(doc_id, embeddings, metadata)
+                successful_docs += 1
+
+            for doc_id in skipped_docs:
+                self.doc_to_vectors[doc_id] = saved_docs[doc_id]
+            
+            logger.info(f"Index rebuilt successfully with {self.index.ntotal} vectors - "
+                      f"{successful_docs} documents added, {len(skipped_docs)} documents skipped")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error rebuilding index: {str(e)}", exc_info=True)
+            return False
+            
+    def should_rebuild(self, threshold: float = 0.2) -> bool:
+        if self.index is None or self.index.ntotal == 0:
+            return False
+
+        active_vectors = 0
+        for doc_info in self.doc_to_vectors.values():
+            active_vectors += doc_info.get('count', 0)
+            
+        total_vectors = self.index.ntotal
+        deleted_vectors = total_vectors - active_vectors
+        deleted_ratio = deleted_vectors / total_vectors if total_vectors > 0 else 0
+        
+        if deleted_ratio >= threshold:
+            logger.info(f"Index rebuild recommended: {deleted_vectors}/{total_vectors} vectors deleted ({deleted_ratio:.2%})")
+            return True
+        return False
 
 #TODO: HNSW Removal Limitations
 # python

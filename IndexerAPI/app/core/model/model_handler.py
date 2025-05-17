@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 class ModelHandler:
     def __init__(self, api_key: str = None, api_base: str = None):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.api_base = api_base or os.getenv("OPENAI_API_BASE")
+        self.api_key = api_key or os.getenv("EMBEDDING_API_KEY")
+        self.api_base = api_base or os.getenv("EMBEDDING_API_BASE")
         http_client = httpx.AsyncClient(timeout=7200.0)
         self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.api_base, http_client=http_client)
         logger.info(f"ModelHandler initialized with API base: {self.api_base} and async client")
