@@ -14,6 +14,7 @@ import csv
 
 from app.processors.base_processor import BaseProcessor
 from app.core.markitdown.markdown_handler import MarkDown
+from app.core.model.model_handler import ModelHandler
 from app.config import settings
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class FileProcessor(BaseProcessor):
     def __init__(self):
         self.markdown = MarkDown()
         self.magika = Magika()
+        self.model_handler = ModelHandler()
         logger.info("FileProcessor initialized")
 
         self.unoserver_host = settings.UNOSERVER_HOST
@@ -100,7 +102,7 @@ class FileProcessor(BaseProcessor):
             image_bytes.seek(0)
             image_base64 = base64.b64encode(image_bytes.read()).decode('utf-8')
 
-            text = self.markdown.convert_binary_stream(image_base64)
+            text = await self.model_handler.generate_alt_text(image_base64)
             
             logger.debug(f"Processed page {page_num + 1}")
             

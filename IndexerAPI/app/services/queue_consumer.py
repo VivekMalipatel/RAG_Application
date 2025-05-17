@@ -211,6 +211,7 @@ class QueueConsumer:
                 metadata=metadata
             )
             self.vector_store.save()
+            self.vector_store.load()
             
             logger.info(f"Added {vectors_added} vectors to FAISS index for document {stable_doc_id} across {len(embeddings)} pages")
             

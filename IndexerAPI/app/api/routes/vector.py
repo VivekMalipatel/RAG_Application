@@ -38,7 +38,7 @@ class ProcessPdfUrlRequest(BaseModel):
     source: str
     metadata: Optional[Dict[str, Any]] = None
 
-@router.post("/search/text", response_model=List[Dict[str, Any]])
+@router.post("/search/text", response_model=List[List[Dict[str, Any]]])
 async def search_by_text(request: SearchTextRequest):
     try:
         query_embeddings = await model_handler.embed_text([request.text])
@@ -53,7 +53,7 @@ async def search_by_text(request: SearchTextRequest):
         logger.error(f"Error during text search: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
-@router.post("/search/image", response_model=List[Dict[str, Any]])
+@router.post("/search/image", response_model=List[List[Dict[str, Any]]])
 async def search_by_image(request: SearchImageRequest):
     try:
         image_text = request.text or "Image query"

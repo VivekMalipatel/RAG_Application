@@ -12,21 +12,67 @@ logger = logging.getLogger(__name__)
 
 class ModelHandler:
     def __init__(self, api_key: str = None, api_base: str = None):
-        self.api_key = api_key or os.getenv("EMBEDDING_API_KEY")
-        self.api_base = api_base or os.getenv("EMBEDDING_API_BASE")
+        self.embedding_api_key = api_key or os.getenv("EMBEDDING_API_KEY")
+        self.embedding_api_base = api_base or os.getenv("EMBEDDING_API_BASE")
+        self.inference_api_key = api_key or os.getenv("INFERENCE_API_KEY")
+        self.inference_api_base = api_base or os.getenv("INFERENCE_API_BASE")
         http_client = httpx.AsyncClient(timeout=7200.0)
-        self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.api_base, http_client=http_client)
-        logger.info(f"ModelHandler initialized with API base: {self.api_base} and async client")
+        self.embedding_client = AsyncOpenAI(api_key=self.embedding_api_key, base_url=self.embedding_api_base, http_client=http_client)
+        self.inference_client = AsyncOpenAI(api_key=self.inference_api_key, base_url=self.inference_api_base, http_client=http_client)
+    
+    async def generate_alt_text(self, image_base64: str, model: str = "gemma3:12b-it-q8_0") -> str:
+        if not image_base64:
+            logger.warning("Empty image_base64 provided for alt text generation")
+            return ""
+        
+        system_prompt = """
+        You are an AI assistant whose job is to generate rich, descriptive alt text for images in a multimodal RAG pipeline. For each input image—whether it comes from a PDF page, a webpage screenshot, a DOCX export, or a standalone photo—you will produce concise, context-aware alt text that:
 
-    async def embed_text(self, texts: List[str], model: str = "nomic-ai/colnomic-embed-multimodal-3b") -> List[List[float]]:
+        1. Identifies and names all salient entities, objects, and text visible in the image.
+        2. Describes relationships, actions, or interactions depicted.
+        3. Conveys any relevant context or setting needed for understanding.
+        4. Remains clear and unambiguous, suitable for embedding alongside the image to provide downstream models with full context.
+        5. Try to be as concise as possible while still being descriptive.
+
+        Your alt text will be attached to each image before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively.
+        """
+
+        try:
+            response = await self.inference_client.chat.completions.create(
+                model=model,
+                messages=[  
+                            {
+                                "role": "system",
+                                "content": system_prompt,
+                            },   
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "Generate alt text for the following image. Just the alt text, no other text like 'Here is the alt text:',etc"},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": "data:image/png;base64," + image_base64,
+                                        }
+                                    },
+                                ],
+                            }
+                        ],
+            )
+            alt_text = response.choices[0].message.content.strip()
+            return alt_text
+            
+        except Exception as e:
+            logger.error(f"Error generating alt text: {str(e)}")
+            raise
+
+    async def embed_text(self, texts: List[str], model: str = "nomic-ai/nomic-embed-multimodal-3b") -> List[List[float]]:
         if not texts:
             logger.warning("Empty texts list provided for embedding")
             return []
 
-        logger.info(f"Generating embeddings for {len(texts)} text items using model: {model}")
-
         try:
-            response = await self.client.embeddings.create(
+            response = await self.embedding_client.embeddings.create(
                 input=texts,
                 model=model,
                 encoding_format="float"
@@ -40,15 +86,15 @@ class ModelHandler:
             logger.error(f"Error generating text embeddings: {str(e)}")
             raise
 
-    async def embed_image(self, image_texts: List[Dict[str, str]], model: str = "nomic-ai/colnomic-embed-multimodal-3b") -> List[List[float]]:
+    async def embed_image(self, image_texts: List[Dict[str, str]], model: str = "nomic-ai/nomic-embed-multimodal-3b") -> List[List[float]]:
         if not image_texts:
             logger.warning("Empty image_texts list provided for embedding")
             return []
-
-        logger.info(f"Generating embeddings for {len(image_texts)} image-text pairs using model: {model}")
+        
+        logger.info(f"Processing {len(image_texts)} images for embedding")
 
         try:
-            response = await self.client.embeddings.create(
+            response = await self.embedding_client.embeddings.create(
                 input=image_texts,
                 model=model,
                 encoding_format="float"

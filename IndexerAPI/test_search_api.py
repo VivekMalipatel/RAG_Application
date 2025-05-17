@@ -29,8 +29,8 @@ def test_search_text_api(text, top_k=10):
         
         # Check if request was successful
         if response.status_code == 200:
-            results = response.json()
-            return results
+            # API returns list of result lists; keep as is
+            return response.json()
         else:
             print(f"Error: API returned status code {response.status_code}")
             print(f"Response: {response.text}")
@@ -108,23 +108,24 @@ def display_results(results):
     if not results:
         print("No results to display")
         return
-    
-    print(f"\nFound {len(results)} results:")
-    print("-" * 60)
-    
-    for i, result in enumerate(results, 1):
-        print(f"Result #{i}:")
-        print(f"Score: {result.get('score', 'N/A')}")
-        print(f"Text: {result.get('text', 'N/A')[:100]}...")  # Show first 100 chars
-        
-        # Display metadata if available
-        metadata = result.get('metadata', {})
-        if metadata:
-            print("Metadata:")
-            for key, value in metadata.items():
-                print(f"  - {key}: {value}")
-        
+    print(results)
+    # results is a list of lists (one per query)
+    for q_idx, hits in enumerate(results, 1):
+        print(f"\nQuery #{q_idx}: {len(hits)} results")
         print("-" * 60)
+        for i, result in enumerate(hits, 1):
+            print(f"Result #{i}:")
+            print(f"Score: {result.get('score', 'N/A')}")
+            txt = result.get('text', 'N/A')
+            print(f"Text: {txt[:100]}...")
+            if 'page_idx' in result:
+                print(f"Page: {result.get('page_idx', 'N/A')}")
+            metadata = result.get('metadata', {})
+            if metadata:
+                print("Metadata:")
+                for key, value in metadata.items():
+                    print(f"  - {key}: {value}")
+            print("-" * 60)
 
 def ingest_files_from_directory(directory_path, source, extensions=None):
     """
