@@ -12,7 +12,7 @@ class Settings:
     DB_URL: str = os.getenv("DB_URL", "sqlite:///./app.db")
 
     UNOSERVER_HOST: str = os.getenv("UNOSERVER_HOST", "unoserver")
-    UNOSERVER_PORT: int = int(os.getenv("UNOSERVER_PORT", 2003))
+    UNOSERVER_PORT: int = os.getenv("UNOSERVER_PORT", 2003)
 
 
 settings = Settings()
