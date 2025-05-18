@@ -42,18 +42,6 @@ services:
             - capabilities: [gpu]
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - MODEL_NAME=${MODEL_NAME:-gemma3:12b-it-q8_0}
-      - CTX_SIZE=${CTX_SIZE:-80000}
-    entrypoint:
-      - sh
-      - -c
-      - |
-        exec ollama serve "$MODEL_NAME" \
-          --ctx-size "$CTX_SIZE" \
-          --batch-size 1 \
-          --n-gpu-layers 10 \
-          --threads 40 \
-          --parallel 1
     restart: unless-stopped
     networks:
       - model-router-network
