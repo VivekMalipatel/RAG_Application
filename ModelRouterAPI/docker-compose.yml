@@ -43,7 +43,7 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - MODEL_NAME=${MODEL_NAME:-gemma3:12b-it-q8_0}
-      - CTX_SIZE=80000
+      - CTX_SIZE=${CTX_SIZE:-80000}
     entrypoint:
       - sh
       - -c
