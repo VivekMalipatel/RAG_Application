@@ -42,6 +42,9 @@ services:
             - capabilities: [gpu]
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
+      - OLLAMA_NUM_CTX=$(OLLAMA_NUM_CTX:-8096)
+      - OLLAMA_KV_CACHE_TYPE="q8_0"
+      - OLLAMA_FLASH_ATTENTION=1
     restart: unless-stopped
     networks:
       - model-router-network

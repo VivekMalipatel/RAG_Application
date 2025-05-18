@@ -209,6 +209,7 @@ class OllamaClient:
             "messages": serializable_messages,
             "stream": stream,
             "options": {
+                "num_ctx": settings.OLLAMA_NUM_CTX,
                 "temperature": temperature,
                 "top_p": top_p,
                 "top_k": self.top_k,
