@@ -21,22 +21,21 @@ class ModelHandler:
         self.embedding_client = AsyncOpenAI(api_key=self.embedding_api_key, base_url=self.embedding_api_base, http_client=http_client)
         self.inference_client = AsyncOpenAI(api_key=self.inference_api_key, base_url=self.inference_api_base, http_client=http_client)
     
-    async def generate_alt_text(self, image_base64: str, model: str = "gemma3:12b-it-q8_0") -> str:
+    async def generate_text_description(self, image_base64: str, model: str = "qwen2.5vl:7b-q8_0") -> str:
         if not image_base64:
-            logger.warning("Empty image_base64 provided for alt text generation")
+            logger.warning("Empty image_base64 provided for text generation")
             return ""
         
-        system_prompt = """
-        You are an AI assistant whose job is to generate rich, descriptive alt text for the provided documents in a multimodal RAG pipeline. For each input document-whether it comes from a PDF page, a webpage screenshot, a DOCX export, or a standalone photo—you will produce concise, context-aware alt text that:
+        system_prompt = """You are an AI assistant whose job is to generate rich, descriptive text for the provided documents in a multimodal RAG pipeline. For each input document-whether it comes from a PDF page, a webpage screenshot, a DOCX export, or a standalone photo—you will produce concise, context-aware text that:
 
-        1. Identifies and names all salient entities, objects, and text visible in the document.
+        1. Identifies and names all salient Named and Unnamed entities, objects, and data visible in the document.
         2. Describes relationships, actions, or interactions depicted.
         3. Conveys any relevant context or setting needed for understanding the document.
         4. Remains clear and unambiguous, suitable for embedding alongside this document to provide downstream models with full context.
 
-        Note: The provided image can be a screenshot of a webpage, a PDF page, or any other image format. Your task is to generate alt text that accurately describes the content of the document.
+        Note: The provided image can be a screenshot of a webpage, a PDF page, or any other image format. Your task is to generate text that accurately describes the content of the document.
 
-        Your alt text will be attached to each document before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively.
+        Your text will be attached to each document before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively.
         """
 
         try:

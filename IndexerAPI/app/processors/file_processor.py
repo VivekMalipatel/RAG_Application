@@ -118,7 +118,7 @@ class FileProcessor(BaseProcessor):
             _, image_base64 = await loop.run_in_executor(
                 self._executor, _rasterize_and_encode, page_data, page_num
             )
-            text = await self.model_handler.generate_alt_text(image_base64)
+            text = await self.model_handler.generate_text_description(image_base64)
             
             text = text + "\n Extracted Text from this document: " + extracted_text
 

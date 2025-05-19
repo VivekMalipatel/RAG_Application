@@ -149,37 +149,3 @@ class ModelSelector:
             return Provider.OLLAMA, ollama_match
             
         raise ModelNotFoundException(f"Could not find a matching model for '{model_name}' of type {model_type.value}")
-        
-    def select_provider_for_model(self, model_name: str, model_type: ModelType) -> Provider:
-        model_name_lower = model_name.lower()
-        
-        if model_type == ModelType.TEXT_EMBEDDING:
-            return Provider.HUGGINGFACE
-        
-        if model_type == ModelType.IMAGE_EMBEDDING:
-            return Provider.HUGGINGFACE
-                    
-        if model_type == ModelType.RERANKER:
-            return Provider.HUGGINGFACE
-            
-        if model_type == ModelType.AUDIO_GENERATION:
-            return Provider.HUGGINGFACE
-        
-        openai_patterns = ["gpt-", "text-davinci", "text-embedding", "dall-e", "claude", "command-r"]
-        if any(pattern in model_name_lower for pattern in openai_patterns):
-            return Provider.OPENAI
-        
-        ollama_patterns = ["llama", "mistral", "mixtral", "phi", "falcon", "gemma"]
-        if any(pattern in model_name_lower for pattern in ollama_patterns):
-            return Provider.OLLAMA
-        
-        if "qwen2.5-omni" in model_name.lower() or "qwen2_5-omni" in model_name.lower():
-            if model_type == ModelType.AUDIO_GENERATION:
-                return Provider.HUGGINGFACE
-            elif model_type == ModelType.TEXT_GENERATION:
-                return Provider.HUGGINGFACE
-        
-        if "qwen2.5-vl" in model_name.lower() or "qwen2_5-vl" in model_name.lower():
-            return Provider.HUGGINGFACE
-            
-        return Provider.OPENAI

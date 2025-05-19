@@ -15,7 +15,7 @@ class MarkDown:
         self.api_key = api_key or settings.INFERENCE_API_KEY
         self.api_base = api_base or settings.INFERENCE_API_BASE
         self.cleint = OpenAI(api_key=self.api_key, base_url=self.api_base)
-        self.markitdown = MarkItDown(enable_plugins=enable_plugins, llm_client=self.cleint, llm_model="gemma3:12b-it-q8_0")
+        self.markitdown = MarkItDown(enable_plugins=enable_plugins, llm_client=self.cleint, llm_model="qwen2.5vl:7b-q8_0")
 
     def convert_file(self, file_path: Union[str, Path]) -> str:
         result = self.markitdown.convert_local(file_path)
