@@ -208,10 +208,10 @@ class OllamaClient:
             "stream": stream,
             "options": {
                 "num_ctx": settings.OLLAMA_NUM_CTX,
-                "temperature": temperature,
-                "top_p": top_p,
-                "top_k": self.top_k,
-                "repeat_penalty": self.repeat_penalty
+                # "temperature": temperature,
+                # "top_p": top_p,
+                # "top_k": self.top_k,
+                # "repeat_penalty": self.repeat_penalty
             }
         }
         
@@ -316,10 +316,10 @@ class OllamaClient:
             "stream": stream,
             "options": {
                 "num_ctx": settings.OLLAMA_NUM_CTX,
-                "temperature": temperature,
-                "top_p": top_p,
-                "top_k": self.top_k,
-                "repeat_penalty": self.repeat_penalty
+                # "temperature": temperature,
+                # "top_p": top_p,
+                # "top_k": self.top_k,
+                # "repeat_penalty": self.repeat_penalty
             }
         }
         
