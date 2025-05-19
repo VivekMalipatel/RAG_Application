@@ -13,6 +13,8 @@ import asyncio
 import csv
 import json
 import uuid
+import os
+from concurrent.futures import ProcessPoolExecutor
 
 from app.processors.base_processor import BaseProcessor
 from app.core.markitdown.markdown_handler import MarkDown
@@ -20,6 +22,14 @@ from app.core.model.model_handler import ModelHandler
 from app.core.storage.s3_handler import S3Handler
 from app.config import settings
 logger = logging.getLogger(__name__)
+
+def _rasterize_and_encode(page_bytes: bytes, page_num: int) -> tuple[int, str]:
+    images = convert_from_bytes(page_bytes, dpi=300)
+    img = images[0]
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    return page_num, b64
 
 class FileProcessor(BaseProcessor):
     
@@ -32,6 +42,11 @@ class FileProcessor(BaseProcessor):
 
         self.unoserver_host = settings.UNOSERVER_HOST
         self.unoserver_port = settings.UNOSERVER_PORT
+
+        total_cpus = os.cpu_count() or 1
+        reserved = 2 if total_cpus > 2 + 1 else 1
+        max_workers = max(1, total_cpus - reserved)
+        self._executor = ProcessPoolExecutor(max_workers=max_workers)
         
         #TODO: Decide on what all file can be processed depending on Markitdown and PDF Converion libraries
         self.unstructured_docs = [
@@ -98,17 +113,12 @@ class FileProcessor(BaseProcessor):
     
     async def process_single_page(self, page_data: bytes, page_num: int) -> Dict[str, Any]:
         try:
-            images = convert_from_bytes(page_data, dpi=300)
-            img = images[0]
-            
-            image_io_buffer = io.BytesIO()
-            img.save(image_io_buffer, format='JPEG')
-            image_io_buffer.seek(0)
-            image_base64 = base64.b64encode(image_io_buffer.getvalue()).decode('utf-8')
+            loop = asyncio.get_running_loop()
+            _, image_base64 = await loop.run_in_executor(
+                self._executor, _rasterize_and_encode, page_data, page_num
+            )
 
             text = await self.model_handler.generate_alt_text(image_base64) 
-            
-            logger.debug(f"Processed page {page_num + 1}")
             
             return {
                 "image": image_base64,
@@ -128,7 +138,7 @@ class FileProcessor(BaseProcessor):
             total_pages = len(pdf_reader.pages)
             logger.info(f"Processing PDF with {total_pages} pages")
     
-            page_tasks = []
+            page_tasks:List[asyncio.Future] = []
             for page_num in range(total_pages):
                 writer = pypdf.PdfWriter()
                 writer.add_page(pdf_reader.pages[page_num])
