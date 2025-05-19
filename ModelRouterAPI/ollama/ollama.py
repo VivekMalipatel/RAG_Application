@@ -169,9 +169,7 @@ class OllamaClient:
                         image_url = content_item.get('image_url', {}).get('url')
                         if image_url:
                             import base64
-                            # Check if the image is already in Base64 format (with data URI scheme)
                             if image_url.startswith('data:image/'):
-                                # Extract the Base64 part after the comma
                                 base64_part = image_url.split(',', 1)
                                 if len(base64_part) > 1:
                                     images.append(base64_part[1])

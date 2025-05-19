@@ -24,34 +24,6 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     OLLAMA_NUM_CTX: int = 8096
 
-    DEFAULT_MODELS: Dict[str, str] = {
-        "openai": "gpt-3.5-turbo",
-        "ollama": "llama2",
-        "huggingface": "mistralai/Mistral-7B-Instruct-v0.2"
-    }
-    
-    AUTO_SELECT_MODEL: bool = True
-    PROVIDER_PRIORITY: List[str] = ["openai", "ollama", "huggingface"]
-    COST_SENSITIVE_MODE: bool = False
-    
-    ENABLE_VISION: bool = True
-    ENABLE_AUDIO: bool = False
-    
-    ENABLE_FUNCTION_CALLING: bool = True
-    FUNCTION_SCHEMA_PATH: Optional[str] = None
-
-    ENABLE_MODEL_CACHE: bool = True
-    CACHE_EXPIRY_SECONDS: int = 3600
-    
-    RATE_LIMIT_ENABLED: bool = True
-    REQUESTS_PER_MINUTE: int = 60
-    
-    PREFERRED_DEVICE: str = os.getenv("PREFERRED_DEVICE", "auto")
-    CUDA_VISIBLE_DEVICES: str = os.getenv("CUDA_VISIBLE_DEVICES", "")
-    MPS_FALLBACK_TO_CPU: bool = True
-    DEVICE_MAP_STRATEGY: str = "auto"
-    LOW_CPU_MEM_USAGE: bool = False
-
     class Config:
         env_file = ".env"
         case_sensitive = True
