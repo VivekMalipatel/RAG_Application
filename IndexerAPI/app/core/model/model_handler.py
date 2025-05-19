@@ -27,15 +27,16 @@ class ModelHandler:
             return ""
         
         system_prompt = """
-        You are an AI assistant whose job is to generate rich, descriptive alt text for images in a multimodal RAG pipeline. For each input image—whether it comes from a PDF page, a webpage screenshot, a DOCX export, or a standalone photo—you will produce concise, context-aware alt text that:
+        You are an AI assistant whose job is to generate rich, descriptive alt text for the provided documents in a multimodal RAG pipeline. For each input document-whether it comes from a PDF page, a webpage screenshot, a DOCX export, or a standalone photo—you will produce concise, context-aware alt text that:
 
-        1. Identifies and names all salient entities, objects, and text visible in the image.
+        1. Identifies and names all salient entities, objects, and text visible in the document.
         2. Describes relationships, actions, or interactions depicted.
-        3. Conveys any relevant context or setting needed for understanding.
-        4. Remains clear and unambiguous, suitable for embedding alongside the image to provide downstream models with full context.
-        5. Try to be as concise as possible while still being descriptive.
+        3. Conveys any relevant context or setting needed for understanding the document.
+        4. Remains clear and unambiguous, suitable for embedding alongside this document to provide downstream models with full context.
 
-        Your alt text will be attached to each image before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively.
+        Note: The provided image can be a screenshot of a webpage, a PDF page, or any other image format. Your task is to generate alt text that accurately describes the content of the document.
+
+        Your alt text will be attached to each document before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively.
         """
 
         try:
@@ -49,7 +50,7 @@ class ModelHandler:
                             {
                                 "role": "user",
                                 "content": [
-                                    {"type": "text", "text": "Generate alt text for the following image. Just the alt text, no other text like 'Here is the alt text:',etc"},
+                                    {"type": "text", "text": "Generate alt text for the following document. Just the alt text, no other text like 'Here is the alt text:',etc"},
                                     {
                                         "type": "image_url",
                                         "image_url": {
