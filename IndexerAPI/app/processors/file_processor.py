@@ -11,10 +11,13 @@ from magika import Magika
 import sys
 import asyncio
 import csv
+import json
+import uuid
 
 from app.processors.base_processor import BaseProcessor
 from app.core.markitdown.markdown_handler import MarkDown
 from app.core.model.model_handler import ModelHandler
+from app.core.storage.s3_handler import S3Handler
 from app.config import settings
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,7 @@ class FileProcessor(BaseProcessor):
         self.markdown = MarkDown()
         self.magika = Magika()
         self.model_handler = ModelHandler()
+        self.s3_handler = S3Handler()
         logger.info("FileProcessor initialized")
 
         self.unoserver_host = settings.UNOSERVER_HOST
@@ -97,12 +101,12 @@ class FileProcessor(BaseProcessor):
             images = convert_from_bytes(page_data, dpi=300)
             img = images[0]
             
-            image_bytes = io.BytesIO()
-            img.save(image_bytes, format='JPEG')
-            image_bytes.seek(0)
-            image_base64 = base64.b64encode(image_bytes.read()).decode('utf-8')
+            image_io_buffer = io.BytesIO()
+            img.save(image_io_buffer, format='JPEG')
+            image_io_buffer.seek(0)
+            image_base64 = base64.b64encode(image_io_buffer.getvalue()).decode('utf-8')
 
-            text = await self.model_handler.generate_alt_text(image_base64)
+            text = await self.model_handler.generate_alt_text(image_base64) 
             
             logger.debug(f"Processed page {page_num + 1}")
             
@@ -267,8 +271,8 @@ class FileProcessor(BaseProcessor):
         except Exception as e:
             logger.error(f"Error processing direct document: {e}")
             raise
-    
-    async def process(self, data: bytes, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+
+    async def process(self, data: bytes, metadata: Optional[Dict[str, Any]] = None, source: Optional[str] = None) -> Dict[str, Any]:
         logger.info("Processing file")
         
         if not data or not isinstance(data, bytes):
@@ -285,6 +289,7 @@ class FileProcessor(BaseProcessor):
             
             if category == 'unstructured':
                 result = await self.process_unstructured_document(data, file_type)
+                
             elif category == 'structured':
                 result = self.process_structured_document(data, file_type)
             elif category == 'direct':
@@ -296,6 +301,69 @@ class FileProcessor(BaseProcessor):
             
             result["metadata"] = metadata or {}
             result['metadata']['file_type'] = file_type
+
+            internal_object_id = str(uuid.uuid4())
+            result['metadata']['internal_object_id'] = internal_object_id
+            source_filename_from_meta = result['metadata'].get('filename', f'unknown_source_{internal_object_id}')
+            
+            base_filename_for_folder = os.path.splitext(source_filename_from_meta)[0]
+            s3_friendly_folder_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in base_filename_for_folder)
+            if not s3_friendly_folder_name: 
+                s3_friendly_folder_name = internal_object_id
+            
+            s3_base_path = f"{source}/{s3_friendly_folder_name}"
+
+            page_image_s3_urls = []
+            page_text_s3_urls = [] 
+
+            if category == 'unstructured' and 'data' in result and isinstance(result['data'], list):
+                for idx, page_content in enumerate(result['data']):
+                    if 'image' in page_content and page_content['image']:
+                        base64_image_string = page_content['image']
+                        try:
+                            image_bytes_data = base64.b64decode(base64_image_string)
+                            image_s3_key = f"{s3_base_path}/page_{idx + 1}.jpg" 
+                            upload_image_success = await self.s3_handler.upload_bytes(image_bytes_data, image_s3_key)
+                            if upload_image_success:
+                                s3_image_url = f"{self.s3_handler.endpoint_url}/{self.s3_handler.bucket_name}/{image_s3_key}"
+                                page_content['s3_image_url'] = s3_image_url
+                                page_image_s3_urls.append(s3_image_url)
+                                logger.info(f"Successfully uploaded page {idx+1} image to S3: {s3_image_url}")
+                            else:
+                                logger.error(f"Failed to upload page {idx+1} image to S3 at {image_s3_key}.")
+                                page_content['s3_image_upload_status'] = 'failed'
+                        except Exception as img_e:
+                            logger.error(f"Error decoding or uploading page {idx+1} image to S3 ({image_s3_key}): {img_e}")
+                            page_content['s3_image_upload_status'] = 'error'
+                            page_content['s3_image_error'] = str(img_e)
+                    
+                    if 'image' in page_content: 
+                         del page_content['image']
+                         
+                    if 'text' in page_content and page_content['text']:
+                        page_text_content = page_content['text']
+                        text_s3_key = f"{s3_base_path}/page_{idx + 1}.txt"
+                        try:
+                            upload_text_success = await self.s3_handler.upload_string(page_text_content, text_s3_key)
+                            if upload_text_success:
+                                s3_text_page_url = f"{self.s3_handler.endpoint_url}/{self.s3_handler.bucket_name}/{text_s3_key}"
+                                page_content['s3_text_url'] = s3_text_page_url
+                                page_text_s3_urls.append(s3_text_page_url)
+                                logger.info(f"Successfully uploaded page {idx+1} text to S3: {s3_text_page_url}")
+                            else:
+                                logger.error(f"Failed to upload page {idx+1} text to S3 at {text_s3_key}.")
+                                page_content['s3_text_upload_status'] = 'failed'
+                        except Exception as txt_e:
+                            logger.error(f"Error uploading page {idx+1} text to S3 ({text_s3_key}): {txt_e}")
+                            page_content['s3_text_upload_status'] = 'error'
+                            page_content['s3_text_error'] = str(txt_e)
+
+                    if 'text' in page_content:
+                        del page_content['text']
+                
+                result['metadata']['page_image_s3_urls'] = page_image_s3_urls
+                result['metadata']['page_text_s3_urls'] = page_text_s3_urls
+            logger.info(f"Processing complete. Final JSON metadata will be uploaded.")
             
             return result
         except Exception as e:
@@ -320,17 +388,17 @@ async def main():
         sys.exit(1)
     
     processor = FileProcessor()
+    await processor.s3_handler.initialize()
+
 
     with open(file_path, 'rb') as f:
         file_data = f.read()
     
-    file_type = processor.detect_file_type(file_data)
-    print(f"Detected file type: {file_type}")
-    
+    print(f"Processing file: {file_path.name}")
     try:
-        result = await processor.process_unstructured_document(file_data, file_type)
+        result = await processor.process(file_data, metadata={"source_filename": file_path.name})
 
-        print("\n--- Processing Results ---")
+        print("\n--- Overall Processing Results ---")
         print(f"Processed {len(result['data'])} pages/images")
 
         if result['data'] and len(result['data']) > 0:

@@ -6,13 +6,14 @@ import requests
 from openai import OpenAI
 from markitdown import MarkItDown
 from markitdown._base_converter import DocumentConverterResult
+from app.config import settings
 import base64
 
 
 class MarkDown:
     def __init__(self, enable_plugins: bool = False, api_key: str = None, api_base: str = None):
-        self.api_key = api_key or os.getenv("INFERENCE_API_KEY")
-        self.api_base = api_base or os.getenv("INFERENCE_API_BASE")
+        self.api_key = api_key or settings.INFERENCE_API_KEY
+        self.api_base = api_base or settings.INFERENCE_API_BASE
         self.cleint = OpenAI(api_key=self.api_key, base_url=self.api_base)
         self.markitdown = MarkItDown(enable_plugins=enable_plugins, llm_client=self.cleint, llm_model="gemma3:12b-it-q8_0")
 

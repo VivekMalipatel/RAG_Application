@@ -6,16 +6,17 @@ from openai import AsyncOpenAI
 import httpx
 import asyncio
 import json
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class ModelHandler:
     def __init__(self, api_key: str = None, api_base: str = None):
-        self.embedding_api_key = api_key or os.getenv("EMBEDDING_API_KEY")
-        self.embedding_api_base = api_base or os.getenv("EMBEDDING_API_BASE")
-        self.inference_api_key = api_key or os.getenv("INFERENCE_API_KEY")
-        self.inference_api_base = api_base or os.getenv("INFERENCE_API_BASE")
+        self.embedding_api_key = api_key or settings.EMBEDDING_API_KEY
+        self.embedding_api_base = api_base or settings.EMBEDDING_API_BASE
+        self.inference_api_key = api_key or settings.INFERENCE_API_KEY
+        self.inference_api_base = api_base or settings.INFERENCE_API_BASE
         http_client = httpx.AsyncClient(timeout=7200.0)
         self.embedding_client = AsyncOpenAI(api_key=self.embedding_api_key, base_url=self.embedding_api_base, http_client=http_client)
         self.inference_client = AsyncOpenAI(api_key=self.inference_api_key, base_url=self.inference_api_base, http_client=http_client)

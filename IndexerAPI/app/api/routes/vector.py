@@ -88,6 +88,28 @@ async def search_text_batch(request: SearchBatchTextRequest):
 async def get_vector_stats():
     return vector_store.get_stats()
 
+@router.delete("/documents/{doc_id}", response_model=Dict[str, Any])
+async def delete_document_from_store(doc_id: str):
+    logger.info(f"Attempting to remove document: {doc_id} from vector store.")
+    try:
+        removed = vector_store.remove_document(doc_id)
+        if removed:
+            saved = vector_store.save()
+            if saved:
+                logger.info(f"Successfully removed document {doc_id} and saved the index.")
+                return {"message": f"Document {doc_id} and its vectors removed successfully.", "doc_id": doc_id, "status": "removed"}
+            else:
+                logger.error(f"Removed document {doc_id}, but failed to save the index.")
+                raise HTTPException(status_code=500, detail=f"Document {doc_id} removed from memory, but failed to save index.")
+        else:
+            logger.warning(f"Document {doc_id} not found in vector store for removal.")
+            raise HTTPException(status_code=404, detail=f"Document {doc_id} not found.")
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Error during document removal for doc_id {doc_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error removing document: {str(e)}")
+
 @router.post("/process/pdf/url", response_model=Dict[str, Any])
 async def process_pdf_from_url(
     request: ProcessPdfUrlRequest,
@@ -96,7 +118,6 @@ async def process_pdf_from_url(
     logger.info(f"Received URL for PDF processing from source: {request.source}")
     
     try:
-        # Download file from the signed URL
         async with aiohttp.ClientSession() as session:
             async with session.get(str(request.url)) as response:
                 if response.status != 200:
@@ -104,7 +125,6 @@ async def process_pdf_from_url(
                                        detail=f"Failed to fetch file: {response.reason}")
                 file_content = await response.read()
         
-        # Process the file using FileProcessor
         result = await file_processor.process(file_content, request.metadata)
         
         return result
@@ -132,14 +152,9 @@ async def process_pdf(
             raise HTTPException(status_code=400, detail="Invalid metadata format")
     
     #TODO: Validate file type and size
-    # The File Type and Size will be depending on what files and size the Markdown class can handle.
-    
-    # Read file content
     file_content = await file.read()
     
     try:
-        # Process the file using FileProcessor
-        # Fix: Pass parameters as expected by the process method
         result = await file_processor.process(file_content, meta_dict)
         
         return result

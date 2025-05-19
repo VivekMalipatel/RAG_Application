@@ -275,9 +275,6 @@ class QueueHandler:
         metadata['last_retry'] = datetime.now().isoformat()
         queue_item.item_metadata = json.dumps(metadata)
         
-        # Don't remove from failure queue table - just keep the record for tracking
-        # We'll update the retry count when it fails again if needed
-        
         await self.db_session.commit()
         logger.info(f"Queue item {queue_id} returned to processing queue for retry")
         return True

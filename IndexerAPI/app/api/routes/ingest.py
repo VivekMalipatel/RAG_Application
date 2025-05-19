@@ -30,10 +30,8 @@ async def ingest_file(
     #TODO: Validate file type and size
     # The File Type and Size will be depending on what files and size the Markdown class can handle.
     
-    # Read file content
     file_content = await file.read()
     
-    # Add file to queue
     queue_handler = QueueHandler(db)
     queue_id = await queue_handler.enqueue_file(
         file_content=file_content,
@@ -54,7 +52,6 @@ async def ingest_url(
 ):
     logger.info(f"Received URL: {url_request.url} from source: {url_request.source}")
     
-    # Add URL to queue
     queue_handler = QueueHandler(db)
     queue_id = await queue_handler.enqueue_url(
         url=url_request.url,
@@ -74,7 +71,6 @@ async def ingest_raw_text(
 ):
     logger.info(f"Received raw text from source: {text_request.source}")
     
-    # Add text to queue
     queue_handler = QueueHandler(db)
     queue_id = await queue_handler.enqueue_text(
         text=text_request.text,

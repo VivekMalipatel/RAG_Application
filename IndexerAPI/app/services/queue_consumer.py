@@ -51,7 +51,7 @@ class QueueConsumer:
             
             metadata = json.loads(queue_item.item_metadata) if queue_item.item_metadata else {}
             try:
-                processed_data = await processor.process(data, metadata)
+                processed_data = await processor.process(data, metadata, source=queue_item.source)
             except Exception as e:
                 error_msg = f"Error processing item {queue_item.id}: {str(e)}"
                 logger.error(error_msg, exc_info=True)

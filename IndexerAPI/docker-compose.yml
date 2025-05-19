@@ -14,14 +14,20 @@ services:
     environment:
       - UNOSERVER_HOST=unoserver
       - UNOSERVER_PORT=2003
-      - DB_URL=${DB_URL}
-      - LOG_LEVEL=${LOG_LEVEL}
-      - INFERENCE_API_KEY=${INFERENCE_API_KEY}
+      - DB_URL=${DB_URL:-sqlite:///./indexer.db}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - INFERENCE_API_KEY=${INFERENCE_API_KEY:-test-key}
       - INFERENCE_API_BASE=${INFERENCE_API_BASE:-http://modelrouter-api:8000/v1}
-      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-test-key}
       - EMBEDDING_API_BASE=${EMBEDDING_API_BASE:-http://modelrouter-api:8000/v1}
+      - MINIO_ENDPOINT_URL=$(MINIO_ENDPOINT_URL:-http://66.181.39.194:9000}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME:-embeddings}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-admin}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-admin12345}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
     volumes:
       - ./:/app
+      - indexer-api-data:/app/data
     networks:
       - model-router-network
   unoserver:
@@ -33,7 +39,8 @@ services:
     networks:
       - model-router-network
 
-volumes: {}
+volumes:
+  indexer-api-data:
 
 networks:
   model-router-network:
