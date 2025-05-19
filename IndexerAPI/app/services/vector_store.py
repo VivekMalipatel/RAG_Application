@@ -94,10 +94,6 @@ class VectorStore:
         if self.use_ivf and self.should_rebuild():
             logger.info("Re-training IVF quantizer due to high churn")
             self.rebuild_index(use_gpu=self.use_gpu)
-        try:
-            self.save()
-        except Exception:
-            logger.warning("Failed to save index after adding document")
         return count
 
     def search(self, query_vectors: Any, k: int = 10, nprobe: int = None, efSearch: int = None) -> List[Dict[str, Any]]:
@@ -141,12 +137,6 @@ class VectorStore:
         with open(os.path.join(self.index_dir, 'mapping.pkl'), 'wb') as f:
             pickle.dump({'doc_to_vectors': self.doc_to_vectors, 'id_to_doc': self.id_to_doc}, f)
         logger.info(f"Saved index with {idx.ntotal} vectors")
-        self.index = None
-        success = self.load()
-        if success:
-            logger.info("Successfully reloaded the saved index")
-        else:
-            logger.error("Failed to reload the saved index")
         return True
 
     def load(self) -> bool:

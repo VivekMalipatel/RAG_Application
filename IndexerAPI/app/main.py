@@ -10,6 +10,7 @@ from app.api.routes import ingest, status, vector
 from app.db.database import init_db, get_db
 from app.services.queue_consumer import QueueConsumer
 from app.core.model.model_handler import ModelHandler
+from app.services.vector_store import VectorStore
 from app.processors import register_processors
 
 logging.basicConfig(
@@ -26,11 +27,16 @@ async def lifespan(app: FastAPI):
     
     db_session = await anext(get_db())
     model_handler = ModelHandler()
-    queue_consumer = QueueConsumer(db_session, model_handler)
+    vector_store = VectorStore()
+    vector_store.load()
+    
+    queue_consumer = QueueConsumer(db_session, model_handler, vector_store)
     
     register_processors(queue_consumer)
     
     app.state.queue_consumer = queue_consumer
+    app.state.model_handler = model_handler
+    app.state.vector_store = vector_store
     
     process_task = asyncio.create_task(queue_consumer.start_processing())
     logging.info("Queue consumer started successfully")

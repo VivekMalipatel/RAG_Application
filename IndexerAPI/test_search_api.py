@@ -107,8 +107,7 @@ def display_results(results):
     """
     if not results:
         print("No results to display")
-        return
-    print(results)
+        return\
     # results is a list of lists (one per query)
     for q_idx, hits in enumerate(results, 1):
         print(f"\nQuery #{q_idx}: {len(hits)} results")

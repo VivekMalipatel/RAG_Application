@@ -15,13 +15,13 @@ from app.services.vector_store import VectorStore
 logger = logging.getLogger(__name__)
 
 class QueueConsumer:
-    def __init__(self, db_session: AsyncSession, model_handler: ModelHandler = None):
+    def __init__(self, db_session: AsyncSession, model_handler: ModelHandler = None, vector_store: VectorStore = None):
         self.db_session = db_session
         self.queue_handler = QueueHandler(db_session)
         self.model_handler = model_handler or ModelHandler()
         self.running = False
         self.processors = {}
-        self.vector_store = VectorStore()
+        self.vector_store = vector_store
         self.vector_store.load()
         logger.info("QueueConsumer initialized with FAISS vector store")
     
@@ -210,7 +210,6 @@ class QueueConsumer:
                 embeddings=embeddings,
                 metadata=metadata
             )
-            self.vector_store.save()
             
             logger.info(f"Added {vectors_added} vectors to FAISS index for document {stable_doc_id} across {len(embeddings)} pages")
             

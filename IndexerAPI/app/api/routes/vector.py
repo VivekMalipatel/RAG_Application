@@ -15,9 +15,6 @@ from app.db.database import get_db
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-vector_store = VectorStore()
-vector_store.load()
-model_handler = ModelHandler()
 file_processor = FileProcessor()
 
 class SearchTextRequest(BaseModel):
@@ -39,10 +36,11 @@ class ProcessPdfUrlRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 @router.post("/search/text", response_model=List[List[Dict[str, Any]]])
-async def search_by_text(request: SearchTextRequest):
+async def search_by_text(request: SearchTextRequest, req: Request):
     try:
+        model_handler = req.app.state.model_handler
+        vector_store = req.app.state.vector_store
         query_embeddings = await model_handler.embed_text([request.text])
-        
         results = vector_store.search(
             query_vectors=query_embeddings,
             k=request.top_k
@@ -54,8 +52,10 @@ async def search_by_text(request: SearchTextRequest):
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
 @router.post("/search/image", response_model=List[List[Dict[str, Any]]])
-async def search_by_image(request: SearchImageRequest):
+async def search_by_image(request: SearchImageRequest, req: Request):
     try:
+        model_handler = req.app.state.model_handler
+        vector_store = req.app.state.vector_store
         image_text = request.text or "Image query"
         query_data = [{"image": request.image_base64, "text": image_text}]
         
@@ -70,10 +70,12 @@ async def search_by_image(request: SearchImageRequest):
     except Exception as e:
         logger.error(f"Error during image search: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
-
+    
 @router.post("/search/text/batch", response_model=List[List[Dict[str, Any]]])
-async def search_text_batch(request: SearchBatchTextRequest):
+async def search_text_batch(request: SearchBatchTextRequest, req: Request):
     try:
+        model_handler = req.app.state.model_handler
+        vector_store = req.app.state.vector_store
         query_embeddings = await model_handler.embed_text(request.texts)
         results = vector_store.search_batch(
             queries=query_embeddings,
@@ -85,13 +87,15 @@ async def search_text_batch(request: SearchBatchTextRequest):
         raise HTTPException(status_code=500, detail=f"Batch search error: {str(e)}")
 
 @router.get("/stats")
-async def get_vector_stats():
+async def get_vector_stats(req: Request):
+    vector_store = req.app.state.vector_store
     return vector_store.get_stats()
 
 @router.delete("/documents/{doc_id}", response_model=Dict[str, Any])
-async def delete_document_from_store(doc_id: str):
+async def delete_document_from_store(doc_id: str, req: Request):
     logger.info(f"Attempting to remove document: {doc_id} from vector store.")
     try:
+        vector_store = req.app.state.vector_store
         removed = vector_store.remove_document(doc_id)
         if removed:
             saved = vector_store.save()
