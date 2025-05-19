@@ -194,19 +194,16 @@ class QueueConsumer:
                         metadata[key] = value
             
             filename = metadata.get('filename', f"item_{result['id']}")
-            stable_doc_id_str = f"{result.get('source')}:{filename}"
-            stable_doc_id = hashlib.sha256(stable_doc_id_str.encode()).hexdigest()
+            doc_id = result['id']
             
-            logger.info(f"Generated stable document ID: {stable_doc_id} for {result.get('source')}/{filename}")
-            
-            removed = self.vector_store.remove_document(stable_doc_id)
+            removed = self.vector_store.remove_document(doc_id)
             if removed:
-                logger.info(f"Removed existing document version for {stable_doc_id} ({result.get('source')}/{filename})")
+                logger.info(f"Removed existing document version for {doc_id} ({result.get('source')}/{filename})")
             else:
-                logger.info(f"No existing document found for {stable_doc_id} ({result.get('source')}/{filename})")
+                logger.info(f"No existing document found for {doc_id} ({result.get('source')}/{filename})")
             
             vectors_added = self.vector_store.add_document(
-                doc_id=stable_doc_id,
+                doc_id=doc_id,
                 embeddings=embeddings,
                 metadata=metadata
             )
