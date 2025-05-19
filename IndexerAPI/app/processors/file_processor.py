@@ -336,19 +336,12 @@ class FileProcessor(BaseProcessor):
                             upload_image_success = await self.s3_handler.upload_bytes(image_bytes_data, image_s3_key)
                             if upload_image_success:
                                 s3_image_url = f"{self.s3_handler.endpoint_url}/{self.s3_handler.bucket_name}/{image_s3_key}"
-                                page_content['s3_image_url'] = s3_image_url
                                 page_image_s3_urls.append(s3_image_url)
                                 logger.info(f"Successfully uploaded page {idx+1} image to S3: {s3_image_url}")
                             else:
                                 logger.error(f"Failed to upload page {idx+1} image to S3 at {image_s3_key}.")
-                                page_content['s3_image_upload_status'] = 'failed'
                         except Exception as img_e:
                             logger.error(f"Error decoding or uploading page {idx+1} image to S3 ({image_s3_key}): {img_e}")
-                            page_content['s3_image_upload_status'] = 'error'
-                            page_content['s3_image_error'] = str(img_e)
-                    
-                    if 'image' in page_content: 
-                         del page_content['image']
                          
                     if 'text' in page_content and page_content['text']:
                         page_text_content = page_content['text']
@@ -357,23 +350,15 @@ class FileProcessor(BaseProcessor):
                             upload_text_success = await self.s3_handler.upload_string(page_text_content, text_s3_key)
                             if upload_text_success:
                                 s3_text_page_url = f"{self.s3_handler.endpoint_url}/{self.s3_handler.bucket_name}/{text_s3_key}"
-                                page_content['s3_text_url'] = s3_text_page_url
                                 page_text_s3_urls.append(s3_text_page_url)
                                 logger.info(f"Successfully uploaded page {idx+1} text to S3: {s3_text_page_url}")
                             else:
                                 logger.error(f"Failed to upload page {idx+1} text to S3 at {text_s3_key}.")
-                                page_content['s3_text_upload_status'] = 'failed'
                         except Exception as txt_e:
                             logger.error(f"Error uploading page {idx+1} text to S3 ({text_s3_key}): {txt_e}")
-                            page_content['s3_text_upload_status'] = 'error'
-                            page_content['s3_text_error'] = str(txt_e)
-
-                    if 'text' in page_content:
-                        del page_content['text']
                 
                 result['metadata']['page_image_s3_urls'] = page_image_s3_urls
                 result['metadata']['page_text_s3_urls'] = page_text_s3_urls
-            logger.info(f"Processing complete. Final JSON metadata will be uploaded.")
             
             return result
         except Exception as e:
