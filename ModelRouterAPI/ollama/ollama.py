@@ -14,7 +14,7 @@ class OllamaClient:
         hf_repo: str,
         system_prompt: Optional[str] = None,
         quantization: Optional[str] = None,
-        temperature: float = 0.7,
+        temperature: float = 0.3,
         top_p: float = 1.0,
         max_tokens: Optional[int] = None,
         stream: bool = False,
@@ -208,10 +208,10 @@ class OllamaClient:
             "stream": stream,
             "options": {
                 "num_ctx": settings.OLLAMA_NUM_CTX,
-                # "temperature": temperature,
-                # "top_p": top_p,
-                # "top_k": self.top_k,
-                # "repeat_penalty": self.repeat_penalty
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": self.top_k,
+                "repeat_penalty": self.repeat_penalty
             }
         }
         
@@ -316,10 +316,10 @@ class OllamaClient:
             "stream": stream,
             "options": {
                 "num_ctx": settings.OLLAMA_NUM_CTX,
-                # "temperature": temperature,
-                # "top_p": top_p,
-                # "top_k": self.top_k,
-                # "repeat_penalty": self.repeat_penalty
+                "temperature": temperature,
+                "top_p": top_p,
+                "top_k": self.top_k,
+                "repeat_penalty": self.repeat_penalty
             }
         }
         
