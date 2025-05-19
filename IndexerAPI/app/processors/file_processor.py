@@ -24,7 +24,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 def _rasterize_and_encode(page_bytes: bytes, page_num: int) -> tuple[int, str]:
-    images = convert_from_bytes(page_bytes, dpi=300)
+    images = convert_from_bytes(page_bytes, dpi=200)
     img = images[0]
     buf = io.BytesIO()
     img.save(buf, format="JPEG")
