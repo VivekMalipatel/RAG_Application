@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, HttpUrl
 import json
 import aiohttp
+import hashlib
 
 from app.services.vector_store import VectorStore
 from app.core.model.model_handler import ModelHandler
@@ -91,12 +92,13 @@ async def get_vector_stats(req: Request):
     vector_store = req.app.state.vector_store
     return vector_store.get_stats()
 
-@router.delete("/documents/{doc_id}", response_model=Dict[str, Any])
-async def delete_document_from_store(doc_id: str, req: Request):
-    logger.info(f"Attempting to remove document: {doc_id} from vector store.")
+@router.delete("/documents/{filename}", response_model=Dict[str, Any])
+async def delete_document_from_store(filename: str, req: Request):
+    logger.info(f"Attempting to remove document: {filename} from vector store.")
     try:
         vector_store = req.app.state.vector_store
-        removed = vector_store.remove_document(doc_id)
+        doc_id = hashlib.sha256(filename.encode()).hexdigest()
+        removed = vector_store.remove_document(filename)
         if removed:
             saved = vector_store.save()
             if saved:
