@@ -45,6 +45,8 @@ services:
       - OLLAMA_NUM_CTX=$(OLLAMA_NUM_CTX:-8096)
       - OLLAMA_KV_CACHE_TYPE=q8_0
       - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_GPU_OVERHEAD=1
+      - OLLAMA_MAX_LOADED_MODELS=1
     restart: unless-stopped
     networks:
       - model-router-network

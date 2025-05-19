@@ -223,7 +223,7 @@ class OllamaClient:
             
         if stream:
             async def generate_stream():
-                client = httpx.AsyncClient(timeout=60.0)
+                client = httpx.AsyncClient(timeout=7200.0)
                 try:
                     for attempt in range(self.max_retries):
                         try:
@@ -231,7 +231,7 @@ class OllamaClient:
                                 "POST", 
                                 f"{self.api_base_url}/api/chat",
                                 json=payload, 
-                                timeout=60.0
+                                timeout=7200.0
                             ) as response:
                                 if response.status_code != 200:
                                     if attempt < self.max_retries - 1:
@@ -266,13 +266,13 @@ class OllamaClient:
             return generate_stream()
         
         else:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=7200.0) as client:
                 for attempt in range(self.max_retries):
                     try:
                         response = await client.post(
                             f"{self.api_base_url}/api/chat",
                             json=payload,
-                            timeout=60.0
+                            timeout=7200.0
                         )
                         
                         if response.status_code != 200:
@@ -315,6 +315,7 @@ class OllamaClient:
             "prompt": prompt,
             "stream": stream,
             "options": {
+                "num_ctx": settings.OLLAMA_NUM_CTX,
                 "temperature": temperature,
                 "top_p": top_p,
                 "top_k": self.top_k,
@@ -333,7 +334,7 @@ class OllamaClient:
         
         if stream:
             async def generate_stream():
-                client = httpx.AsyncClient(timeout=60.0)
+                client = httpx.AsyncClient(timeout=7200.0)
                 try:
                     for attempt in range(self.max_retries):
                         try:
@@ -341,7 +342,7 @@ class OllamaClient:
                                 "POST", 
                                 f"{self.api_base_url}/api/generate",
                                 json=payload, 
-                                timeout=60.0
+                                timeout=7200.0
                             ) as response:
                                 if response.status_code != 200:
                                     if attempt < self.max_retries - 1:
@@ -376,13 +377,13 @@ class OllamaClient:
             return generate_stream()
         
         else:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=7200.0) as client:
                 for attempt in range(self.max_retries):
                     try:
                         response = await client.post(
                             f"{self.api_base_url}/api/generate",
                             json=payload,
-                            timeout=60.0
+                            timeout=7200.0
                         )
                         
                         if response.status_code != 200:
@@ -494,12 +495,12 @@ class OllamaClient:
             response = None
             response_data = None
             try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with httpx.AsyncClient(timeout=7200.0) as client:
                     self.logger.debug(f"Attempting structured output via /api/generate (attempt {attempt+1}/{self.max_retries})")
                     response = await client.post(
                         f"{self.api_base_url}/api/generate",
                         json=generate_payload,
-                        timeout=60.0
+                        timeout=7200.0
                     )
                     last_response = response
 
