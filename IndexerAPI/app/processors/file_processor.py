@@ -114,12 +114,14 @@ class FileProcessor(BaseProcessor):
     async def process_single_page(self, page_data: bytes, page_num: int) -> Dict[str, Any]:
         try:
             loop = asyncio.get_running_loop()
+            extracted_text = self.markdown.convert_bytes(page_data)
             _, image_base64 = await loop.run_in_executor(
                 self._executor, _rasterize_and_encode, page_data, page_num
             )
-
-            text = await self.model_handler.generate_alt_text(image_base64) 
+            text = await self.model_handler.generate_alt_text(image_base64)
             
+            text = text + "\n Extracted Text from this document: " + extracted_text
+
             return {
                 "image": image_base64,
                 "text": text or f"No text extracted from page {page_num + 1}"
@@ -217,7 +219,7 @@ class FileProcessor(BaseProcessor):
             error_msg = f"File conversion to PDF failed: {file_type}"
             logger.error(error_msg)
             raise ValueError(error_msg)
-
+        
         images_with_text = await self.convert_to_images(file_data)
         
         return {
