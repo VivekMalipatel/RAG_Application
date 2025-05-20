@@ -91,8 +91,6 @@ class ModelHandler:
         if not image_texts:
             logger.warning("Empty image_texts list provided for embedding")
             return []
-        
-        logger.info(f"Processing {len(image_texts)} images for embedding")
 
         try:
             response = await self.embedding_client.embeddings.create(
