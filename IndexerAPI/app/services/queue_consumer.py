@@ -65,7 +65,10 @@ class QueueConsumer:
                 task_results = {}
                 next_task_id = 0
                 
-                embedding_batch_size = 3
+                image_embedding_batch_size = 3
+                text_embedding_batch_size = 35
+                
+                logger.info(f"Using batch sizes: Image={image_embedding_batch_size}, Text={text_embedding_batch_size}")
                 
                 current_image_batch = []
                 current_text_batch = []
@@ -92,7 +95,7 @@ class QueueConsumer:
                         if "image_b64" in item:
                             current_image_batch.append(item)
                             
-                            if len(current_image_batch) >= embedding_batch_size:
+                            if len(current_image_batch) >= image_embedding_batch_size:
                                 image_items = current_image_batch.copy()
                                 task_id = next_task_id
                                 next_task_id += 1
@@ -103,7 +106,7 @@ class QueueConsumer:
                         else:
                             current_text_batch.append(item)
                             
-                            if len(current_text_batch) >= embedding_batch_size:
+                            if len(current_text_batch) >= text_embedding_batch_size:
                                 text_items = current_text_batch.copy()
                                 task_id = next_task_id
                                 next_task_id += 1
