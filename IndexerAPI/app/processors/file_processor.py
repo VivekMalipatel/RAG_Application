@@ -177,12 +177,10 @@ class FileProcessor(BaseProcessor):
             adaptive_batch_size = self._calculate_adaptive_batch_size('unstructured', complexity_metrics)
             
             base_filename = metadata.get('filename', f'unknown_source_{metadata.get("internal_object_id", "")}')
-            # Remove file extension before creating s3 folder name
             filename_without_ext = base_filename.rsplit('.', 1)[0] if '.' in base_filename else base_filename
             s3_friendly_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in filename_without_ext)
             s3_base_path = f"{source}/{s3_friendly_name}"
             
-            # Clear the prefetch queue before starting a new batch
             while not self._prefetch_queue.empty():
                 try:
                     _ = self._prefetch_queue.get_nowait()
@@ -291,7 +289,6 @@ class FileProcessor(BaseProcessor):
             MAX_CHARS = 8000
             
             base_filename = metadata.get('filename', f'unknown_source_{metadata.get("internal_object_id", "")}')
-            # Remove file extension before creating s3 folder name
             filename_without_ext = base_filename.rsplit('.', 1)[0] if '.' in base_filename else base_filename
             s3_friendly_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in filename_without_ext)
             s3_base_path = f"{source}/{s3_friendly_name}"
@@ -396,7 +393,6 @@ class FileProcessor(BaseProcessor):
                 markdown_text = text
             
             base_filename = metadata.get('filename', f'unknown_source_{metadata.get("internal_object_id", "")}')
-            # Remove file extension before creating s3 folder name
             filename_without_ext = base_filename.rsplit('.', 1)[0] if '.' in base_filename else base_filename
             s3_friendly_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in filename_without_ext)
             s3_base_path = f"{source}/{s3_friendly_name}"
@@ -456,7 +452,7 @@ class FileProcessor(BaseProcessor):
 
     def _analyze_document_complexity(self, pdf_reader, sample_size=3):
         total_pages = len(pdf_reader.pages)
-        page_indices = [0]  # Always include first page
+        page_indices = [0]
         
         if total_pages > 1:
             page_indices.append(total_pages // 2)
@@ -547,7 +543,6 @@ class FileProcessor(BaseProcessor):
                 queue_items = []
                 found_page = None
                 
-                # Try to get items without blocking
                 while not self._prefetch_queue.empty():
                     try:
                         item = self._prefetch_queue.get_nowait()
@@ -558,7 +553,6 @@ class FileProcessor(BaseProcessor):
                     except asyncio.QueueEmpty:
                         break
                 
-                # Put back items we don't need yet
                 for item in queue_items:
                     await self._prefetch_queue.put(item)
                     
