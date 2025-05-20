@@ -22,9 +22,11 @@ class QueueConsumer:
         self.processors = {}
         self.vector_store = vector_store
         self.vector_store.load()
+        logger.info("QueueConsumer initialized with FAISS vector store")
     
     def register_processor(self, item_type: str, processor):
         self.processors[item_type] = processor
+        logger.info(f"Registered {processor.__class__.__name__} for item type: {item_type}")
     
     async def process_queue_item(self, queue_item: QueueItem) -> Dict[str, Any]:
         try:
@@ -52,11 +54,6 @@ class QueueConsumer:
                 filename = metadata.get('filename', f"unknown_{queue_item.id}")
                 stable_doc_id_str = f"{queue_item.source}:{filename}"
                 stable_doc_id = hashlib.sha256(stable_doc_id_str.encode()).hexdigest()
-                
-
-                removed = self.vector_store.remove_document(stable_doc_id)
-                if removed:
-                    logger.info(f"Removed existing document version for {stable_doc_id}")
                 
                 processor_generator = processor.process(data, metadata, source=queue_item.source)
                 
@@ -134,7 +131,9 @@ class QueueConsumer:
                     item_batches.append((task_id, "text", text_items))
 
                 for task_id, batch_type, batch_items in item_batches:
+                    logger.info(f"Awaiting embeddings for batch {task_id} ({batch_type}, {len(batch_items)} items)")
                     batch_embeddings = await task_results[task_id]
+                    logger.info(f"Received embeddings for batch {task_id} - {len(batch_embeddings) if batch_embeddings else 0} vectors")
                     
                     for batch_item, embedding in zip(batch_items, batch_embeddings):
                         item_meta = batch_item.get("metadata", {}).copy()
@@ -179,7 +178,11 @@ class QueueConsumer:
                             if key not in document_metadata:
                                 document_metadata[key] = value
                         
-                        document_metadata["pages"] = all_metadata
+                        document_metadata["pages"] = all_metadata          
+
+                        removed = self.vector_store.remove_document(stable_doc_id)
+                        if removed:
+                            logger.info(f"Removed existing document version for {stable_doc_id}")
                         
                         vectors_added = self.vector_store.add_document(
                             doc_id=stable_doc_id,
@@ -289,10 +292,11 @@ class QueueConsumer:
                 
                 if images:
                     embeddings = await self.model_handler.embed_image(images)
+
                 else:
                     embeddings = []
             
             return embeddings
         except Exception as e:
-            logger.error(f"Error processing batch embeddings: {str(e)}")
+            logger.error(f"Error processing batch embeddings: {str(e)}", exc_info=True)
             return [None] * len(items)

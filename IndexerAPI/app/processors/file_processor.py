@@ -42,7 +42,7 @@ class FileProcessor(BaseProcessor):
         self.unoserver_port = settings.UNOSERVER_PORT
 
         total_cpus = os.cpu_count() or 1
-        reserved = 2 if total_cpus > 2 + 1 else 1
+        reserved = 5 if total_cpus > 6 + 1 else 2
         max_workers = max(1, total_cpus - reserved)
         self._executor = ProcessPoolExecutor(max_workers=max_workers)
         self._thread_pool = get_cpu_thread_pool()
@@ -180,9 +180,10 @@ class FileProcessor(BaseProcessor):
             s3_friendly_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in base_filename)
             s3_base_path = f"{source}/{s3_friendly_name}"
             
+            # Clear the prefetch queue before starting a new batch
             while not self._prefetch_queue.empty():
                 try:
-                    await self._prefetch_queue.get_nowait()
+                    _ = self._prefetch_queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
                     
@@ -540,19 +541,22 @@ class FileProcessor(BaseProcessor):
                 queue_items = []
                 found_page = None
                 
+                # Try to get items without blocking
                 while not self._prefetch_queue.empty():
-                    item = await asyncio.wait_for(self._prefetch_queue.get(), timeout)
-                    if item[0] == page_num:
-                        found_page = item
-                    else:
-                        queue_items.append(item)
+                    try:
+                        item = self._prefetch_queue.get_nowait()
+                        if item[0] == page_num:
+                            found_page = item
+                        else:
+                            queue_items.append(item)
+                    except asyncio.QueueEmpty:
+                        break
                 
+                # Put back items we don't need yet
                 for item in queue_items:
                     await self._prefetch_queue.put(item)
                     
                 return found_page
-        except (asyncio.TimeoutError, asyncio.QueueEmpty):
-            pass
         except Exception as e:
             logger.error(f"Error retrieving pre-fetched page: {e}")
             
