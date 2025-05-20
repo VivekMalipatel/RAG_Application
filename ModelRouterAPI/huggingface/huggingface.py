@@ -338,7 +338,7 @@ class HuggingFaceClient:
             
             return text_output, audio_np
     
-    async def embed_text(self, texts: List[str], batch_size: int = 8) -> List[List[float]]:
+    async def embed_text(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:
         if len(texts) == 0:
             return []
             
@@ -398,7 +398,7 @@ class HuggingFaceClient:
         
         return all_embeddings
     
-    async def embed_image(self, images: List[dict], batch_size: int = 2) -> List[List[float]]:
+    async def embed_image(self, images: List[dict], batch_size: int = 4) -> List[List[float]]:
         if len(images) == 0:
             return []
             
