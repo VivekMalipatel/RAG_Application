@@ -177,7 +177,9 @@ class FileProcessor(BaseProcessor):
             adaptive_batch_size = self._calculate_adaptive_batch_size('unstructured', complexity_metrics)
             
             base_filename = metadata.get('filename', f'unknown_source_{metadata.get("internal_object_id", "")}')
-            s3_friendly_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in base_filename)
+            # Remove file extension before creating s3 folder name
+            filename_without_ext = base_filename.rsplit('.', 1)[0] if '.' in base_filename else base_filename
+            s3_friendly_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in filename_without_ext)
             s3_base_path = f"{source}/{s3_friendly_name}"
             
             # Clear the prefetch queue before starting a new batch
@@ -289,7 +291,9 @@ class FileProcessor(BaseProcessor):
             MAX_CHARS = 8000
             
             base_filename = metadata.get('filename', f'unknown_source_{metadata.get("internal_object_id", "")}')
-            s3_friendly_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in base_filename)
+            # Remove file extension before creating s3 folder name
+            filename_without_ext = base_filename.rsplit('.', 1)[0] if '.' in base_filename else base_filename
+            s3_friendly_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in filename_without_ext)
             s3_base_path = f"{source}/{s3_friendly_name}"
             
             complexity_metrics = {
@@ -392,7 +396,9 @@ class FileProcessor(BaseProcessor):
                 markdown_text = text
             
             base_filename = metadata.get('filename', f'unknown_source_{metadata.get("internal_object_id", "")}')
-            s3_friendly_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in base_filename)
+            # Remove file extension before creating s3 folder name
+            filename_without_ext = base_filename.rsplit('.', 1)[0] if '.' in base_filename else base_filename
+            s3_friendly_name = "".join(c if c.isalnum() or c in ['-', '_'] else '_' for c in filename_without_ext)
             s3_base_path = f"{source}/{s3_friendly_name}"
             
             text_s3_key = f"{s3_base_path}/content.txt"
