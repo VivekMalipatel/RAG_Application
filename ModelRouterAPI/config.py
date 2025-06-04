@@ -7,6 +7,11 @@ from pydantic_settings import BaseSettings
 from pydantic import model_validator
 import secrets
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+
 class Settings(BaseSettings):
     API_V1_STR: str = "/v1"
     PROJECT_NAME: str = "ModelRouter API"
