@@ -16,6 +16,7 @@ class ChatMessage(BaseModel):
     content: Optional[Union[str, List[dict]]] = None
     name: Optional[str] = None
     refusal: Optional[Any] = None
+    tool_call_id: Optional[str] = None
     annotations: Optional[List[Any]] = None
     tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
 

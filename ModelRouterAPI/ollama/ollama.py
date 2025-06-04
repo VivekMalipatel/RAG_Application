@@ -302,6 +302,28 @@ class OllamaClient:
         keep_alive: Optional[str] = None,
         think: Optional[bool] = None
     ) -> Union[str, AsyncGenerator[str, None]]:
+        def process_tool_calls(tool_calls):
+            if not tool_calls:
+                return tool_calls
+            
+            processed_tool_calls = []
+            for tool_call in tool_calls:
+                processed_tool_call = tool_call.copy()
+                
+                if 'function' in processed_tool_call and 'arguments' in processed_tool_call['function']:
+                    arguments = processed_tool_call['function']['arguments']
+                    
+                    if isinstance(arguments, str):
+                        try:
+                            processed_tool_call['function']['arguments'] = json.loads(arguments)
+                        except json.JSONDecodeError as e:
+                            self.logger.error(f"Failed to parse tool call arguments as JSON: {arguments}. Error: {str(e)}")
+                            processed_tool_call['function']['arguments'] = {}
+                
+                processed_tool_calls.append(processed_tool_call)
+            
+            return processed_tool_calls
+        
         serializable_messages = []
         for message in messages:
             if hasattr(message, 'model_dump'):
@@ -353,7 +375,7 @@ class OllamaClient:
                     processed_message["thinking"] = message['thinking']
                 
                 if message.get('tool_calls'):
-                    processed_message["tool_calls"] = message['tool_calls']
+                    processed_message["tool_calls"] = process_tool_calls(message['tool_calls'])
                 
                 serializable_messages.append(processed_message)
             else:
@@ -366,7 +388,7 @@ class OllamaClient:
                     filtered_message["thinking"] = message['thinking']
                 
                 if message.get('tool_calls'):
-                    filtered_message["tool_calls"] = message['tool_calls']
+                    filtered_message["tool_calls"] = process_tool_calls(message['tool_calls'])
                 
                 serializable_messages.append(filtered_message)
         
@@ -489,14 +511,12 @@ class OllamaClient:
                         if "message" in response_data:
                             message_data = response_data["message"]
                             
-                            # Create ChatMessage object
                             chat_message = ChatMessage(
                                 role="assistant",
                                 content=message_data.get("content", ""),
                                 tool_calls=None
                             )
                             
-                            # Parse tool calls if present
                             if "tool_calls" in message_data and message_data["tool_calls"]:
                                 tool_calls = []
                                 for tool_call in message_data["tool_calls"]:
