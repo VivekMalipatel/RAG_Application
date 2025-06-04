@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class StructuredOutputRequest(BaseModel):
     model: str = Field(..., description="Model to use for generation")
-    prompt: str = Field(..., description="Text prompt for the model")
+    prompt: Union[str, List[Dict[str, Any]]] = Field(..., description="Text prompt or list of messages for the model")
     schema: Dict[str, Any] = Field(..., description="Pydantic schema definition as a JSON schema")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens to generate")
     temperature: Optional[float] = Field(0.7, description="Sampling temperature")

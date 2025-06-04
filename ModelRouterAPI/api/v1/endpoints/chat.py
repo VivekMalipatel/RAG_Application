@@ -14,24 +14,55 @@ from db.session import get_db
 from core.security import get_api_key
 from db.models import ApiKey, Usage
 from schemas.chat import (
-    ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChoice, ChatMessage,
-    ChatCompletionChunkResponse, ChatCompletionChunkChoice, ChatCompletionChunkDelta, UsageInfo
+    ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChoice, ChatMessage, ResponseFormat,
+    ChatCompletionChunkResponse, ChatCompletionChunkChoice, ChatCompletionChunkDelta, UsageInfo,
+    ChatCompletionMessageToolCall, ChatCompletionMessageToolCallFunction
 )
 
 from model_handler import ModelRouter
 from model_type import ModelType
+from config import settings
 
 router = APIRouter()
 
-def count_tokens(text: str, model: str = "gpt-3.5-turbo") -> int:
+def count_tokens(text: str, model: str = "gpt-4o") -> int:
     try:
         encoding = tiktoken.encoding_for_model(model)
         return len(encoding.encode(text))
-    except Exception:
-        if isinstance(text, str):
-            return int(len(text.split()) * 1.3)
-        else:
-            return int(len(text) * 1.3)
+    except KeyError:
+        try:
+            encoding = tiktoken.get_encoding("cl100k_base")
+            return len(encoding.encode(text))
+        except Exception:
+            return len(text.split()) * 1.3
+
+def apply_chat_defaults(request: ChatCompletionRequest) -> None:
+    if request.frequency_penalty is None:
+        request.frequency_penalty = settings.CHAT_DEFAULT_FREQUENCY_PENALTY
+    # if request.logprobs is None:
+    #     request.logprobs = settings.CHAT_DEFAULT_LOGPROBS
+    # if request.n is None:
+    #     request.n = settings.CHAT_DEFAULT_N
+    # if request.presence_penalty is None:
+    #     request.presence_penalty = settings.CHAT_DEFAULT_PRESENCE_PENALTY
+    if request.stream is None:
+        request.stream = settings.CHAT_DEFAULT_STREAM
+    if request.temperature is None:
+        request.temperature = settings.CHAT_DEFAULT_TEMPERATURE
+    if request.top_p is None:
+        request.top_p = settings.CHAT_DEFAULT_TOP_P
+    # if request.parallel_tool_calls is None:
+    #     request.parallel_tool_calls = settings.CHAT_DEFAULT_PARALLEL_TOOL_CALLS
+    # if request.response_format is None:
+    #     request.response_format = ResponseFormat(type=settings.CHAT_DEFAULT_RESPONSE_FORMAT_TYPE)
+    # elif request.response_format.type is None:
+    #     request.response_format.type = settings.CHAT_DEFAULT_RESPONSE_FORMAT_TYPE
+    # if request.service_tier is None:
+    #     request.service_tier = settings.CHAT_DEFAULT_SERVICE_TIER
+    
+    for message in request.messages:
+        if message.annotations is None:
+            message.annotations = []
 
 @router.post("/chat/completions", response_model=None)
 async def create_chat_completion(
@@ -40,6 +71,8 @@ async def create_chat_completion(
     api_key: ApiKey = Depends(get_api_key),
     db: Session = Depends(get_db)
 ):
+    apply_chat_defaults(request)
+    
     if request.stream:
         return StreamingResponse(
             generate_chat_stream(request, background_tasks, api_key, db),
@@ -55,18 +88,55 @@ async def create_chat_completion(
         prompt_tokens = sum(count_tokens(msg.content or "", request.model) for msg in request.messages)
         
         max_tokens = request.max_tokens
-        model_router = await ModelRouter.initialize_from_model_name(
-            model_name=request.model,
-            model_type=ModelType.TEXT_GENERATION,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            max_tokens=max_tokens,
-            frequency_penalty=request.frequency_penalty,
-            presence_penalty=request.presence_penalty,
-            stop=request.stop
-        )
+        
+        try:
+            model_router = await ModelRouter.initialize_from_model_name(
+                model_name=request.model,
+                model_type=ModelType.TEXT_GENERATION,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                max_tokens=max_tokens,
+                max_completion_tokens=request.max_completion_tokens,
+                frequency_penalty=request.frequency_penalty,
+                presence_penalty=request.presence_penalty,
+                stop=request.stop,
+                logit_bias=request.logit_bias,
+                logprobs=request.logprobs,
+                top_logprobs=request.top_logprobs,
+                n=request.n,
+                seed=request.seed,
+                user=request.user,
+                tools=request.tools,
+                tool_choice=request.tool_choice,
+                parallel_tool_calls=request.parallel_tool_calls,
+                response_format=request.response_format.model_dump() if request.response_format else None,
+                service_tier=request.service_tier,
+                store=request.store,
+                metadata=request.metadata,
+                reasoning_effort=request.reasoning_effort,
+                modalities=request.modalities,
+                audio=request.audio,
+                prediction=request.prediction,
+                web_search_options=request.web_search_options,
+                stream_options=request.stream_options.model_dump() if request.stream_options else None,
+                num_ctx=request.num_ctx,
+                repeat_last_n=request.repeat_last_n,
+                repeat_penalty=request.repeat_penalty,
+                top_k=request.top_k,
+                min_p=request.min_p,
+                keep_alive=request.keep_alive,
+                think=request.think
+            )
+        except Exception as model_init_error:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to initialize model router for model '{request.model}': {str(model_init_error)}"
+            )
         
         response_text = ""
+        tool_calls = None
+        response_message = None
+        
         if request.response_format and request.response_format.type == "json_schema":
             schema = {}
             if request.response_format.json_schema:
@@ -75,16 +145,56 @@ async def create_chat_completion(
                 else:
                     schema = request.response_format.json_schema
                 
-            prompt_text = "\n".join([f"{msg.role}: {msg.content}" for msg in request.messages])
+            messages_for_api = []
+            for msg in request.messages:
+                msg_dict = {"role": msg.role}
+                if msg.content:
+                    msg_dict["content"] = msg.content
+                if msg.name:
+                    msg_dict["name"] = msg.name
+                messages_for_api.append(msg_dict)
             
-            structured_output = await model_router.generate_structured_output(
-                prompt=prompt_text,
-                schema=schema,
-                max_tokens=max_tokens
-            )
-            
-            response_text = json.dumps(structured_output)
-        
+            try:
+                structured_output = await model_router.generate_structured_output(
+                    prompt=messages_for_api,
+                    schema=schema,
+                    max_tokens=max_tokens,
+                    max_completion_tokens=request.max_completion_tokens,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                    stop=request.stop,
+                    logit_bias=request.logit_bias,
+                    logprobs=request.logprobs,
+                    top_logprobs=request.top_logprobs,
+                    n=request.n,
+                    seed=request.seed,
+                    user=request.user,
+                    tools=request.tools,
+                    tool_choice=request.tool_choice,
+                    parallel_tool_calls=request.parallel_tool_calls,
+                    service_tier=request.service_tier,
+                    store=request.store,
+                    metadata=request.metadata,
+                    reasoning_effort=request.reasoning_effort,
+                    modalities=request.modalities,
+                    audio=request.audio,
+                    prediction=request.prediction,
+                    web_search_options=request.web_search_options,
+                    num_ctx=request.num_ctx,
+                    repeat_last_n=request.repeat_last_n,
+                    repeat_penalty=request.repeat_penalty,
+                    top_k=request.top_k,
+                    min_p=request.min_p,
+                    keep_alive=request.keep_alive,
+                    think=request.think
+                )
+                response_text = json.dumps(structured_output)
+            except Exception as structured_error:
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Failed to generate structured output: {str(structured_error)}"
+                )
+
         elif request.response_format and request.response_format.type == "json_object":
             system_msg = next((msg for msg in request.messages if msg.role == "system"), None)
             
@@ -96,23 +206,194 @@ async def create_chat_completion(
                     content="Respond with JSON format only."
                 ))
             
-            response_text = await model_router.generate_text(
-                prompt=request.messages,
-                max_tokens=max_tokens,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                stop=request.stop
-            )
+            try:
+                response_text = await model_router.generate_text(
+                    prompt=request.messages,
+                    max_tokens=max_tokens,
+                    max_completion_tokens=request.max_completion_tokens,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                    stop=request.stop,
+                    logit_bias=request.logit_bias,
+                    logprobs=request.logprobs,
+                    top_logprobs=request.top_logprobs,
+                    n=request.n,
+                    seed=request.seed,
+                    user=request.user,
+                    tools=request.tools,
+                    tool_choice=request.tool_choice,
+                    parallel_tool_calls=request.parallel_tool_calls,
+                    service_tier=request.service_tier,
+                    store=request.store,
+                    metadata=request.metadata,
+                    reasoning_effort=request.reasoning_effort,
+                    modalities=request.modalities,
+                    audio=request.audio,
+                    prediction=request.prediction,
+                    web_search_options=request.web_search_options,
+                    num_ctx=request.num_ctx,
+                    repeat_last_n=request.repeat_last_n,
+                    repeat_penalty=request.repeat_penalty,
+                    top_k=request.top_k,
+                    min_p=request.min_p,
+                    keep_alive=request.keep_alive,
+                    think=request.think
+                )
+            except Exception as json_generation_error:
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Failed to generate JSON object response: {str(json_generation_error)}"
+                )
         else:
-            response_text = await model_router.generate_text(
-                prompt=request.messages,
-                max_tokens=max_tokens,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                stop=request.stop
-            )
+            try:
+                response_message = await model_router.generate_text(
+                    prompt=request.messages,
+                    max_tokens=max_tokens,
+                    max_completion_tokens=request.max_completion_tokens,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                    stop=request.stop,
+                    logit_bias=request.logit_bias,
+                    logprobs=request.logprobs,
+                    top_logprobs=request.top_logprobs,
+                    n=request.n,
+                    seed=request.seed,
+                    user=request.user,
+                    tools=request.tools,
+                    tool_choice=request.tool_choice,
+                    parallel_tool_calls=request.parallel_tool_calls,
+                    service_tier=request.service_tier,
+                    store=request.store,
+                    metadata=request.metadata,
+                    reasoning_effort=request.reasoning_effort,
+                    modalities=request.modalities,
+                    audio=request.audio,
+                    prediction=request.prediction,
+                    web_search_options=request.web_search_options,
+                    num_ctx=request.num_ctx,
+                    repeat_last_n=request.repeat_last_n,
+                    repeat_penalty=request.repeat_penalty,
+                    top_k=request.top_k,
+                    min_p=request.min_p,
+                    keep_alive=request.keep_alive,
+                    think=request.think
+                )
+                
+                if hasattr(response_message, 'content'):
+                    response_text = response_message.content or ""
+                    if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
+                        tool_calls = []
+                        for tool_call in response_message.tool_calls:
+                            tool_calls.append(ChatCompletionMessageToolCall(
+                                id=tool_call.id,
+                                type=tool_call.type,
+                                function=ChatCompletionMessageToolCallFunction(
+                                    name=tool_call.function.name,
+                                    arguments=tool_call.function.arguments
+                                )
+                            ))
+                elif isinstance(response_message, str):
+                    response_text = response_message
+                    tool_calls = None
+                else:
+                    response_text = str(response_message)
+                    tool_calls = None
+                    
+            except Exception as text_generation_error:
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Failed to generate text response: {str(text_generation_error)}"
+                )
         
-        completion_tokens = count_tokens(response_text, request.model)
+        if isinstance(response_message, list):
+            choices = []
+            total_completion_tokens = 0
+            
+            for i, item in enumerate(response_message):
+                if hasattr(item, 'content'):
+                    content = item.content
+                    item_tool_calls = None
+                    if hasattr(item, 'tool_calls') and item.tool_calls:
+                        item_tool_calls = []
+                        for tool_call in item.tool_calls:
+                            item_tool_calls.append(ChatCompletionMessageToolCall(
+                                id=tool_call.id,
+                                type=tool_call.type,
+                                function=ChatCompletionMessageToolCallFunction(
+                                    name=tool_call.function.name,
+                                    arguments=tool_call.function.arguments
+                                )
+                            ))
+                else:
+                    content = str(item)
+                    item_tool_calls = None
+                
+                completion_tokens_single = count_tokens(content or "", request.model)
+                total_completion_tokens += completion_tokens_single
+                
+                choices.append(
+                    ChatCompletionChoice(
+                        index=i,
+                        message=ChatMessage(
+                            role="assistant", 
+                            content=content if content else None,
+                            refusal=None,
+                            annotations=[],
+                            tool_calls=item_tool_calls
+                        ),
+                        finish_reason="tool_calls" if item_tool_calls else "stop",
+                        logprobs=None
+                    )
+                )
+            completion_tokens = total_completion_tokens
+        elif response_message and (hasattr(response_message, 'content') or hasattr(response_message, 'tool_calls')):
+            content = getattr(response_message, 'content', None)
+            message_tool_calls = None
+            
+            if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
+                message_tool_calls = []
+                for tool_call in response_message.tool_calls:
+                    message_tool_calls.append(ChatCompletionMessageToolCall(
+                        id=tool_call.id,
+                        type=tool_call.type,
+                        function=ChatCompletionMessageToolCallFunction(
+                            name=tool_call.function.name,
+                            arguments=tool_call.function.arguments
+                        )
+                    ))
+            
+            completion_tokens = count_tokens(content or "", request.model)
+            choices = [
+                ChatCompletionChoice(
+                    index=0,
+                    message=ChatMessage(
+                        role="assistant",
+                        content=content,
+                        refusal=None,
+                        annotations=[],
+                        tool_calls=message_tool_calls
+                    ),
+                    finish_reason="tool_calls" if message_tool_calls else "stop",
+                    logprobs=None
+                )
+            ]
+        else:
+            completion_tokens = count_tokens(response_text or "", request.model)
+            choices = [
+                ChatCompletionChoice(
+                    index=0,
+                    message=ChatMessage(
+                        role="assistant", 
+                        content=response_text if response_text else None,
+                        refusal=None,
+                        annotations=[],
+                        tool_calls=tool_calls
+                    ),
+                    finish_reason="tool_calls" if tool_calls else "stop",
+                    logprobs=None
+                )
+            ]
+            
         total_tokens = prompt_tokens + completion_tokens
         
         completion_time = time.time() - start_time
@@ -135,19 +416,7 @@ async def create_chat_completion(
             id=f"chatcmpl-{request_id}",
             created=created_time,
             model=request.model,
-            choices=[
-                ChatCompletionChoice(
-                    index=0,
-                    message=ChatMessage(
-                        role="assistant", 
-                        content=response_text,
-                        refusal=None,
-                        annotations=[]
-                    ),
-                    finish_reason="stop",
-                    logprobs=None
-                )
-            ],
+            choices=choices,
             usage=UsageInfo(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -164,12 +433,17 @@ async def create_chat_completion(
                 }
             ),
             system_fingerprint=system_fingerprint,
-            service_tier="default",
-            object="chat.completion"
+            service_tier=request.service_tier or settings.CHAT_DEFAULT_SERVICE_TIER,
+            object=settings.CHAT_DEFAULT_OBJECT_COMPLETION
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Internal server error in chat completion: {str(e)}"
+        )
 
 async def generate_chat_stream(
     request: ChatCompletionRequest,
@@ -187,17 +461,56 @@ async def generate_chat_stream(
     
     try:
         max_tokens = request.max_tokens
-        model_router = await ModelRouter.initialize_from_model_name(
-            model_name=request.model,
-            model_type=ModelType.TEXT_GENERATION,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            max_tokens=max_tokens,
-            frequency_penalty=request.frequency_penalty,
-            presence_penalty=request.presence_penalty,
-            stop=request.stop,
-            stream=True
-        )
+        
+        try:
+            model_router = await ModelRouter.initialize_from_model_name(
+                model_name=request.model,
+                model_type=ModelType.TEXT_GENERATION,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                max_tokens=max_tokens,
+                max_completion_tokens=request.max_completion_tokens,
+                frequency_penalty=request.frequency_penalty,
+                presence_penalty=request.presence_penalty,
+                stop=request.stop,
+                logit_bias=request.logit_bias,
+                logprobs=request.logprobs,
+                top_logprobs=request.top_logprobs,
+                n=request.n,
+                seed=request.seed,
+                user=request.user,
+                tools=request.tools,
+                tool_choice=request.tool_choice,
+                parallel_tool_calls=request.parallel_tool_calls,
+                response_format=request.response_format.model_dump() if request.response_format else None,
+                service_tier=request.service_tier,
+                store=request.store,
+                metadata=request.metadata,
+                reasoning_effort=request.reasoning_effort,
+                modalities=request.modalities,
+                audio=request.audio,
+                prediction=request.prediction,
+                web_search_options=request.web_search_options,
+                stream_options=request.stream_options.model_dump() if request.stream_options else None,
+                num_ctx=request.num_ctx,
+                repeat_last_n=request.repeat_last_n,
+                repeat_penalty=request.repeat_penalty,
+                top_k=request.top_k,
+                min_p=request.min_p,
+                keep_alive=request.keep_alive,
+                think=request.think,
+                stream=True
+            )
+        except Exception as model_init_error:
+            error_chunk = {
+                "error": {
+                    "message": f"Failed to initialize model router for streaming with model '{request.model}': {str(model_init_error)}",
+                    "type": "model_initialization_error"
+                }
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
         
         initial_chunk = ChatCompletionChunkResponse(
             id=f"chatcmpl-{request_id}",
@@ -262,14 +575,16 @@ async def generate_chat_stream(
                     )
                     yield f"data: {chunk.model_dump_json(exclude_none=False)}\n\n"
                     await asyncio.sleep(0.01)
-            except Exception as e:
+            except Exception as structured_stream_error:
                 error_chunk = {
                     "error": {
-                        "message": f"Error generating structured output: {str(e)}",
-                        "type": "server_error"
+                        "message": f"Failed to generate structured output for streaming: {str(structured_stream_error)}",
+                        "type": "structured_output_error"
                     }
                 }
                 yield f"data: {json.dumps(error_chunk)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
         
         elif request.response_format and request.response_format.type == "json_object":
             system_msg = next((msg for msg in request.messages if msg.role == "system"), None)
@@ -282,46 +597,109 @@ async def generate_chat_stream(
                     content="Respond with JSON format only."
                 ))
             
-            stream_generator = await model_router.generate_text(
-                prompt=request.messages,
-                max_tokens=max_tokens,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                stop=request.stop,
-                stream=True
-            )
-            
-            async for text_chunk in stream_generator:
-                if text_chunk:
-                    accumulated_text += text_chunk
-                    
-                    chunk = ChatCompletionChunkResponse(
-                        id=f"chatcmpl-{request_id}",
-                        created=created_time,
-                        model=request.model,
-                        system_fingerprint=system_fingerprint,
-                        service_tier="default",
-                        choices=[
-                            ChatCompletionChunkChoice(
-                                index=0,
-                                delta=ChatCompletionChunkDelta(content=text_chunk, refusal=None),
-                                finish_reason=None,
-                                logprobs=None
-                            )
-                        ],
-                        object="chat.completion.chunk"
-                    )
-                    yield f"data: {chunk.model_dump_json(exclude_none=False)}\n\n"
-                    await asyncio.sleep(0.01)
+            try:
+                stream_generator = await model_router.generate_text(
+                    prompt=request.messages,
+                    max_tokens=max_tokens,
+                    max_completion_tokens=request.max_completion_tokens,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                    stop=request.stop,
+                    stream=True,
+                    logit_bias=request.logit_bias,
+                    logprobs=request.logprobs,
+                    top_logprobs=request.top_logprobs,
+                    n=request.n,
+                    seed=request.seed,
+                    user=request.user,
+                    tools=request.tools,
+                    tool_choice=request.tool_choice,
+                    parallel_tool_calls=request.parallel_tool_calls,
+                    service_tier=request.service_tier,
+                    store=request.store,
+                    metadata=request.metadata,
+                    reasoning_effort=request.reasoning_effort,
+                    modalities=request.modalities,
+                    audio=request.audio,
+                    prediction=request.prediction,
+                    web_search_options=request.web_search_options,
+                    stream_options=request.stream_options.model_dump() if request.stream_options else None,
+                    num_ctx=request.num_ctx,
+                    repeat_last_n=request.repeat_last_n,
+                    repeat_penalty=request.repeat_penalty,
+                    top_k=request.top_k,
+                    min_p=request.min_p,
+                    keep_alive=request.keep_alive,
+                    think=request.think
+                )
+                
+                async for text_chunk in stream_generator:
+                    if text_chunk:
+                        accumulated_text += text_chunk
+                        
+                        chunk = ChatCompletionChunkResponse(
+                            id=f"chatcmpl-{request_id}",
+                            created=created_time,
+                            model=request.model,
+                            system_fingerprint=system_fingerprint,
+                            service_tier="default",
+                            choices=[
+                                ChatCompletionChunkChoice(
+                                    index=0,
+                                    delta=ChatCompletionChunkDelta(content=text_chunk, refusal=None),
+                                    finish_reason=None,
+                                    logprobs=None
+                                )
+                            ],
+                            object="chat.completion.chunk"
+                        )
+                        yield f"data: {chunk.model_dump_json(exclude_none=False)}\n\n"
+                        await asyncio.sleep(0.01)
+            except Exception as json_stream_error:
+                error_chunk = {
+                    "error": {
+                        "message": f"Failed to generate JSON object streaming response: {str(json_stream_error)}",
+                        "type": "json_streaming_error"
+                    }
+                }
+                yield f"data: {json.dumps(error_chunk)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
         
         else:
             stream_generator = await model_router.generate_text(
                 prompt=request.messages,
                 max_tokens=max_tokens,
+                max_completion_tokens=request.max_completion_tokens,
                 temperature=request.temperature,
                 top_p=request.top_p,
                 stop=request.stop,
-                stream=True
+                stream=True,
+                logit_bias=request.logit_bias,
+                logprobs=request.logprobs,
+                top_logprobs=request.top_logprobs,
+                n=request.n,
+                seed=request.seed,
+                user=request.user,
+                tools=request.tools,
+                tool_choice=request.tool_choice,
+                parallel_tool_calls=request.parallel_tool_calls,
+                service_tier=request.service_tier,
+                store=request.store,
+                metadata=request.metadata,
+                reasoning_effort=request.reasoning_effort,
+                modalities=request.modalities,
+                audio=request.audio,
+                prediction=request.prediction,
+                web_search_options=request.web_search_options,
+                stream_options=request.stream_options.model_dump() if request.stream_options else None,
+                num_ctx=request.num_ctx,
+                repeat_last_n=request.repeat_last_n,
+                repeat_penalty=request.repeat_penalty,
+                top_k=request.top_k,
+                min_p=request.min_p,
+                keep_alive=request.keep_alive,
+                think=request.think
             )
             
             async for text_chunk in stream_generator:
@@ -394,198 +772,6 @@ async def generate_chat_stream(
         }
         yield f"data: {json.dumps(error_chunk)}\n\n"
         yield "data: [DONE]\n\n"
-
-@router.post("/audio/speech", response_model=None)
-async def create_audio_speech(
-    request: ChatCompletionRequest,
-    background_tasks: BackgroundTasks,
-    speaker: str = Query("Chelsie", description="Voice to use for audio generation"),
-    api_key: ApiKey = Depends(get_api_key),
-    db: Session = Depends(get_db)
-):
-    start_time = time.time()
-    request_id = str(uuid.uuid4())
-    created_time = int(time.time())
-    system_fingerprint = f"fp_{uuid.uuid4().hex[:10]}"
-    
-    try:
-        prompt_tokens = sum(count_tokens(msg.content or "", request.model) for msg in request.messages)
-        
-        max_tokens = request.max_tokens
-        model_router = await ModelRouter.initialize_from_model_name(
-            model_name=request.model,
-            model_type=ModelType.AUDIO_GENERATION,  # This will automatically select the Qwen Omni models
-            temperature=request.temperature,
-            top_p=request.top_p,
-            max_tokens=max_tokens,
-            frequency_penalty=request.frequency_penalty,
-            presence_penalty=request.presence_penalty,
-            stop=request.stop
-        )
-        
-        # Generate both text and audio
-        text_output, audio_data = await model_router.generate_audio_and_text(
-            prompt=request.messages,
-            max_tokens=max_tokens,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            stop=request.stop,
-            speaker=speaker,
-            return_audio=True
-        )
-        
-        # Calculate tokens
-        completion_tokens = count_tokens(text_output, request.model)
-        total_tokens = prompt_tokens + completion_tokens
-        
-        # Log usage
-        completion_time = time.time() - start_time
-        background_tasks.add_task(
-            log_usage,
-            db=db,
-            api_key_id=getattr(api_key, "id", None),
-            request_id=request_id,
-            endpoint="audio/speech",
-            model=request.model,
-            provider=model_router.provider.value,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            processing_time=completion_time,
-            request_data=request.model_dump_json()
-        )
-        
-        # Encode audio to base64
-        audio_base64 = base64.b64encode(audio_data.tobytes()).decode("utf-8")
-        
-        # Return response with both text and audio
-        return {
-            "id": f"speechgen-{request_id}",
-            "created": created_time,
-            "model": request.model,
-            "text": text_output,
-            "audio": audio_base64,
-            "audio_format": "wav",
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens
-            },
-            "system_fingerprint": system_fingerprint,
-            "object": "audio.speech"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/audio/speech/stream", response_model=None)
-async def stream_audio_speech(
-    request: ChatCompletionRequest,
-    background_tasks: BackgroundTasks,
-    speaker: str = Query("Chelsie", description="Voice to use for audio generation"),
-    api_key: ApiKey = Depends(get_api_key),
-    db: Session = Depends(get_db)
-):
-    start_time = time.time()
-    request_id = str(uuid.uuid4())
-    
-    async def audio_stream_generator():
-        try:
-            prompt_tokens = sum(count_tokens(msg.content or "", request.model) for msg in request.messages)
-            
-            max_tokens = request.max_tokens
-            model_router = await ModelRouter.initialize_from_model_name(
-                model_name=request.model,
-                model_type=ModelType.AUDIO_GENERATION,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                max_tokens=max_tokens,
-                frequency_penalty=request.frequency_penalty,
-                presence_penalty=request.presence_penalty,
-                stop=request.stop
-            )
-            
-            # Qwen models don't support true streaming for audio yet,
-            # so we'll generate the full response and then simulate streaming
-            text_output, audio_data = await model_router.generate_audio_and_text(
-                prompt=request.messages,
-                max_tokens=max_tokens,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                stop=request.stop,
-                speaker=speaker,
-                return_audio=True
-            )
-            
-            # Calculate tokens and log usage
-            completion_tokens = count_tokens(text_output, request.model)
-            total_tokens = prompt_tokens + completion_tokens
-            
-            completion_time = time.time() - start_time
-            background_tasks.add_task(
-                log_usage,
-                db=db,
-                api_key_id=getattr(api_key, "id", None),
-                request_id=request_id,
-                endpoint="audio/speech/stream",
-                model=request.model,
-                provider=model_router.provider.value,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                processing_time=completion_time,
-                request_data=request.model_dump_json()
-            )
-            
-            # First yield the text response
-            text_chunk = json.dumps({
-                "type": "text",
-                "text": text_output,
-                "id": f"speechgen-{request_id}"
-            })
-            yield f"data: {text_chunk}\n\n"
-            
-            # Then stream the audio in chunks
-            if audio_data is not None:
-                # Split audio into chunks (e.g., 1 second each)
-                sample_rate = 24000  # Typical sample rate for Qwen Omni audio
-                chunk_size = sample_rate * 1  # 1 second chunks
-                audio_array = audio_data
-                
-                for i in range(0, len(audio_array), chunk_size):
-                    chunk = audio_array[i:i + chunk_size]
-                    if len(chunk) > 0:
-                        # Convert chunk to bytes and base64 encode
-                        chunk_bytes = chunk.tobytes()
-                        chunk_base64 = base64.b64encode(chunk_bytes).decode("utf-8")
-                        
-                        audio_chunk = json.dumps({
-                            "type": "audio_chunk",
-                            "audio": chunk_base64,
-                            "format": "wav",
-                            "chunk_index": i // chunk_size,
-                            "id": f"speechgen-{request_id}"
-                        })
-                        yield f"data: {audio_chunk}\n\n"
-                        await asyncio.sleep(0.5)  # Small delay between chunks
-            
-            # Signal completion
-            end_chunk = json.dumps({"type": "done", "id": f"speechgen-{request_id}"})
-            yield f"data: {end_chunk}\n\n"
-            
-        except Exception as e:
-            error_chunk = json.dumps({
-                "type": "error",
-                "error": {
-                    "message": str(e),
-                    "type": "server_error"
-                }
-            })
-            yield f"data: {error_chunk}\n\n"
-    
-    return StreamingResponse(
-        audio_stream_generator(),
-        media_type="text/event-stream"
-    )
 
 def log_usage(
     db: Session,

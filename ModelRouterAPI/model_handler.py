@@ -20,15 +20,41 @@ class ModelRouter:
         provider: Union[Provider, str],
         model_name: str,
         model_type: ModelType,
-        model_quantization: Optional[str] = None,
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         top_p: float = 1.0,
         max_tokens: Optional[int] = None,
+        max_completion_tokens: Optional[int] = None,
         stream: bool = False,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
         stop: Optional[Union[str, List[str]]] = None,
+        logit_bias: Optional[Dict[str, float]] = None,
+        logprobs: Optional[bool] = None,
+        top_logprobs: Optional[int] = None,
+        n: Optional[int] = 1,
+        seed: Optional[int] = None,
+        user: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        parallel_tool_calls: Optional[bool] = True,
+        response_format: Optional[Dict[str, Any]] = None,
+        service_tier: Optional[str] = None,
+        store: Optional[bool] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        reasoning_effort: Optional[str] = None,
+        modalities: Optional[List[str]] = None,
+        audio: Optional[Dict[str, Any]] = None,
+        prediction: Optional[Dict[str, Any]] = None,
+        web_search_options: Optional[Dict[str, Any]] = None,
+        stream_options: Optional[Dict[str, Any]] = None,
+        num_ctx: Optional[int] = None,
+        repeat_last_n: Optional[int] = None,
+        repeat_penalty: Optional[float] = None,
+        top_k: Optional[int] = None,
+        min_p: Optional[float] = None,
+        keep_alive: Optional[str] = None,
+        think: Optional[bool] = None,
         **kwargs
     ):
         if isinstance(provider, str):
@@ -51,18 +77,49 @@ class ModelRouter:
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
+            "max_completion_tokens": max_completion_tokens,
             "stream": stream,
             "frequency_penalty": frequency_penalty,
             "presence_penalty": presence_penalty,
             "stop": stop,
+            "logit_bias": logit_bias,
+            "logprobs": logprobs,
+            "top_logprobs": top_logprobs,
+            "n": n,
+            "seed": seed,
+            "user": user,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "parallel_tool_calls": parallel_tool_calls,
+            "response_format": response_format,
+            "service_tier": service_tier,
+            "store": store,
+            "metadata": metadata,
+            "reasoning_effort": reasoning_effort,
+            "modalities": modalities,
+            "audio": audio,
+            "prediction": prediction,
+            "web_search_options": web_search_options,
+            "stream_options": stream_options,
+            "num_ctx": num_ctx,
+            "repeat_last_n": repeat_last_n,
+            "repeat_penalty": repeat_penalty,
+            "top_k": top_k,
+            "min_p": min_p,
+            "keep_alive": keep_alive,
+            "think": think,
             **kwargs
         }
         
         if self.provider == Provider.OPENAI:
+            provider_config = kwargs.get('provider_config')
+            if provider_config:
+                common_params['api_key'] = provider_config.get('api_key')
+                common_params['base_url'] = provider_config.get('base_url')
             self.client = OpenAIClient(model_name=model_name, **common_params)
             
         elif self.provider == Provider.OLLAMA:
-            self.client = OllamaClient(hf_repo=model_name, quantization=model_quantization, **common_params)
+            self.client = OllamaClient(hf_repo=model_name, **common_params)
             
         elif self.provider == Provider.HUGGINGFACE:
             self.client = HuggingFaceClient(model_name=model_name, model_type=model_type, **common_params)
@@ -79,10 +136,13 @@ class ModelRouter:
         selector = ModelSelector()
         
         try:
-            provider, actual_model_name = await selector.select_best_model(
+            provider, actual_model_name, provider_config = await selector.select_best_model(
                 model_type=model_type, 
                 model_name=model_name
             )
+            
+            if provider_config:
+                kwargs['provider_config'] = provider_config
             
             return ModelRouter(
                 provider=provider,
@@ -98,20 +158,74 @@ class ModelRouter:
     async def generate_text(
         self, 
         prompt: Union[str, List], 
-        max_tokens: Optional[int] = None, 
+        max_tokens: Optional[int] = None,
+        max_completion_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
         stop: Optional[Union[str, List[str]]] = None,
-        stream: Optional[bool] = None
-    ) -> Union[str, AsyncGenerator[str, None]]:
+        stream: Optional[bool] = None,
+        logit_bias: Optional[Dict[str, float]] = None,
+        logprobs: Optional[bool] = None,
+        top_logprobs: Optional[int] = None,
+        n: Optional[int] = None,
+        seed: Optional[int] = None,
+        user: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        parallel_tool_calls: Optional[bool] = None,
+        response_format: Optional[Dict[str, Any]] = None,
+        service_tier: Optional[str] = None,
+        store: Optional[bool] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        reasoning_effort: Optional[str] = None,
+        modalities: Optional[List[str]] = None,
+        audio: Optional[Dict[str, Any]] = None,
+        prediction: Optional[Dict[str, Any]] = None,
+        web_search_options: Optional[Dict[str, Any]] = None,
+        stream_options: Optional[Dict[str, Any]] = None,
+        num_ctx: Optional[int] = None,
+        repeat_last_n: Optional[int] = None,
+        repeat_penalty: Optional[float] = None,
+        top_k: Optional[int] = None,
+        min_p: Optional[float] = None,
+        keep_alive: Optional[str] = None,
+        think: Optional[bool] = None
+    ) -> Union[str, List[str], AsyncGenerator[str, None]]:
         try:
             return await self.client.generate_text(
                 prompt, 
-                max_tokens=max_tokens, 
+                max_tokens=max_tokens,
+                max_completion_tokens=max_completion_tokens,
                 temperature=temperature, 
                 top_p=top_p,
                 stop=stop,
-                stream=stream if stream is not None else self.stream
+                stream=stream if stream is not None else self.stream,
+                logit_bias=logit_bias,
+                logprobs=logprobs,
+                top_logprobs=top_logprobs,
+                n=n,
+                seed=seed,
+                user=user,
+                tools=tools,
+                tool_choice=tool_choice,
+                parallel_tool_calls=parallel_tool_calls,
+                response_format=response_format,
+                service_tier=service_tier,
+                store=store,
+                metadata=metadata,
+                reasoning_effort=reasoning_effort,
+                modalities=modalities,
+                audio=audio,
+                prediction=prediction,
+                web_search_options=web_search_options,
+                stream_options=stream_options,
+                num_ctx=num_ctx,
+                repeat_last_n=repeat_last_n,
+                repeat_penalty=repeat_penalty,
+                top_k=top_k,
+                min_p=min_p,
+                keep_alive=keep_alive,
+                think=think
             )
         except Exception as e:
             self.logger.error(f"Error generating text with {self.provider.value}: {str(e)}")
@@ -154,9 +268,41 @@ class ModelRouter:
 
     async def generate_structured_output(
         self,
-        prompt: str,
+        prompt: Union[str, List],
         schema: Union[Dict[str, Any], Type[BaseModel]],
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        max_completion_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        stop: Optional[Union[str, List[str]]] = None,
+        stream: Optional[bool] = None,
+        logit_bias: Optional[Dict[str, float]] = None,
+        logprobs: Optional[bool] = None,
+        top_logprobs: Optional[int] = None,
+        n: Optional[int] = None,
+        seed: Optional[int] = None,
+        user: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        parallel_tool_calls: Optional[bool] = None,
+        response_format: Optional[Dict[str, Any]] = None,
+        service_tier: Optional[str] = None,
+        store: Optional[bool] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        reasoning_effort: Optional[str] = None,
+        modalities: Optional[List[str]] = None,
+        audio: Optional[Dict[str, Any]] = None,
+        prediction: Optional[Dict[str, Any]] = None,
+        web_search_options: Optional[Dict[str, Any]] = None,
+        stream_options: Optional[Dict[str, Any]] = None,
+        num_ctx: Optional[int] = None,
+        repeat_last_n: Optional[int] = None,
+        repeat_penalty: Optional[float] = None,
+        top_k: Optional[int] = None,
+        min_p: Optional[float] = None,
+        keep_alive: Optional[str] = None,
+        think: Optional[bool] = None,
+        **kwargs
     ) -> Dict[str, Any]:
         if not hasattr(self.client, "generate_structured_output"):
             raise UnsupportedFeatureError(f"Provider {self.provider} does not support structured output generation")
@@ -165,41 +311,42 @@ class ModelRouter:
             return await self.client.generate_structured_output(
                 prompt=prompt,
                 schema=schema,
-                max_tokens=max_tokens if max_tokens is not None else self.max_tokens
+                max_tokens=max_tokens,
+                max_completion_tokens=max_completion_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                stop=stop,
+                stream=stream,
+                logit_bias=logit_bias,
+                logprobs=logprobs,
+                top_logprobs=top_logprobs,
+                n=n,
+                seed=seed,
+                user=user,
+                tools=tools,
+                tool_choice=tool_choice,
+                parallel_tool_calls=parallel_tool_calls,
+                response_format=response_format,
+                service_tier=service_tier,
+                store=store,
+                metadata=metadata,
+                reasoning_effort=reasoning_effort,
+                modalities=modalities,
+                audio=audio,
+                prediction=prediction,
+                web_search_options=web_search_options,
+                stream_options=stream_options,
+                num_ctx=num_ctx,
+                repeat_last_n=repeat_last_n,
+                repeat_penalty=repeat_penalty,
+                top_k=top_k,
+                min_p=min_p,
+                keep_alive=keep_alive,
+                think=think,
+                **kwargs
             )
         except Exception as e:
             self.logger.error(f"Error generating structured output with {self.provider.value}: {str(e)}")
-            raise
-
-    async def generate_audio_and_text(
-        self, 
-        prompt: Union[str, List], 
-        max_tokens: Optional[int] = None, 
-        temperature: Optional[float] = None,
-        top_p: Optional[float] = None,
-        stop: Optional[Union[str, List[str]]] = None,
-        stream: Optional[bool] = None,
-        speaker: Optional[str] = "Chelsie",
-        use_audio_in_video: bool = True,
-        return_audio: bool = True
-    ) -> Union[Tuple[str, Any], AsyncGenerator[Tuple[str, Optional[Any]], None]]:
-        if not hasattr(self.client, "generate_audio_and_text"):
-            raise UnsupportedFeatureError(f"Provider {self.provider} does not support audio generation")
-            
-        try:
-            return await self.client.generate_audio_and_text(
-                prompt, 
-                max_tokens=max_tokens, 
-                temperature=temperature, 
-                top_p=top_p,
-                stop=stop,
-                stream=stream if stream is not None else self.stream,
-                speaker=speaker,
-                use_audio_in_video=use_audio_in_video,
-                return_audio=return_audio
-            )
-        except Exception as e:
-            self.logger.error(f"Error generating audio and text with {self.provider.value}: {str(e)}")
             raise
 
     def set_system_prompt(self, system_prompt: str) -> None:

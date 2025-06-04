@@ -19,7 +19,7 @@ try:
     # Example using a model available in your ModelRouterAPI (e.g., llama2 or gpt-3.5-turbo if configured)
     print("Sending streaming chat completion request...")
     stream = client.chat.completions.create(
-        model="meta-llama_Llama-3.1-8B-Instruct_Q8_0", # Or another model configured in your API
+        model="qwen3:1.7b-fp16", # Or another model configured in your API
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": "Explain the concept of RAG in large language models in detail, step by step."}
@@ -40,6 +40,32 @@ try:
 
     print("\n\n--- End of Stream ---")
     print(f"\nFull reconstructed response:\n{full_response}")
+
+    print("\n" + "="*60)
+    print("Sending non-streaming chat completion request...")
+    
+    response = client.chat.completions.create(
+        model="qwen2.5vl:3b-q4_K_M",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "What is machine learning? Give a brief explanation."}
+        ],
+        stream=False
+    )
+
+    print("\nNon-Streaming Chat Completion Response:")
+    if response.choices and len(response.choices) > 0:
+        content = response.choices[0].message.content
+        print(content)
+        
+        print("\nResponse metadata:")
+        print(f"Model: {response.model}")
+        print(f"ID: {response.id}")
+        print(f"Created: {response.created}")
+        if hasattr(response, 'usage') and response.usage:
+            print(f"Tokens used - Prompt: {response.usage.prompt_tokens}, Completion: {response.usage.completion_tokens}, Total: {response.usage.total_tokens}")
+    else:
+        print("No response content received")
 
 
 except openai.APIConnectionError as e:
