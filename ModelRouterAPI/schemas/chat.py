@@ -12,7 +12,7 @@ class ChatCompletionMessageToolCall(BaseModel):
     type: Literal["function"] = Field(..., description="The type of the tool. Currently, only function is supported")
 
 class ChatMessage(BaseModel):
-    role: Literal["system", "user", "assistant"]
+    role: Literal["system", "user", "assistant", "tool", "function", "developer"]
     content: Optional[Union[str, List[dict]]] = None
     name: Optional[str] = None
     refusal: Optional[Any] = None
@@ -114,7 +114,7 @@ class ChatCompletionResponse(BaseModel):
 
 class ChatCompletionChunkDelta(BaseModel):
     content: Optional[str] = None
-    role: Optional[Literal["system", "user", "assistant"]] = None
+    role: Optional[Literal["system", "user", "assistant", "tool", "function", "developer"]] = None
     refusal: Optional[Any] = None
     tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
 
