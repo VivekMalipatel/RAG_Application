@@ -339,7 +339,8 @@ async def create_chat_completion(
                             content=content if content else None,
                             refusal=None,
                             annotations=[],
-                            tool_calls=item_tool_calls
+                            tool_calls=item_tool_calls,
+                            audio=None
                         ),
                         finish_reason="tool_calls" if item_tool_calls else "stop",
                         logprobs=None
@@ -371,7 +372,8 @@ async def create_chat_completion(
                         content=content,
                         refusal=None,
                         annotations=[],
-                        tool_calls=message_tool_calls
+                        tool_calls=message_tool_calls,
+                        audio=None
                     ),
                     finish_reason="tool_calls" if message_tool_calls else "stop",
                     logprobs=None
@@ -387,7 +389,8 @@ async def create_chat_completion(
                         content=response_text if response_text else None,
                         refusal=None,
                         annotations=[],
-                        tool_calls=tool_calls
+                        tool_calls=tool_calls,
+                        audio=None
                     ),
                     finish_reason="tool_calls" if tool_calls else "stop",
                     logprobs=None

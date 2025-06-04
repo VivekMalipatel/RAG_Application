@@ -107,7 +107,7 @@ class OpenAIClient:
         web_search_options: Optional[Dict[str, Any]] = None,
         stream_options: Optional[Dict[str, Any]] = None,
         **kwargs: Any
-    ) -> Union[str, List[str], AsyncGenerator[str, None]]:
+    ) -> Union[str, List[str], AsyncGenerator[Dict[str, Any], None]]:
         stream = stream if stream is not None else self.stream
         max_tokens = max_tokens if max_tokens is not None else self.max_tokens
         max_completion_tokens = max_completion_tokens if max_completion_tokens is not None else self.max_completion_tokens

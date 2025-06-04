@@ -19,6 +19,7 @@ class ChatMessage(BaseModel):
     tool_call_id: Optional[str] = None
     annotations: Optional[List[Any]] = None
     tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
+    audio: Optional[Dict[str, Any]] = None
 
 class ResponseFormat(BaseModel):
     type: Literal["text", "json_object", "json_schema", None]
