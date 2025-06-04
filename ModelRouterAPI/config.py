@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import logging
 from typing import Dict, List, Optional, Union
 from pydantic_settings import BaseSettings
 from pydantic import model_validator
@@ -115,6 +116,13 @@ class Settings(BaseSettings):
             }
         
         self.openai_compatible_providers = providers
+        
+        logging.info(f"Loaded {len(providers)} OpenAI-compatible providers:")
+        for provider_name, config in providers.items():
+            model_count = len(config['models'])
+            models_list = ', '.join(config['models'])
+            logging.info(f"  {provider_name}: {model_count} models - {models_list}")
+        
         return self
 
     def get_provider_config(self, model_name: str) -> Optional[Dict[str, str]]:
