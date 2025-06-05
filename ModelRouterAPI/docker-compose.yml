@@ -29,11 +29,12 @@ services:
       - IMAGE_EMBEDDING_MODELS=${IMAGE_EMBEDDING_MODELS:-}
       - RERANKER_MODELS=${RERANKER_MODELS:-}
       - OLLAMA_DEFAULT_NUM_CTX=${OLLAMA_DEFAULT_NUM_CTX:-}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [gpu]
+    gpus: all
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]
     volumes:
       - ./:/app
       - model-router-data:/app/data
@@ -48,13 +49,14 @@ services:
     image: ollama/ollama:0.7.0
     volumes:
       - ollama-data:/root/.ollama
+    gpus: all
     ports:
       - "11434:11434"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [gpu]
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - OLLAMA_NUM_CTX=$(OLLAMA_NUM_CTX:-8096)
