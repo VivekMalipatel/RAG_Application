@@ -48,19 +48,19 @@ class OpenAIClient:
             base_url=base_url or settings.OPENAI_BASE_URL
         )
         self.model_name = model_name
-        self.system_prompt = system_prompt
-        self.temperature = temperature
-        self.top_p = top_p
+        self.system_prompt = system_prompt if system_prompt is not None else settings.OPENAI_DEFAULT_SYSTEM_PROMPT
+        self.temperature = temperature if temperature is not None else settings.OPENAI_DEFAULT_TEMPERATURE
+        self.top_p = top_p if top_p is not None else settings.OPENAI_DEFAULT_TOP_P
         self.max_tokens = max_tokens
         self.max_completion_tokens = max_completion_tokens
-        self.stream = stream
-        self.frequency_penalty = frequency_penalty
-        self.presence_penalty = presence_penalty
+        self.stream = stream if stream is not None else settings.OPENAI_DEFAULT_STREAM
+        self.frequency_penalty = frequency_penalty if frequency_penalty is not None else settings.OPENAI_DEFAULT_FREQUENCY_PENALTY
+        self.presence_penalty = presence_penalty if presence_penalty is not None else settings.OPENAI_DEFAULT_PRESENCE_PENALTY
         self.stop = stop
         self.logit_bias = logit_bias
-        self.logprobs = logprobs
+        self.logprobs = logprobs if logprobs is not None else settings.OPENAI_DEFAULT_LOGPROBS
         self.top_logprobs = top_logprobs
-        self.n = n
+        self.n = n if n is not None else settings.OPENAI_DEFAULT_N
         self.seed = seed
         self.user = user
         self.tools = tools

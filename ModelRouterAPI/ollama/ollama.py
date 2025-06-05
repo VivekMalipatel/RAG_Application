@@ -80,18 +80,18 @@ class OllamaClient:
         self.web_search_options = web_search_options
         self.stream_options = stream_options
         
-        self.num_ctx = num_ctx or kwargs.get("num_ctx")
-        self.repeat_last_n = repeat_last_n or kwargs.get("repeat_last_n")
-        self.repeat_penalty = repeat_penalty or kwargs.get("repeat_penalty")
-        self.top_k = top_k or kwargs.get("top_k")
-        self.min_p = min_p or kwargs.get("min_p")
-        self.keep_alive = keep_alive or kwargs.get("keep_alive")
-        self.think = think or kwargs.get("think")
+        self.num_ctx = num_ctx if num_ctx is not None else kwargs.get("num_ctx", settings.OLLAMA_DEFAULT_NUM_CTX)
+        self.repeat_last_n = repeat_last_n if repeat_last_n is not None else kwargs.get("repeat_last_n", settings.OLLAMA_DEFAULT_REPEAT_LAST_N)
+        self.repeat_penalty = repeat_penalty if repeat_penalty is not None else kwargs.get("repeat_penalty", settings.OLLAMA_DEFAULT_REPEAT_PENALTY)
+        self.top_k = top_k if top_k is not None else kwargs.get("top_k", settings.OLLAMA_DEFAULT_TOP_K)
+        self.min_p = min_p if min_p is not None else kwargs.get("min_p", settings.OLLAMA_DEFAULT_MIN_P)
+        self.keep_alive = keep_alive if keep_alive is not None else kwargs.get("keep_alive", settings.OLLAMA_DEFAULT_KEEP_ALIVE)
+        self.think = think if think is not None else kwargs.get("think", settings.OLLAMA_DEFAULT_THINK)
 
         self.api_base_url = settings.OLLAMA_BASE_URL
-        self.max_retries = kwargs.get("max_retries", 1)
-        self.retry_delay = kwargs.get("retry_delay", 5)
-        self.connection_timeout = kwargs.get("connection_timeout", 10)
+        self.max_retries = kwargs.get("max_retries", settings.OLLAMA_DEFAULT_MAX_RETRIES)
+        self.retry_delay = kwargs.get("retry_delay", settings.OLLAMA_DEFAULT_RETRY_DELAY)
+        self.connection_timeout = kwargs.get("connection_timeout", settings.OLLAMA_DEFAULT_CONNECTION_TIMEOUT)
 
         self.logger = logging.getLogger(__name__)
         self.logger.info(f"Initialized Ollama client with model {hf_repo} at {self.api_base_url}")
@@ -575,7 +575,7 @@ class OllamaClient:
         think: Optional[bool] = None
     ) -> Union[str, AsyncGenerator[str, None]]:
         options = {
-            "num_ctx": num_ctx or settings.OLLAMA_NUM_CTX,
+            "num_ctx": num_ctx or self.num_ctx,
             "temperature": temperature or self.temperature,
             "top_p": top_p or self.top_p,
             "top_k": top_k or self.top_k,
@@ -799,10 +799,6 @@ class OllamaClient:
             options["min_p"] = min_p
         if seed:
             options["seed"] = seed
-        if keep_alive:
-            options["keep_alive"] = keep_alive
-        if think:
-            options["think"] = think
             
         if max_tokens or max_completion_tokens:
             options["num_predict"] = max_tokens if max_tokens else max_completion_tokens
@@ -883,6 +879,12 @@ class OllamaClient:
 
         last_error = None
         last_response = None
+                
+        if keep_alive:
+            generate_payload["keep_alive"] = keep_alive
+        
+        if think is not None:
+            generate_payload["think"] = think
 
         for attempt in range(self.max_retries):
             response = None
@@ -925,7 +927,7 @@ class OllamaClient:
                 return {"error": error_msg}
 
         if response_data:
-            content = response_data.get("message", {}).get("content", "") or response_data.get("response", "")
+            content = response_data.get("message").get("content") or response_data.get("response")
             content = content.strip()
 
             structured_data = None
