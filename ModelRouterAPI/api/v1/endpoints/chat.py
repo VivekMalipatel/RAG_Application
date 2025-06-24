@@ -25,7 +25,22 @@ from config import settings
 
 router = APIRouter()
 
-def count_tokens(text: str, model: str = "gpt-4o") -> int:
+def count_tokens(text: Union[str, List[dict]], model: str = "gpt-4o") -> int:
+    if isinstance(text, list):
+        if not text:
+            return 0
+        text_content = ""
+        for item in text:
+            if isinstance(item, dict) and "text" in item:
+                text_content += item["text"]
+        text = text_content
+    
+    if not isinstance(text, str):
+        text = str(text)
+    
+    if not text:
+        return 0
+    
     try:
         encoding = tiktoken.encoding_for_model(model)
         return len(encoding.encode(text))
@@ -85,7 +100,7 @@ async def create_chat_completion(
     system_fingerprint = f"fp_{uuid.uuid4().hex[:10]}"
     
     try:
-        prompt_tokens = sum(count_tokens(msg.content or "", request.model) for msg in request.messages)
+        prompt_tokens = sum(count_tokens(msg.content or [], request.model) for msg in request.messages)
         
         max_tokens = request.max_tokens
         
@@ -459,7 +474,7 @@ async def generate_chat_stream(
     created_time = int(time.time())
     system_fingerprint = f"fp_{uuid.uuid4().hex[:10]}"
     
-    prompt_tokens = sum(count_tokens(msg.content or "", request.model) for msg in request.messages)
+    prompt_tokens = sum(count_tokens(msg.content or [], request.model) for msg in request.messages)
     accumulated_text = ""
     
     try:
