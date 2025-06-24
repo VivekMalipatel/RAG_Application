@@ -25,4 +25,7 @@ class Settings:
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
     AWS_REGION: str = os.getenv("AWS_REGION")
 
+    AUTO_BACKUP_INTERVAL_MINUTES: int = int(os.getenv("AUTO_BACKUP_INTERVAL_MINUTES", "30"))
+    S3_BACKUP_PREFIX: str = os.getenv("S3_BACKUP_PREFIX", "IndexerAPI/")
+
 settings = Settings()

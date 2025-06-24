@@ -7,10 +7,13 @@ from contextlib import asynccontextmanager
 
 from app.config import settings
 from app.api.routes import ingest, status, vector
+from app.api.routes.scraper import router as scraper_router
+from app.api.routes.backup import router as backup_router
 from app.db.database import init_db, get_db
 from app.services.queue_consumer import QueueConsumer
 from app.core.model.model_handler import ModelHandler
 from app.services.vector_store import VectorStore
+from app.services.database_persistence import DatabasePersistence
 from app.processors import register_processors
 
 logging.basicConfig(
@@ -21,6 +24,10 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
+    db_persistence = DatabasePersistence()
+    logging.info("Checking for database backup in S3...")
+    await db_persistence.restore_from_s3()
+    
     logging.info("Initializing database...")
     await init_db()
     logging.info("Database initialized successfully")
@@ -28,7 +35,9 @@ async def lifespan(app: FastAPI):
     db_session = await anext(get_db())
     model_handler = ModelHandler()
     vector_store = VectorStore()
-    vector_store.load()
+    
+    logging.info("Loading vector store from local storage or S3...")
+    await vector_store._load_async()
     
     queue_consumer = QueueConsumer(db_session, model_handler, vector_store)
     
@@ -37,11 +46,19 @@ async def lifespan(app: FastAPI):
     app.state.queue_consumer = queue_consumer
     app.state.model_handler = model_handler
     app.state.vector_store = vector_store
+    app.state.db_persistence = db_persistence
     
     process_task = asyncio.create_task(queue_consumer.start_processing())
-    logging.info("Queue consumer started successfully")
+    backup_task = asyncio.create_task(db_persistence.schedule_periodic_backup(settings.AUTO_BACKUP_INTERVAL_MINUTES))
+    logging.info("Queue consumer and database backup scheduler started successfully")
     
     yield
+    
+    if hasattr(app.state, "vector_store"):
+        await app.state.vector_store.shutdown()
+    
+    if hasattr(app.state, "db_persistence"):
+        await app.state.db_persistence.backup_to_s3()
     
     if hasattr(app.state, "queue_consumer"):
         app.state.queue_consumer.stop_processing()
@@ -49,13 +66,15 @@ async def lifespan(app: FastAPI):
 
     try:
         process_task.cancel()
+        backup_task.cancel()
         await asyncio.wait_for(process_task, timeout=5.0)
+        await asyncio.wait_for(backup_task, timeout=2.0)
     except asyncio.CancelledError:
-        logging.info("Queue processing task was cancelled during shutdown")
+        logging.info("Background tasks were cancelled during shutdown")
     except asyncio.TimeoutError:
-        logging.warning("Queue processing task didn't terminate within timeout")
+        logging.warning("Background tasks didn't terminate within timeout")
     except Exception as e:
-        logging.error(f"Error waiting for queue processing task: {str(e)}")
+        logging.error(f"Error waiting for background tasks: {str(e)}")
 
 app = FastAPI(
     title=settings.API_TITLE,
@@ -75,6 +94,8 @@ app.add_middleware(
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
 app.include_router(status.router, tags=["status"])
 app.include_router(vector.router, prefix="/vector", tags=["vector"])
+app.include_router(scraper_router, prefix="/scraper", tags=["scraper"])
+app.include_router(backup_router, prefix="/backup", tags=["backup"])
 
 @app.get("/health")
 def health_check():

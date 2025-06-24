@@ -125,3 +125,76 @@ class S3Handler:
         if 'Contents' in response:
             objects = [obj['Key'] for obj in response['Contents']]
         return objects
+
+    async def upload_file(self, local_file_path, object_key):
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            with open(local_file_path, 'rb') as file:
+                data = file.read()
+            
+            async with await self._get_s3_client() as client:
+                await client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    Body=data
+                )
+            logger.info(f"Successfully uploaded file {local_file_path} to {object_key}")
+            return True
+        except Exception as e:
+            logger.error(f"Error uploading file {local_file_path} to {object_key}: {str(e)}")
+            return False
+    
+    async def download_file(self, object_key, local_file_path):
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            async with await self._get_s3_client() as client:
+                response = await client.get_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key
+                )
+                async with response['Body'] as stream:
+                    data = await stream.read()
+            
+            os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+            with open(local_file_path, 'wb') as file:
+                file.write(data)
+            
+            logger.info(f"Successfully downloaded {object_key} to {local_file_path}")
+            return True
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            if error_code == 'NoSuchKey':
+                logger.info(f"Object {object_key} does not exist in S3")
+                return False
+            else:
+                logger.error(f"Error downloading {object_key} to {local_file_path}: {str(e)}")
+                return False
+        except Exception as e:
+            logger.error(f"Error downloading {object_key} to {local_file_path}: {str(e)}")
+            return False
+    
+    async def object_exists(self, object_key):
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            async with await self._get_s3_client() as client:
+                await client.head_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key
+                )
+            return True
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code')
+            if error_code == '404':
+                return False
+            else:
+                logger.error(f"Error checking if {object_key} exists: {str(e)}")
+                return False
+        except Exception as e:
+            logger.error(f"Error checking if {object_key} exists: {str(e)}")
+            return False

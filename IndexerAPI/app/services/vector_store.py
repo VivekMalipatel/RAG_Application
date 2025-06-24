@@ -4,7 +4,10 @@ import faiss
 import pickle
 import logging
 import time
+import asyncio
 from typing import List, Dict, Any
+from app.core.storage.s3_handler import S3Handler
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +22,8 @@ class VectorStore:
         self.doc_to_vectors: Dict[str, Dict] = {}
         self.id_to_doc: Dict[int, str] = {}
         self.next_id = 0
+        self.s3_handler = S3Handler()
+        self.s3_prefix = f"{settings.S3_BACKUP_PREFIX}faiss_indexes/"
         os.makedirs(self.index_dir, exist_ok=True)
         logger.info(f"VectorStore initialized: dim={embedding_dim}, ivf={use_ivf}, pq={use_pq}, gpu={use_gpu}")
         self.warmup_samples: List[np.ndarray] = []
@@ -91,6 +96,10 @@ class VectorStore:
         }
         self.next_id += count
         logger.info(f"Added document {doc_id} with {count} vectors")
+        
+        if self.index.ntotal % 100 == 0:
+            asyncio.create_task(self._save_to_s3())
+        
         if self.use_ivf and self.should_rebuild():
             logger.info("Re-training IVF quantizer due to high churn")
             self.rebuild_index(use_gpu=self.use_gpu)
@@ -133,27 +142,104 @@ class VectorStore:
             return False
         os.makedirs(self.index_dir, exist_ok=True)
         idx = faiss.index_gpu_to_cpu(self.index) if self.use_gpu else self.index
-        faiss.write_index(idx, os.path.join(self.index_dir, 'faiss.index'))
-        with open(os.path.join(self.index_dir, 'mapping.pkl'), 'wb') as f:
-            pickle.dump({'doc_to_vectors': self.doc_to_vectors, 'id_to_doc': self.id_to_doc}, f)
-        logger.info(f"Saved index with {idx.ntotal} vectors")
-        return True
-
-    def load(self) -> bool:
+        
         idx_path = os.path.join(self.index_dir, 'faiss.index')
         map_path = os.path.join(self.index_dir, 'mapping.pkl')
-        if not os.path.exists(idx_path) or not os.path.exists(map_path):
-            logger.info("No saved index; initializing new one")
-            self.initialize_index()
-            return True
-        self.index = faiss.read_index(idx_path)
-        with open(map_path, 'rb') as f:
-            mapping = pickle.load(f)
-            self.doc_to_vectors = mapping.get('doc_to_vectors', {})
-            self.id_to_doc = mapping.get('id_to_doc', {})
-        self.next_id = max(self.id_to_doc.keys(), default=-1) + 1
-        logger.info(f"Loaded index with {self.index.ntotal} vectors")
+        
+        faiss.write_index(idx, idx_path)
+        with open(map_path, 'wb') as f:
+            pickle.dump({'doc_to_vectors': self.doc_to_vectors, 'id_to_doc': self.id_to_doc}, f)
+        
+        logger.info(f"Saved index with {idx.ntotal} vectors to local storage")
+        
+        asyncio.create_task(self._save_to_s3())
+        
         return True
+
+    async def _save_to_s3(self):
+        try:
+            idx_path = os.path.join(self.index_dir, 'faiss.index')
+            map_path = os.path.join(self.index_dir, 'mapping.pkl')
+            
+            if os.path.exists(idx_path):
+                await self.s3_handler.upload_file(idx_path, f"{self.s3_prefix}faiss.index")
+            
+            if os.path.exists(map_path):
+                await self.s3_handler.upload_file(map_path, f"{self.s3_prefix}mapping.pkl")
+            
+            logger.info("Successfully synced FAISS index to S3")
+            
+        except Exception as e:
+            logger.error(f"Error syncing FAISS index to S3: {str(e)}")
+
+    def load(self) -> bool:
+        return asyncio.run(self._load_async())
+
+    async def _load_async(self) -> bool:
+        idx_path = os.path.join(self.index_dir, 'faiss.index')
+        map_path = os.path.join(self.index_dir, 'mapping.pkl')
+        
+        local_exists = os.path.exists(idx_path) and os.path.exists(map_path)
+        
+        if not local_exists:
+            logger.info("No local index found, checking S3...")
+            s3_loaded = await self._load_from_s3()
+            if not s3_loaded:
+                logger.info("No saved index in S3; initializing new one")
+                self.initialize_index()
+                return True
+        
+        if os.path.exists(idx_path) and os.path.exists(map_path):
+            try:
+                self.index = faiss.read_index(idx_path)
+                with open(map_path, 'rb') as f:
+                    mapping = pickle.load(f)
+                    self.doc_to_vectors = mapping.get('doc_to_vectors', {})
+                    self.id_to_doc = mapping.get('id_to_doc', {})
+                self.next_id = max(self.id_to_doc.keys(), default=-1) + 1
+                logger.info(f"Loaded index with {self.index.ntotal} vectors from local storage")
+                return True
+            except Exception as e:
+                logger.error(f"Error loading index from local storage: {str(e)}")
+                logger.info("Attempting to load from S3...")
+                return await self._load_from_s3()
+        
+        return False
+
+    async def _load_from_s3(self) -> bool:
+        try:
+            idx_s3_key = f"{self.s3_prefix}faiss.index"
+            map_s3_key = f"{self.s3_prefix}mapping.pkl"
+            
+            idx_exists = await self.s3_handler.object_exists(idx_s3_key)
+            map_exists = await self.s3_handler.object_exists(map_s3_key)
+            
+            if not (idx_exists and map_exists):
+                logger.info("FAISS index files not found in S3")
+                return False
+            
+            idx_path = os.path.join(self.index_dir, 'faiss.index')
+            map_path = os.path.join(self.index_dir, 'mapping.pkl')
+            
+            idx_downloaded = await self.s3_handler.download_file(idx_s3_key, idx_path)
+            map_downloaded = await self.s3_handler.download_file(map_s3_key, map_path)
+            
+            if idx_downloaded and map_downloaded:
+                self.index = faiss.read_index(idx_path)
+                with open(map_path, 'rb') as f:
+                    mapping = pickle.load(f)
+                    self.doc_to_vectors = mapping.get('doc_to_vectors', {})
+                    self.id_to_doc = mapping.get('id_to_doc', {})
+                self.next_id = max(self.id_to_doc.keys(), default=-1) + 1
+                logger.info(f"Loaded index with {self.index.ntotal} vectors from S3")
+                return True
+            else:
+                logger.error("Failed to download FAISS index files from S3")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error loading FAISS index from S3: {str(e)}")
+            return False
 
     def get_stats(self):
         if self.index is None:
@@ -241,66 +327,8 @@ class VectorStore:
         deleted = total - active
         return (deleted / total) >= threshold
 
-#TODO: HNSW Removal Limitations
-# python
-# def remove_document(self, doc_id: str) -> bool:
-#     ...
-#     self.index.remove_ids(np.array(ids_to_remove, dtype='int64'))
-# While functional, HNSW+IDMap removal leaves "holes" in graph structure
-# For high-churn systems, consider periodic index rebuilds
-
-#TODO :GPU-Persistence Edge Case
-# python
-# idx_to_save = faiss.index_gpu_to_cpu(self.index) if hasattr(self.index, 'getDevice') else self.index
-# Needs validation for multi-GPU sharded indices
-# Test with faiss.StandardGpuResources.setTempMemory(...) for large datasets
-
-#TODO: ID Mapping Corruption
-# Scenario: Partial index load after failed save
-# Detection:
-# python
-# if os.path.exists(id_map_path):
-#     # Load proper mapping
-# else:
-#     # Rebuild from document metadata
-
-#TODO:GPU-CPU Compatibility
-# Solution:
-# python
-# idx_to_save = faiss.index_gpu_to_cpu(self.index)  # Before serialization
-
-#TODO:Sparse ID Handling
-# Approach:
-# python
-# self.next_id = max(self.id_to_doc.keys(), default=-1) + 1
-
-#TODO:Optimization Guidelines
-# Batch Size Tuning:
-# Add Documents: 1,000-10,000 vectors/batch
-# Search: 100-500 queries/batch
-# Memory Configuration:
-# python
-# # For GPU indices
-# faiss.StandardGpuResources.setTempMemory(1024*1024*1024)  # 1GB
-# Recall/Speed Tradeoff:
-# python
-# self.index.index.hnsw.efSearch = 256  # 64-512 range
-# This implementation provides production-grade vector search capabilities for multi-modal embeddings while maintaining flexibility for both small-scale and large-scale deployments.
-
-#TODO:Failure Recovery
-# 1. Crash Consistency
-# Write-Ahead Logging: Optional addition for atomic operations
-
-# Checksum Verification: MD5 hashes of index segments
-
-# Partial Load Handling: Graceful degradation for corrupt files
-
-# 2. Distributed Deployment
-# Sharding Strategy:
-
-# python
-# co = faiss.GpuClonerOptions()
-# co.shard = True
-# Consistent Hashing: Automatic query routing to shards
-
-# Replication: 3x replication factor for fault tolerance
+    async def shutdown(self):
+        logger.info("Shutting down VectorStore and syncing to S3...")
+        self.save()
+        await self._save_to_s3()
+        logger.info("VectorStore shutdown complete")
