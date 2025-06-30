@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
     API_KEY_HEADER: str = os.getenv("API_KEYS", "test-key")
     BEARER_TOKEN_HEADER: str = os.getenv("BEARER_TOKEN_HEADER", "Authorization")
-    API_KEYS: List[str] = json.loads(os.getenv("API_KEYS", '["test-key"]'))
+    API_KEYS: List[str] = json.loads(os.getenv("API_KEYS", '["517A3469-F71E-462C-B903-32ABDEEEE164"]'))
     USE_BEARER_TOKEN: bool = os.getenv("USE_BEARER_TOKEN", "True").lower() in ("true", "1", "yes")
     
     DATABASE_URL: str = "sqlite:///./modelrouter.db"
