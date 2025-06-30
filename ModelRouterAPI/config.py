@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     USE_BEARER_TOKEN: bool = os.getenv("USE_BEARER_TOKEN", "True").lower() in ("true", "1", "yes")
     
     DATABASE_URL: str = "sqlite:///./modelrouter.db"
-    
+    print(f"Api Keys: {API_KEYS}")
+    print(f"Api Keys header: {API_KEY_HEADER}")
     HUGGINGFACE_API_TOKEN: Optional[str] = None
     
     OLLAMA_BASE_URL: str = "http://localhost:11434"
