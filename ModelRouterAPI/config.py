@@ -16,11 +16,11 @@ class Settings(BaseSettings):
     API_V1_STR: str = os.getenv("API_V1_STR", "/v1")
     PROJECT_NAME: str = os.getenv("PROJECT_NAME", "ModelRouter API")
     
-    SECRET_KEY: str = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
-    API_KEY_HEADER: str = os.getenv("API_KEYS", "test-key")
-    BEARER_TOKEN_HEADER: str = os.getenv("BEARER_TOKEN_HEADER", "Authorization")
-    API_KEYS: List[str] = json.loads(os.getenv("API_KEYS", '["test-key"]'))
-    USE_BEARER_TOKEN: bool = os.getenv("USE_BEARER_TOKEN", "True").lower() in ("true", "1", "yes")
+    SECRET_KEY: str = secrets.token_urlsafe(32)
+    API_KEY_HEADER: str = "X-Api-Key"
+    BEARER_TOKEN_HEADER: str = "Authorization"
+    API_KEYS: List[str] = []
+    USE_BEARER_TOKEN: bool = True
     
     DATABASE_URL: str = "sqlite:///./modelrouter.db"
     print(f"Api Keys: {API_KEYS}")
@@ -71,20 +71,38 @@ class Settings(BaseSettings):
     CHAT_DEFAULT_OBJECT_COMPLETION: str = "chat.completion"
     CHAT_DEFAULT_OBJECT_CHUNK: str = "chat.completion.chunk"
 
-    TEXT_GENERATION_MODELS: List[str] = ["gpt-4o-mini","gpt-4o","qwen2.5-vl-72b-instruct","deepseek-chat","deepseek-reasoner","qwen2.5:7b-instruct-q8_0","qwen2.5vl:3b-q4_K_M","qwen2.5vl:7b-q8_0","qwen3:8b-q8_0","gemma3:12b-it-q8_0"]
-    TEXT_EMBEDDING_MODELS: List[str] = ["nomic-ai/nomic-embed-multimodal-3b"]
-    IMAGE_EMBEDDING_MODELS: List[str] = ["nomic-ai/nomic-embed-multimodal-3b"]
-    RERANKER_MODELS: List[str] = ["jinaai/jina-colbert-v2"]
-    
-    HUGGINGFACE_MODELS: List[str] = ["nomic-ai/nomic-embed-multimodal-3b", "jinaai/jina-colbert-v2"]
-    OLLAMA_MODELS: List[str] = ["qwen2.5:7b-instruct-q8_0","qwen2.5vl:3b-q4_K_M","qwen2.5vl:7b-q8_0","qwen3:8b-q8_0","gemma3:12b-it-q8_0"]
-    
-    OPENAI_ORGS: List[str] = ["OPENAI", "DEEPSEEK", "QWEN"]
+    TEXT_GENERATION_MODELS: List[str] = []
+    TEXT_EMBEDDING_MODELS: List[str] = []
+    IMAGE_EMBEDDING_MODELS: List[str] = []
+    RERANKER_MODELS: List[str] = []
+    HUGGINGFACE_MODELS: List[str] = []
+    OLLAMA_MODELS: List[str] = []
+    OPENAI_ORGS: List[str] = []
 
     openai_compatible_providers: Dict[str, Dict[str, Union[str, List[str]]]] = {}
 
     @model_validator(mode='after')
     def load_openai_compatible_providers(self):
+        def load_list_env(var_name, default=None):
+            val = os.getenv(var_name)
+            if val:
+                try:
+                    parsed = json.loads(val)
+                    if isinstance(parsed, list):
+                        return parsed
+                except json.JSONDecodeError:
+                    raise ValueError(f"Invalid JSON format for {var_name}: {val}")
+            return default if default is not None else []
+
+        self.API_KEYS = load_list_env('API_KEYS', ["test-key"])
+        self.TEXT_GENERATION_MODELS = load_list_env('TEXT_GENERATION_MODELS')
+        self.TEXT_EMBEDDING_MODELS = load_list_env('TEXT_EMBEDDING_MODELS')
+        self.IMAGE_EMBEDDING_MODELS = load_list_env('IMAGE_EMBEDDING_MODELS')
+        self.RERANKER_MODELS = load_list_env('RERANKER_MODELS')
+        self.HUGGINGFACE_MODELS = load_list_env('HUGGINGFACE_MODELS')
+        self.OLLAMA_MODELS = load_list_env('OLLAMA_MODELS')
+        self.OPENAI_ORGS = load_list_env('OPENAI_ORGS', ["OPENAI", "DEEPSEEK", "QWEN"])
+
         providers = {}
         
         for provider_name in self.OPENAI_ORGS:
