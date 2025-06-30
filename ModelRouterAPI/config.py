@@ -23,12 +23,9 @@ class Settings(BaseSettings):
     USE_BEARER_TOKEN: bool = True
     
     DATABASE_URL: str = "sqlite:///./modelrouter.db"
-    print(f"Api Keys: {API_KEYS}")
-    print(f"Api Keys header: {API_KEY_HEADER}")
     HUGGINGFACE_API_TOKEN: Optional[str] = None
     
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_NUM_CTX: int = 8096
 
     OPENAI_DEFAULT_SYSTEM_PROMPT: Optional[str] = "You are a helpful AI assistant."
     OPENAI_DEFAULT_TEMPERATURE: float = 0.7
