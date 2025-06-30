@@ -13,14 +13,14 @@ logging.basicConfig(
 )
 
 class Settings(BaseSettings):
-    API_V1_STR: str = "/v1"
-    PROJECT_NAME: str = "ModelRouter API"
+    API_V1_STR: str = os.getenv("API_V1_STR", "/v1")
+    PROJECT_NAME: str = os.getenv("PROJECT_NAME", "ModelRouter API")
     
-    SECRET_KEY: str = secrets.token_urlsafe(32)
-    API_KEY_HEADER: str = "X-Api-Key"
-    BEARER_TOKEN_HEADER: str = "Authorization"
-    API_KEYS: List[str] = ["test-key"]
-    USE_BEARER_TOKEN: bool = True
+    SECRET_KEY: str = os.getenv("SECRET_KEY", secrets.token_urlsafe(32))
+    API_KEY_HEADER: str = os.getenv("API_KEY_HEADER", "test-key")
+    BEARER_TOKEN_HEADER: str = os.getenv("BEARER_TOKEN_HEADER", "Authorization")
+    API_KEYS: List[str] = json.loads(os.getenv("API_KEYS", '["test-key"]'))
+    USE_BEARER_TOKEN: bool = os.getenv("USE_BEARER_TOKEN", "True").lower() in ("true", "1", "yes")
     
     DATABASE_URL: str = "sqlite:///./modelrouter.db"
     
