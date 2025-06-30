@@ -29,6 +29,7 @@ services:
       - IMAGE_EMBEDDING_MODELS=${IMAGE_EMBEDDING_MODELS:-}
       - RERANKER_MODELS=${RERANKER_MODELS:-}
       - OLLAMA_DEFAULT_NUM_CTX=${OLLAMA_DEFAULT_NUM_CTX:-}
+      - API_KEYS=${API_KEYS:-["test-key"]}
     gpus: all
     # deploy:
     #   resources:
