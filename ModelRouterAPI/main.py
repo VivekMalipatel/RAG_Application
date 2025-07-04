@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import asyncio
 
 from api.v1.router import api_router
+from api.v2.router import api_router as api_router_v2
 from db.init_db import init_db
 from huggingface.model_cache import ModelCache
 
@@ -59,6 +60,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 app.include_router(api_router, prefix="/v1")
+app.include_router(api_router_v2, prefix="/v2")
 
 def custom_openapi():
     if app.openapi_schema:

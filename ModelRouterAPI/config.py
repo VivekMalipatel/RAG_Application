@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = secrets.token_urlsafe(32)
     API_KEY_HEADER: str = "X-Api-Key"
     BEARER_TOKEN_HEADER: str = "Authorization"
-    API_KEYS: List[str] = ["test-key"]
+    API_KEYS: List[str] = []
     USE_BEARER_TOKEN: bool = True
     
     DATABASE_URL: str = "sqlite:///./modelrouter.db"

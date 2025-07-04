@@ -416,6 +416,96 @@ class OpenAIClient:
             self.logger.error(f"Error with OpenAI API: {str(e)}")
             return {"error": str(e)}
 
+    async def embed_text(
+        self,
+        input_text: Union[str, List[str]],
+        model: Optional[str] = None,
+        dimensions: Optional[int] = None,
+        encoding_format: str = "float",
+        user: Optional[str] = None,
+        **kwargs: Any
+    ) -> Dict[str, Any]:
+        try:
+            params = {
+                "model": model or self.model_name,
+                "input": input_text,
+                "encoding_format": encoding_format
+            }
+            
+            if dimensions:
+                params["dimensions"] = dimensions
+                
+            if user:
+                params["user"] = user
+            
+            response = await self.client.embeddings.create(**params)
+            
+            return {
+                "object": response.object,
+                "data": [
+                    {
+                        "object": item.object,
+                        "embedding": item.embedding,
+                        "index": item.index
+                    }
+                    for item in response.data
+                ],
+                "model": response.model,
+                "usage": {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error with OpenAI embedding API: {str(e)}")
+            return {"error": str(e)}
+
+    async def embed_image(
+        self,
+        input_data: Union[str, List[str], List[Dict[str, Any]]],
+        model: Optional[str] = None,
+        dimensions: Optional[int] = None,
+        encoding_format: str = "float",
+        user: Optional[str] = None,
+        **kwargs: Any
+    ) -> Dict[str, Any]:
+        try:
+            params = {
+                "model": model or self.model_name,
+                "input": input_data,
+                "encoding_format": encoding_format
+            }
+            
+            if dimensions:
+                params["dimensions"] = dimensions
+                
+            if user:
+                params["user"] = user
+            
+            response = await self.client.embeddings.create(**params)
+            
+            return {
+                "object": response.object,
+                "data": [
+                    {
+                        "object": item.object,
+                        "embedding": item.embedding,
+                        "index": item.index
+                    }
+                    for item in response.data
+                ],
+                "model": response.model,
+                "usage": {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error with OpenAI embedding API: {str(e)}")
+            return {"error": str(e)}
+
     def is_model_available(self) -> bool:
         nest_asyncio.apply()
         

@@ -231,22 +231,32 @@ class ModelRouter:
             self.logger.error(f"Error generating text with {self.provider.value}: {str(e)}")
             raise
 
-    async def embed_text(self, texts: List[str]) -> List[List[float]]:
+    async def embed_text(self, texts: List[str]) -> Tuple[List[List[float]], Dict[str, Any]]:
         if not hasattr(self.client, "embed_text"):
             raise UnsupportedFeatureError(f"Provider {self.provider} does not support text embedding")
             
         try:
-            return await self.client.embed_text(texts)
+            response = await self.client.embed_text(input_text=texts)
+            if "error" in response:
+                raise Exception(response["error"])
+            embeddings = [item["embedding"] for item in response["data"]]
+            usage = response.get("usage", {})
+            return embeddings, usage
         except Exception as e:
             self.logger.error(f"Error generating embeddings with {self.provider.value}: {str(e)}")
             raise
     
-    async def embed_image(self, image: List[dict]) -> List[List[float]]:
+    async def embed_image(self, image: List[dict]) -> Tuple[List[List[float]], Dict[str, Any]]:
         if not hasattr(self.client, "embed_image"):
             raise UnsupportedFeatureError(f"Provider {self.provider} does not support image embedding")
             
         try:
-            return await self.client.embed_image(image)
+            response = await self.client.embed_image(input_data=image)
+            if "error" in response:
+                raise Exception(response["error"])
+            embeddings = [item["embedding"] for item in response["data"]]
+            usage = response.get("usage", {})
+            return embeddings, usage
         except Exception as e:
             self.logger.error(f"Error generating image embeddings with {self.provider.value}: {str(e)}")
             raise

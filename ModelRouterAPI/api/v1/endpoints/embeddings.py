@@ -76,7 +76,7 @@ async def create_embeddings(
                         "model_not_found",
                         404
                     )
-                embeddings = await model_router.embed_image(image=input_texts)
+                embeddings, usage = await model_router.embed_image(image=input_texts)
             else:
                 try:
                     model_router = await ModelRouter.initialize_from_model_name(
@@ -89,7 +89,7 @@ async def create_embeddings(
                         "model_not_found",
                         404
                     )
-                embeddings = await model_router.embed_text(texts=input_texts)
+                embeddings, usage = await model_router.embed_text(texts=input_texts)
         except Exception as e:
             return create_error_response(
                 f"Error generating embeddings: {str(e)}",
@@ -112,9 +112,9 @@ async def create_embeddings(
                 ]
         
         if is_image_input:
-            prompt_tokens = len(input_texts) * 100 
+            prompt_tokens = usage.get("prompt_tokens", len(input_texts) * 100)
         else:
-            prompt_tokens = sum(len(text.split()) for text in input_texts)
+            prompt_tokens = usage.get("prompt_tokens", sum(len(text.split()) for text in input_texts))
         
         embedding_data = [
             EmbeddingData(embedding=embedding, index=i, object="embedding")
