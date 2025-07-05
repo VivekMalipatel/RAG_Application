@@ -7,10 +7,6 @@ class Config:
     OPENAI_API_KEY: str = "sk-372c69b72fb14a90a2e1b0b17884d9b4"
     MODEL_PROVIDER: str = "openai"
     
-    IMAGE_DESCRIPTION_PROMPT: str = "Provide an extremely detailed description of this image. Include every visible text, object, person, color, layout, and any other visual elements without missing any detail."
-    
     MEDIA_DESCRIPTION_PROMPT: str = "Provide an extremely detailed description of this media content. Include every visible/audible element, text, object, person, color, layout, sounds, speech, and any other relevant details without missing anything."
-    
-    DEFAULT_TOOL_STATUS: str = "success"
 
 config = Config()
