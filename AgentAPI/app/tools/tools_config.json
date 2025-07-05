@@ -1,0 +1,12 @@
+{
+  "tools": {
+    "web_search": {
+      "module": "app.tools.web_tools",
+      "class": "WebSearchTool"
+    },
+    "web_scraping": {
+      "module": "app.tools.web_tools", 
+      "class": "WebScrapingTool"
+    }
+  }
+}

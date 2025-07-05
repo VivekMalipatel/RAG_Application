@@ -1,8 +1,7 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
 pydantic-settings
-sqlalchemy
 openai
 python-dotenv
 python-multipart
@@ -10,4 +9,7 @@ tenacity
 langgraph
 langchain_core
 langchain_openai
+langchain_tavily
 langgraph-sdk
+typing-extensions
+requests
