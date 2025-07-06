@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  agentapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentapp
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount logs directory for persistent logging
+      - ./logs:/app/logs
+      # Mount source code for development (comment out for production)
+      - .:/app
+    restart: unless-stopped
+    # Override default command if you want to run as a web service
+    # command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    
+    # For running the semantic store demo
+    command: ["python", "pretests/semantic_store_langgraph.py"]
