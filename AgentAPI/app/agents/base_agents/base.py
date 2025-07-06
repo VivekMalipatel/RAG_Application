@@ -189,12 +189,13 @@ class BaseAgent:
 if __name__ == "__main__":
     async def test_base_agent():
 
+        checkpointer = MemorySaver()
         test_agent = BaseAgent(
             config={"configurable": {"thread_id": "test_thread"}}
         )
 
         test_agent.compile(
-            checkpointer=MemorySaver(),
+            checkpointer=checkpointer,
             store=None,
             interrupt_before=None,
             interrupt_after=None,
@@ -204,7 +205,40 @@ if __name__ == "__main__":
         
         output_lines = []
         
+        def capture_checkpoints(round_name):
+            output_lines.append(f"\n=== CHECKPOINTS AFTER {round_name} ===")
+            checkpoints = list(checkpointer.list({"configurable": {"thread_id": "test_thread"}}))
+            output_lines.append(f"Total checkpoints: {len(checkpoints)}")
+            
+            for i, checkpoint_tuple in enumerate(checkpoints):
+                output_lines.append(f"\n--- Checkpoint {i+1} ---")
+                output_lines.append(f"Checkpoint ID: {checkpoint_tuple.checkpoint['id']}")
+                output_lines.append(f"Checkpoint TS: {checkpoint_tuple.checkpoint['ts']}")
+                output_lines.append(f"Config: {checkpoint_tuple.config}")
+                output_lines.append(f"Parent Config: {checkpoint_tuple.parent_config}")
+                output_lines.append(f"Pending Writes: {checkpoint_tuple.pending_writes}")
+                
+                if 'channel_values' in checkpoint_tuple.checkpoint:
+                    output_lines.append("Channel Values:")
+                    for key, value in checkpoint_tuple.checkpoint['channel_values'].items():
+                        if key == 'messages':
+                            output_lines.append(f"  {key}: {len(value)} messages")
+                            for j, msg in enumerate(value):
+                                msg_type = type(msg).__name__
+                                content_preview = str(msg.content)[:100] + "..." if len(str(msg.content)) > 100 else str(msg.content)
+                                output_lines.append(f"    Message {j+1} ({msg_type}): {content_preview}")
+                        else:
+                            output_lines.append(f"  {key}: {value}")
+                
+                if hasattr(checkpoint_tuple.checkpoint, 'channel_versions'):
+                    output_lines.append(f"Channel Versions: {checkpoint_tuple.checkpoint.get('channel_versions', {})}")
+                
+                if hasattr(checkpoint_tuple.checkpoint, 'versions_seen'):
+                    output_lines.append(f"Versions Seen: {checkpoint_tuple.checkpoint.get('versions_seen', {})}")
+        
         output_lines.append("=== Multi-round Image Conversation ===")
+        
+        capture_checkpoints("INITIAL")
         
         try:
             output_lines.append("\n--- Round 1: Initial image question ---")
@@ -218,11 +252,15 @@ if __name__ == "__main__":
                 print(event)
                 output_lines.append(f"Event: {event}")
             
+            capture_checkpoints("ROUND 1")
+            
             output_lines.append("\n--- Round 2: Follow-up about colors ---")
             round2_messages = [HumanMessage(content="Can you describe the colors in more detail?")]
             async for event in test_agent.astream_events(round2_messages):
                 print(event)
                 output_lines.append(f"Event: {event}")
+            
+            capture_checkpoints("ROUND 2")
             
             output_lines.append("\n--- Round 3: Activities question ---")
             round3_messages = [HumanMessage(content="What kind of activities could someone do in this location?")]
@@ -230,11 +268,15 @@ if __name__ == "__main__":
                 print(event)
                 output_lines.append(f"Event: {event}")
             
+            capture_checkpoints("ROUND 3")
+            
             output_lines.append("\n--- Round 4: Photography question ---")
             round4_messages = [HumanMessage(content="Is this a good place for photography? Why?")]
             async for event in test_agent.astream_events(round4_messages):
                 print(event)
                 output_lines.append(f"Event: {event}")
+                
+            capture_checkpoints("ROUND 4")
                 
         except Exception as e:
             output_lines.append(f"Error: {e}")
