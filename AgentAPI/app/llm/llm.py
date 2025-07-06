@@ -25,20 +25,24 @@ class LLM:
         if vlm_kwargs is None:
             vlm_kwargs = {}
             
+        reasoning_llm_filtered_kwargs = {k: v for k, v in reasoningllm_kwargs.items() 
+                                         if k not in ["model", "model_provider", "base_url", "api_key"]}
         reasoning_llm_config = {
-            "model": config.REASONING_LLM_MODEL,
-            "model_provider": config.MODEL_PROVIDER,
-            "base_url": config.OPENAI_BASE_URL,
-            "api_key": config.OPENAI_API_KEY,
-            **reasoningllm_kwargs
+            "model": reasoningllm_kwargs.get("model", config.REASONING_LLM_MODEL),
+            "model_provider": reasoningllm_kwargs.get("model_provider", config.MODEL_PROVIDER),
+            "base_url": reasoningllm_kwargs.get("base_url", config.OPENAI_BASE_URL),
+            "api_key": reasoningllm_kwargs.get("api_key", config.OPENAI_API_KEY),
+            **reasoning_llm_filtered_kwargs
         }
         
+        vlm_filtered_kwargs = {k: v for k, v in vlm_kwargs.items() 
+                              if k not in ["model", "model_provider", "base_url", "api_key"]}
         vlm_config = {
-            "model": config.VLM_MODEL,
-            "model_provider": config.MODEL_PROVIDER,
-            "base_url": config.OPENAI_BASE_URL,
-            "api_key": config.OPENAI_API_KEY,
-            **vlm_kwargs
+            "model": vlm_kwargs.get("model", config.VLM_MODEL),
+            "model_provider": vlm_kwargs.get("model_provider", config.MODEL_PROVIDER),
+            "base_url": vlm_kwargs.get("base_url", config.OPENAI_BASE_URL),
+            "api_key": vlm_kwargs.get("api_key", config.OPENAI_API_KEY),
+            **vlm_filtered_kwargs
         }
 
         self.reasoning_llm: BaseChatModel = init_chat_model(**reasoning_llm_config)
