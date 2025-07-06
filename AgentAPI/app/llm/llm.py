@@ -3,6 +3,7 @@ import typing
 from langchain.chat_models import init_chat_model
 from langchain.chat_models.base import _ConfigurableModel
 from langchain_core.tools import BaseTool
+from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.chat_models import LanguageModelInput
 from langchain_core.messages import HumanMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig, Runnable
@@ -27,7 +28,6 @@ class LLM:
         reasoning_llm_config = {
             "model": config.REASONING_LLM_MODEL,
             "model_provider": config.MODEL_PROVIDER,
-            "configurable_fields": "any",
             "base_url": config.OPENAI_BASE_URL,
             "api_key": config.OPENAI_API_KEY,
             **reasoningllm_kwargs
@@ -36,17 +36,16 @@ class LLM:
         vlm_config = {
             "model": config.VLM_MODEL,
             "model_provider": config.MODEL_PROVIDER,
-            "configurable_fields": "any",
             "base_url": config.OPENAI_BASE_URL,
             "api_key": config.OPENAI_API_KEY,
             **vlm_kwargs
         }
 
-        self.reasoning_llm: _ConfigurableModel = init_chat_model(**reasoning_llm_config)
+        self.reasoning_llm: BaseChatModel = init_chat_model(**reasoning_llm_config)
 
         self.reasoning_llm.with_structured_output
 
-        self.vlm: _ConfigurableModel = init_chat_model(**vlm_config)
+        self.vlm: BaseChatModel = init_chat_model(**vlm_config)
         self.tools = []
         self.logger = logging.getLogger(__name__)
     
@@ -185,16 +184,7 @@ llm = LLM()
 if __name__ == "__main__":
     async def test_llm():
 
-        extra_body={
-            "chat_template_kwargs": {"enable_thinking": True},
-            "separate_reasoning": True
-        }
-
-        reasoningllm_kwargs = {
-            "extra_body": extra_body,
-        }
-
-        test_llm = LLM(reasoningllm_kwargs)
+        test_llm = LLM()
 
         text_messages = [
             HumanMessage(content="Hello, how are you?")
@@ -208,11 +198,14 @@ if __name__ == "__main__":
         ]
         
         output_lines = []
-        
+
+        thinkingkwargs = {"configurable": {"reasoning_effort": "low"}}
+
         output_lines.append("=== Testing astream_events with text messages (all parameters) ===")
         try:
             async for event in test_llm.astream_events(
-                text_messages
+                text_messages,
+                config=thinkingkwargs
             ):
                 event_str = f"Event: {event}"
                 print(event_str)

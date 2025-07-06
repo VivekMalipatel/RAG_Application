@@ -131,22 +131,14 @@ def is_media_block(block: dict, media_types: List[str]) -> bool:
     return False
 
 
-def get_media_prompt(media_type: str) -> str:
-    if media_type == "image":
-        return config.IMAGE_DESCRIPTION_PROMPT
-    else:
-        return config.MEDIA_DESCRIPTION_PROMPT
-
-
 async def get_media_descriptions_batch(vlm: BaseChatModel, media_blocks_info: List[Dict]) -> List[str]:
     logger = logging.getLogger(__name__)
     vlm_tasks = []
     
     for block_info in media_blocks_info:
         block = block_info['block']
-        media_type = block_info['media_type']
         
-        prompt = get_media_prompt(media_type)
+        prompt = config.MEDIA_DESCRIPTION_PROMPT
         vlm_message = HumanMessage(content=[
             {"type": "text", "text": prompt},
             block

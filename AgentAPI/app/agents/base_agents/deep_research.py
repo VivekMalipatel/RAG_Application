@@ -4,7 +4,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 import typing
 from typing import Any, Sequence, Union, Optional, Callable
 from langchain_core.tools import BaseTool
-from agents.base_agents.single_shot import SingleShotAgent
+from agents.base_agents.base import BaseAgent
 from agents.base_states.simple_state import State
 from agents.base_checkpointers.simple_checkpointer import MemorySaver
 from prompts import get_research_prompt
@@ -15,14 +15,14 @@ class DeepResearchAgent:
 
     def __init__(self, prompt=None):
 
-        self.gather_background_knowledge = SingleShotAgent()
-        self.user_intent_analysis = SingleShotAgent()
-        self.human_clarification = SingleShotAgent()
-        self.query_intent_analysis = SingleShotAgent()
-        self.gap_analysis = SingleShotAgent()
-        self.generate_report = SingleShotAgent()
-        self.gaps_to_subquery = SingleShotAgent()
-        self.subquery_processor = SingleShotAgent()
+        self.gather_background_knowledge = BaseAgent()
+        self.user_intent_analysis = BaseAgent()
+        self.human_clarification = BaseAgent()
+        self.query_intent_analysis = BaseAgent()
+        self.gap_analysis = BaseAgent()
+        self.generate_report = BaseAgent()
+        self.gaps_to_subquery = BaseAgent()
+        self.subquery_processor = BaseAgent()
         self.graph_builder = StateGraph(State)
         self.checkpointer = MemorySaver()
         self.compiled_graph : CompiledStateGraph = None
