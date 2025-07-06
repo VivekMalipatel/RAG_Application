@@ -21,8 +21,8 @@ from functools import wraps
 from copy import deepcopy
 
 from llm.llm import LLM
-from agents.base_states.simple_state import State
-from agents.base_checkpointers.simple_checkpointer import MemorySaver
+from agents.base_agents.base_state import BaseState
+from agents.base_agents.base_checkpointer import MemorySaver
 
 import asyncio
 import logging
@@ -117,7 +117,7 @@ class BaseAgent:
         new_agent._name = self._name
         return new_agent
 
-    async def llm_node(self, state: State):
+    async def llm_node(self, state: BaseState):
         messages = state["messages"]
         try:
             response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
@@ -127,7 +127,7 @@ class BaseAgent:
             raise
 
     def _compile_graph(self, has_tools: bool, **compile_kwargs) -> CompiledStateGraph:
-        graph_builder = StateGraph(State)
+        graph_builder = StateGraph(BaseState)
         
         graph_builder.add_node("llm", self.llm_node)
         

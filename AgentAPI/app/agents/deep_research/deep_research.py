@@ -13,9 +13,9 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from dataclasses import dataclass, field
 from functools import wraps
-from agents.base_agents.base import BaseAgent 
-from agents.base_states.simple_state import State
-from agents.base_checkpointers.simple_checkpointer import MemorySaver
+from app.agents.base_agents.base_agent import BaseAgent 
+from app.agents.base_agents.base_state import BaseState
+from app.agents.base_agents.base_checkpointer import MemorySaver
 from prompts import get_research_prompt
 
 
