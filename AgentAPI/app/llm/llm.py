@@ -1,8 +1,7 @@
-from types import CoroutineType
-from typing import List, Dict, Any, Sequence, Literal
+from typing import Any, Sequence, Literal, Union, Optional, Callable
+import typing
 from langchain.chat_models import init_chat_model
 from langchain_core.tools import BaseTool
-from langchain_core.messages import BaseMessage
 from langchain_core.language_models.chat_models import LanguageModelInput
 from config import config
 from llm.utils import (
@@ -21,9 +20,20 @@ class LLM:
         self.tools = []
         self.logger = logging.getLogger(__name__)
         
-    def bind_tools(self, tools: List[BaseTool]):
+    def bind_tools(self,
+        tools: Sequence[
+            Union[typing.Dict[str, Any], type, Callable, BaseTool]
+        ],
+        *,
+        tool_choice: Optional[Union[str]] = None,
+        **kwargs: Any,
+        ):
         self.tools = tools
-        self.reasoning_llm_with_tools = self.reasoning_llm.bind_tools(tools)
+        self.reasoning_llm_with_tools = self.reasoning_llm.bind_tools(
+            tools, 
+            tool_choice=tool_choice, 
+            **kwargs
+        )
         return self
 
     async def ainvoke(self,
@@ -136,7 +146,7 @@ llm = LLM()
 if __name__ == "__main__":
     async def test_llm():
         test_llm = LLM()
-        
+
         text_messages = [
             HumanMessage(content="Hello, how are you?")
         ]
