@@ -1,25 +1,64 @@
-from typing import Any, Sequence, Literal, Union, Optional, Callable
+from typing import Any, Sequence, Literal, Union, Optional, Callable, AsyncIterator
 import typing
 from langchain.chat_models import init_chat_model
+from langchain.chat_models.base import _ConfigurableModel
 from langchain_core.tools import BaseTool
 from langchain_core.language_models.chat_models import LanguageModelInput
+from langchain_core.messages import HumanMessage, BaseMessage
+from langchain_core.runnables import RunnableConfig, Runnable
+from langchain_core.runnables.utils import Output
+from langchain_core.runnables.schema import StreamEvent
+from pydantic import BaseModel
 from config import config
 from llm.utils import (
     has_media, process_media_with_vlm
 )
 import logging
 import asyncio
-from langchain_core.messages import HumanMessage
-from langchain_core.runnables import RunnableConfig
 
 
 class LLM:
-    def __init__(self):
-        self.reasoning_llm = init_chat_model(config.REASONING_LLM_MODEL, model_provider=config.MODEL_PROVIDER, base_url=config.OPENAI_BASE_URL, api_key=config.OPENAI_API_KEY)
-        self.vlm = init_chat_model(config.VLM_MODEL, model_provider=config.MODEL_PROVIDER, base_url=config.OPENAI_BASE_URL, api_key=config.OPENAI_API_KEY)
+    def __init__(self, reasoningllm_kwargs: Optional[dict] = None, vlm_kwargs: Optional[dict] = None):
+        if reasoningllm_kwargs is None:
+            reasoningllm_kwargs = {}
+        if vlm_kwargs is None:
+            vlm_kwargs = {}
+            
+        reasoning_llm_config = {
+            "model": config.REASONING_LLM_MODEL,
+            "model_provider": config.MODEL_PROVIDER,
+            "configurable_fields": "any",
+            "base_url": config.OPENAI_BASE_URL,
+            "api_key": config.OPENAI_API_KEY,
+            **reasoningllm_kwargs
+        }
+        
+        vlm_config = {
+            "model": config.VLM_MODEL,
+            "model_provider": config.MODEL_PROVIDER,
+            "configurable_fields": "any",
+            "base_url": config.OPENAI_BASE_URL,
+            "api_key": config.OPENAI_API_KEY,
+            **vlm_kwargs
+        }
+
+        self.reasoning_llm: _ConfigurableModel = init_chat_model(**reasoning_llm_config)
+
+        self.reasoning_llm.with_structured_output
+
+        self.vlm: _ConfigurableModel = init_chat_model(**vlm_config)
         self.tools = []
         self.logger = logging.getLogger(__name__)
-        
+    
+    def with_structured_output(
+        self, schema: Union[dict, type[BaseModel]], **kwargs: Any
+    ) -> 'LLM':
+        self.reasoning_llm = self.reasoning_llm.with_structured_output(
+            schema=schema, 
+            **kwargs
+        )
+        return self
+
     def bind_tools(self,
         tools: Sequence[
             Union[typing.Dict[str, Any], type, Callable, BaseTool]
@@ -27,7 +66,7 @@ class LLM:
         *,
         tool_choice: Optional[Union[str]] = None,
         **kwargs: Any,
-        ):
+        ) -> 'LLM' :
         self.tools = tools
         self.reasoning_llm_with_tools = self.reasoning_llm.bind_tools(
             tools, 
@@ -39,7 +78,7 @@ class LLM:
     async def ainvoke(self,
                       input: LanguageModelInput,
                       config: RunnableConfig | None = None,
-                      **kwargs: Any):
+                      **kwargs: Any)  -> Output :
         if has_media(input):
             processed_messages = await process_media_with_vlm(self.vlm, input)
         else:
@@ -53,7 +92,7 @@ class LLM:
     async def astream(self,
                       input: LanguageModelInput,
                       config: RunnableConfig | None = None,
-                      **kwargs: Any | None):
+                      **kwargs: Any | None) -> AsyncIterator[Output]:
         if has_media(input):
             processed_messages = await process_media_with_vlm(self.vlm, input)
         else:
@@ -77,7 +116,7 @@ class LLM:
                              exclude_names: Sequence[str] | None = None,
                              exclude_types: Sequence[str] | None = None,
                              exclude_tags: Sequence[str] | None = None,
-                             **kwargs: Any):
+                             **kwargs: Any) -> AsyncIterator[StreamEvent] :
         if has_media(input):
             processed_messages = await process_media_with_vlm(self.vlm, input)
         else:
@@ -117,7 +156,7 @@ class LLM:
                      config: RunnableConfig | list[RunnableConfig] | None = None,
                      *,
                      return_exceptions: bool = False,
-                     **kwargs: Any | None):
+                     **kwargs: Any | None) -> list[Output] :
         processed_inputs = []
         for messages in inputs:
             if has_media(messages):
@@ -145,7 +184,17 @@ llm = LLM()
 
 if __name__ == "__main__":
     async def test_llm():
-        test_llm = LLM()
+
+        extra_body={
+            "chat_template_kwargs": {"enable_thinking": True},
+            "separate_reasoning": True
+        }
+
+        reasoningllm_kwargs = {
+            "extra_body": extra_body,
+        }
+
+        test_llm = LLM(reasoningllm_kwargs)
 
         text_messages = [
             HumanMessage(content="Hello, how are you?")
@@ -158,48 +207,59 @@ if __name__ == "__main__":
             ])
         ]
         
-        print("Testing ainvoke with text-only messages...")
-        try:
-            response = await test_llm.ainvoke(text_messages)
-            print(f"Text response: {response.content}")
-        except Exception as e:
-            print(f"Error with text messages: {e}")
+        output_lines = []
         
-        print("\nTesting ainvoke with media messages...")
+        output_lines.append("=== Testing astream_events with text messages (all parameters) ===")
         try:
-            response = await test_llm.ainvoke(media_messages)
-            print(f"Media response: {response.content}")
+            async for event in test_llm.astream_events(
+                text_messages
+            ):
+                event_str = f"Event: {event}"
+                print(event_str)
+                output_lines.append(event_str)
         except Exception as e:
-            print(f"Error with media messages: {e}")
+            error_str = f"Error with text astream_events: {e}"
+            print(error_str)
+            output_lines.append(error_str)
         
-        print("\nTesting astream with text messages...")
+        output_lines.append("\n=== Testing astream_events with media messages (all parameters) ===")
         try:
-            print("Streaming response: ", end="", flush=True)
-            async for chunk in test_llm.astream(text_messages):
-                if chunk.content:
-                    print(chunk.content, end="", flush=True)
-            print()
+            async for event in test_llm.astream_events(
+                media_messages
+            ):
+                event_str = f"Event: {event}"
+                print(event_str)
+                output_lines.append(event_str)
         except Exception as e:
-            print(f"Error with streaming: {e}")
+            error_str = f"Error with media astream_events: {e}"
+            print(error_str)
+            output_lines.append(error_str)
         
-        print("\nTesting astream with media messages...")
+        output_lines.append("\n=== Testing astream_events with all possible output (no filtering) ===")
         try:
-            print("Streaming media response: ", end="", flush=True)
-            async for chunk in test_llm.astream(media_messages):
-                if chunk.content:
-                    print(chunk.content, end="", flush=True)
-            print()
+            async for event in test_llm.astream_events(
+                text_messages,
+                config=None,
+                version="v2",
+                include_names=None,
+                include_types=None,
+                include_tags=None,
+                exclude_names=None,
+                exclude_types=None,
+                exclude_tags=None
+            ):
+                event_str = f"All Events: {event}"
+                print(event_str)
+                output_lines.append(event_str)
         except Exception as e:
-            print(f"Error with media streaming: {e}")
+            error_str = f"Error with all events astream_events: {e}"
+            print(error_str)
+            output_lines.append(error_str)
         
-        print("\nTesting abatch with multiple messages...")
-        try:
-            batch_inputs = [text_messages, [HumanMessage(content="What's the weather like?")]]
-            responses = await test_llm.abatch(batch_inputs)
-            for i, response in enumerate(responses):
-                print(f"Batch response {i}: {response.content}")
-        except Exception as e:
-            print(f"Error with batch: {e}")
+        with open("astream_events_output.txt", "w", encoding="utf-8") as f:
+            f.write("\n".join(output_lines))
+        
+        print(f"\nOutput saved to astream_events_output.txt ({len(output_lines)} lines)")
     
     asyncio.run(test_llm())
 
