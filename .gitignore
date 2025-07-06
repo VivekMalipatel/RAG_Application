@@ -34,3 +34,5 @@ IndexerAPI/storage
 .DS_Store
 AgentAPI/.agent
 AgentAPI/agent.db
+AgentAPI/.github/prompts/.langgraph.md
+AgentAPI/.github/prompts/.prompt.md
