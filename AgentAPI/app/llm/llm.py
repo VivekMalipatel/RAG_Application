@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnableConfig, Runnable
 from langchain_core.runnables.utils import Output
 from langchain_core.runnables.schema import StreamEvent
 from pydantic import BaseModel
-from config import config
+from utils.config import config
 from llm.utils import (
     has_media, process_media_with_vlm
 )

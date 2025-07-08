@@ -1,11 +1,10 @@
 # Use Python 3.11 slim image as base
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
 # Set environment variables
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 

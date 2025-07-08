@@ -4,7 +4,7 @@ import logging
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, SystemMessage
 from langchain_core.messages.content_blocks import is_data_content_block
 from langchain_core.language_models.chat_models import BaseChatModel
-from config import config
+from utils.config import config
 
 
 def has_images(messages: List[BaseMessage]) -> bool:

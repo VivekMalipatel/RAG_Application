@@ -45,6 +45,16 @@ def requires_compile(fn):
     return wrapper
 
 
+def requires_compile(fn):
+    @wraps(fn)
+    async def wrapper(self, *args, **kwargs):
+        if not self._compiled_graph:
+            raise ValueError("Agent not compiled. Call compile() first.")
+        async for item in fn(self, *args, **kwargs):
+            yield item
+    return wrapper
+
+
 class BaseAgent:
 
     def __init__(self,
@@ -228,20 +238,19 @@ class BaseAgent:
 
     @requires_compile
     async def astream_events(self,
-                             input: Any,
-                             config: Optional[RunnableConfig] = None,
-                             *,
-                             version: Literal["v1", "v2"] = "v2",
-                             include_names: Optional[Sequence[str]] = None,
-                             include_types: Optional[Sequence[str]] = None,
-                             include_tags: Optional[Sequence[str]] = None,
-                             exclude_names: Optional[Sequence[str]] = None,
-                             exclude_types: Optional[Sequence[str]] = None,
-                             exclude_tags: Optional[Sequence[str]] = None,
-                             **kwargs: Any) -> AsyncIterator[StreamEvent]:
-        
+                            input: Any,
+                            config: Optional[RunnableConfig] = None,
+                            *,
+                            version: Literal["v1", "v2"] = "v2",
+                            include_names: Optional[Sequence[str]] = None,
+                            include_types: Optional[Sequence[str]] = None,
+                            include_tags: Optional[Sequence[str]] = None,
+                            exclude_names: Optional[Sequence[str]] = None,
+                            exclude_types: Optional[Sequence[str]] = None,
+                            exclude_tags: Optional[Sequence[str]] = None,
+                            **kwargs: Any) -> AsyncIterator[StreamEvent]:
         async for event in self._compiled_graph.astream_events(
-            input, 
+            input,
             config=config,
             version=version,
             include_names=include_names,
