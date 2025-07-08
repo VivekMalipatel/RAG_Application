@@ -45,7 +45,7 @@ def requires_compile(fn):
     return wrapper
 
 
-def requires_compile(fn):
+def requires_compile_generator(fn):
     @wraps(fn)
     async def wrapper(self, *args, **kwargs):
         if not self._compiled_graph:
@@ -236,7 +236,7 @@ class BaseAgent:
         ):
             yield chunk
 
-    @requires_compile
+    @requires_compile_generator
     async def astream_events(self,
                             input: Any,
                             config: Optional[RunnableConfig] = None,

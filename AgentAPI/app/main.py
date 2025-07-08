@@ -2,12 +2,13 @@
 Main FastAPI app entrypoint. Registers all routers.
 """
 from fastapi import FastAPI
-from app.endpoints.routes import agents
+from app.endpoints.routes import chat, models
 
 app = FastAPI()
 
 # Register routers
-app.include_router(agents.router)
+app.include_router(chat.router)
+app.include_router(models.router)
 
 # Optionally, add a root endpoint or health check
 def root():
