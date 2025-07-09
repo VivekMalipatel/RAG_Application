@@ -13,3 +13,11 @@ langchain_tavily
 langgraph-sdk
 typing-extensions
 requests
+numpy
+scikit-learn
+qwen-tokenizer
+redis[hiredis]
+redisvl
+langgraph-checkpoint
+langgraph-checkpoint-redis
+transformers

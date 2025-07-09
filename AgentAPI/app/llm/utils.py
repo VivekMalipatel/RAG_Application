@@ -1,10 +1,13 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 import asyncio
 import logging
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, SystemMessage
 from langchain_core.messages.content_blocks import is_data_content_block
 from langchain_core.language_models.chat_models import BaseChatModel
-from utils.config import config
+from langchain import embeddings
+from langchain_core.embeddings import Embeddings
+from langchain_core.runnables import Runnable
+from config import config
 
 
 def has_images(messages: List[BaseMessage]) -> bool:
@@ -260,3 +263,7 @@ def extract_chat_context(messages: List[BaseMessage]) -> str:
                         text_blocks.append(block.get('text', ''))
     
     return ' '.join(text_blocks)
+
+
+def init_embeddings(model: str)-> Union[Embeddings, Runnable[Any, list[float]]]:
+    return embeddings.init_embeddings(model=model, provider="openai", base_url=config.OPENAI_BASE_URL, api_key=config.OPENAI_API_KEY)

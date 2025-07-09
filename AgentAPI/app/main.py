@@ -1,16 +1,19 @@
-"""
-Main FastAPI app entrypoint. Registers all routers.
-"""
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from app.endpoints.routes import chat, models
+from app.db.redis import redis
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    redis.init_session()
+    yield
+    redis.close_session()
 
-# Register routers
+app = FastAPI(lifespan=lifespan)
+
 app.include_router(chat.router)
 app.include_router(models.router)
 
-# Optionally, add a root endpoint or health check
 def root():
     return {"status": "ok"}
 

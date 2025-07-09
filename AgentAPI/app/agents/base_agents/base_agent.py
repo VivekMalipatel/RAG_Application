@@ -1,32 +1,34 @@
+import uuid
+import typing
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from functools import wraps
+from typing import Any, Sequence, Union, Optional, Callable, AsyncIterator, Literal
+
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.store.base import BaseStore
+from langgraph.store.base import BaseStore, IndexConfig
 from langgraph.types import All, StreamMode
-import typing
-import asyncio
-from typing import Any, Sequence, Union, Optional, Callable, AsyncIterator, Literal
-from langchain_core.tools import BaseTool
-from langchain_core.runnables import RunnableConfig, Runnable
-from langchain_core.language_models.chat_models import LanguageModelInput
+from langgraph.config import get_store
+
+from langchain_core.tools import BaseTool, tool
+from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.schema import StreamEvent
 from langchain_core.runnables.utils import Output
 from langchain_core.runnables.base import Input
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from langgraph.checkpoint.base import CheckpointTuple
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
+from langchain_openai import OpenAIEmbeddings
+
 from openai import BaseModel
-from dataclasses import dataclass, field
-from functools import wraps
-from copy import deepcopy
 
 from llm.llm import LLM
 from agents.base_agents.base_state import BaseState
-from agents.base_agents.base_checkpointer import MemorySaver
-
-import asyncio
-import logging
-
+from agents.base_agents.memory.base_checkpointer import BaseMemorySaver
+from agents.base_agents.memory.base_store import BaseMemoryStore
+from db.redis import redis
+from config import config as envconfig
 
 @dataclass(frozen=True)
 class AgentConfig:
@@ -58,6 +60,7 @@ def requires_compile_generator(fn):
 class BaseAgent:
 
     def __init__(self,
+                 prompt: Optional[str] = "You are a helpful assistant.",
                  *,
                  model_kwargs: Optional[dict[str, Any]] = None,
                  vlm_kwargs: Optional[dict[str, Any]] = None,
@@ -70,6 +73,7 @@ class BaseAgent:
             node_kwargs=node_kwargs or {},
             debug=debug
         )
+        
         self._compiled_graph: Optional[CompiledStateGraph] = None
         self._lock = asyncio.Lock()
         self._llm = LLM(self._config.model_kwargs, self._config.vlm_kwargs)
@@ -81,6 +85,8 @@ class BaseAgent:
         self._interrupt_before = None
         self._interrupt_after = None
         self._name = None
+        
+        self.prompt = prompt
 
     def _validate_tools(self, tools: Sequence[Union[typing.Dict[str, Any], type, Callable, BaseTool]]):
         for tool in tools:
@@ -93,9 +99,7 @@ class BaseAgent:
             else:
                 raise ValueError(f"Invalid tool: {tool}. Tools must be callable, BaseTool instances, or dictionaries.")
 
-    def with_structured_output(
-        self, schema: Union[dict, type[BaseModel]], **kwargs: Any
-    ) -> 'BaseAgent':
+    def with_structured_output(self, schema: Union[dict, type[BaseModel]], **kwargs: Any) -> 'BaseAgent':
         new_agent = self._clone()
         new_agent._llm = new_agent._llm.with_structured_output(schema=schema, **kwargs)
         return new_agent
@@ -126,12 +130,99 @@ class BaseAgent:
         new_agent._interrupt_after = self._interrupt_after
         new_agent._name = self._name
         return new_agent
-
-    async def llm_node(self, state: BaseState):
+    
+    async def remember(self, state: BaseState, config: RunnableConfig):
+        user_id = config["configurable"]["user_id"]
+        org_id = config["configurable"]["org_id"]
+        namespace = ("memories", user_id)
         messages = state["messages"]
+        second_last_ai_index = -1
+        ai_count = 0
+        
+        for i in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[i], AIMessage):
+                ai_count += 1
+                if ai_count == 2:
+                    second_last_ai_index = i
+                    break
+        
+        if second_last_ai_index != -1:
+            messages_to_save = messages[second_last_ai_index + 1:]
+        else:
+            messages_to_save = messages
+        
+        checkpoint_id = config.get("checkpoint_id")
+        for i, message in enumerate(messages_to_save):
+            asyncio.create_task(get_store().aput(
+                namespace, 
+                f"{checkpoint_id}_{i}" if checkpoint_id else f"{org_id}_{user_id}_{str(uuid.uuid4())}_{i}", 
+                {"data": message.content}
+            ))
+
+        num_tokens = state["messages"][-1].usage_metadata.get("total_tokens", 0) if state["messages"][-1].usage_metadata else 0
+        self._logger.info(f"State tokens after saving: {num_tokens}")
+
+        if num_tokens >= envconfig.MAX_STATE_TOKENS:
+            if second_last_ai_index != -1:
+                state["messages"] = messages[second_last_ai_index:]
+            return state
+        
+        return
+
+    async def retrieve_memory(self, state: BaseState, config: RunnableConfig):
+        user_id = config["configurable"]["user_id"]
+        org_id = config["configurable"]["org_id"]
+        last_message: BaseMessage = state["messages"][-1]
+        store = get_store()
+        
+        async def get_user_memory():
+            namespace = ("memories", user_id)
+            try:
+                return await store.asearch(namespace, query=str(last_message.content))
+            except Exception as e:
+                self._logger.error(f"Error retrieving user memory: {e}")
+                return []
+        
+        async def get_org_memory():
+            namespace = ("memories", org_id)
+            try:
+                return await store.asearch(namespace, query=str(last_message.content))
+            except Exception as e:
+                self._logger.error(f"Error retrieving organization memory: {e}")
+                return []
+        
+        user_memory, org_memory = await asyncio.gather(get_user_memory(), get_org_memory())
+
+        if not user_memory and not org_memory:
+            return []
+        
+        memory_messages = []
+
+        if not user_memory:
+            memory_messages.append(SystemMessage(content="No user memory found."))
+        else:
+            for user_msg in user_memory:
+                memory_messages.append(SystemMessage(content=str(user_msg.value.get("data", ""))))
+
+        if not org_memory:
+            memory_messages.append(SystemMessage(content="No organization memory found."))
+        else:
+            for org_msg in org_memory:
+                memory_messages.append(SystemMessage(content=str(org_msg.value.get("data", ""))))
+
+        return memory_messages
+
+    async def llm_node(self, state: BaseState, config: RunnableConfig):
+        memory_messages = await self.retrieve_memory(state, config)
+        messages = [SystemMessage(content=self.prompt)] + memory_messages + state["messages"]
+        
         try:
             response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
-            return {"messages": [response]}
+            return {
+                "messages": [response], 
+                "user_id": config["configurable"]["user_id"], 
+                "org_id": config["configurable"]["org_id"]
+            }
         except Exception as e:
             self._logger.error(f"Error in llm_node: {e}")
             raise
@@ -140,6 +231,7 @@ class BaseAgent:
         graph_builder = StateGraph(BaseState)
         
         graph_builder.add_node("llm", self.llm_node)
+        graph_builder.add_node("remember_node", self.remember)
         
         if has_tools:
             graph_builder.add_node("tools", ToolNode(self._tools))
@@ -147,26 +239,52 @@ class BaseAgent:
             graph_builder.add_conditional_edges(
                 "llm",
                 tools_condition,
-                {"tools": "tools", "__end__": END}
+                {"tools": "tools", "__end__": "remember_node"}
             )
             graph_builder.add_edge("tools", "llm")
+            graph_builder.add_edge("remember_node", END)
         else:
             graph_builder.add_edge(START, "llm")
-            graph_builder.add_edge("llm", END)
+            graph_builder.add_edge("llm", "remember_node")
+            graph_builder.add_edge("remember_node", END)
 
         return graph_builder.compile(**compile_kwargs)
 
-    def compile(self,
-                checkpointer: Optional[BaseCheckpointSaver] = None,
-                *,
-                store: Optional[BaseStore] = None,
-                interrupt_before: Optional[Union[All, list[str]]] = None,
-                interrupt_after: Optional[Union[All, list[str]]] = None,
-                debug: Optional[bool] = None,
-                name: Optional[str] = None) -> 'BaseAgent':
+    async def compile(self,
+                      checkpointer: Optional[BaseMemorySaver] = None,
+                      *,
+                      store: Optional[BaseStore] = None,
+                      interrupt_before: list[str] | Literal['*'] | None = None,
+                      interrupt_after: list[str] | Literal['*'] | None = None,
+                      debug: bool = False,
+                      name: str | None = None) -> 'BaseAgent':
 
         self._checkpointer = checkpointer
+        if checkpointer is None:
+            checkpointer = BaseMemorySaver(redis_client=redis.get_session())
+            self._checkpointer = checkpointer
+            await self._checkpointer.asetup()
+
         self._store = store
+        if store is None:
+            index_config: IndexConfig = {
+                "dims": envconfig.MULTIMODEL_EMBEDDING_MODEL_DIMS,
+                "embed": OpenAIEmbeddings(
+                    model=envconfig.MULTIMODEL_EMBEDDING_MODEL,
+                    base_url=envconfig.OPENAI_BASE_URL, 
+                    api_key=envconfig.OPENAI_API_KEY
+                ),
+                "ann_index_config": {"vector_type": "vector"},
+                "distance_type": "cosine",
+            }
+
+            store = BaseMemoryStore(
+                redis_client=redis.get_session(),
+                index=index_config,
+            )
+            self._store = store
+            await self._store.setup()
+
         self._interrupt_before = interrupt_before
         self._interrupt_after = interrupt_after
         self._name = name
@@ -238,17 +356,18 @@ class BaseAgent:
 
     @requires_compile_generator
     async def astream_events(self,
-                            input: Any,
-                            config: Optional[RunnableConfig] = None,
-                            *,
-                            version: Literal["v1", "v2"] = "v2",
-                            include_names: Optional[Sequence[str]] = None,
-                            include_types: Optional[Sequence[str]] = None,
-                            include_tags: Optional[Sequence[str]] = None,
-                            exclude_names: Optional[Sequence[str]] = None,
-                            exclude_types: Optional[Sequence[str]] = None,
-                            exclude_tags: Optional[Sequence[str]] = None,
-                            **kwargs: Any) -> AsyncIterator[StreamEvent]:
+                             input: Any,
+                             config: Optional[RunnableConfig] = None,
+                             *,
+                             version: Literal["v1", "v2"] = "v2",
+                             include_names: Optional[Sequence[str]] = None,
+                             include_types: Optional[Sequence[str]] = None,
+                             include_tags: Optional[Sequence[str]] = None,
+                             exclude_names: Optional[Sequence[str]] = None,
+                             exclude_types: Optional[Sequence[str]] = None,
+                             exclude_tags: Optional[Sequence[str]] = None,
+                             **kwargs: Any) -> AsyncIterator[StreamEvent]:
+        
         async for event in self._compiled_graph.astream_events(
             input,
             config=config,
@@ -278,143 +397,68 @@ class BaseAgent:
             **kwargs
         )
 
+
 if __name__ == "__main__":
     async def test_base_agent():
         output_lines = []
+
+        base_agent = BaseAgent(
+            model_kwargs={},
+            vlm_kwargs={},
+            node_kwargs={},
+            debug=False
+        )
+
+        compiled_agent: BaseAgent = await base_agent.compile(name="test_agent")
         
-        try:
-            checkpointer = MemorySaver()
-            
-            base_agent = BaseAgent(
-                model_kwargs={},
-                vlm_kwargs={},
-                node_kwargs={},
-                debug=False
-            )
-            
-            compiled_agent = base_agent.compile(
-                checkpointer=checkpointer,
-                store=None,
-                interrupt_before=None,
-                interrupt_after=None,
-                debug=False,
-                name="test_agent"
-            )
-            
-            config = {"configurable": {"thread_id": "test_thread"}}
-            
-            def capture_checkpoints(round_name):
-                output_lines.append(f"\n=== CHECKPOINTS AFTER {round_name} ===")
-                try:
-                    checkpoints = list(checkpointer.list(config))
-                    output_lines.append(f"Total checkpoints: {len(checkpoints)}")
-                    
-                    for i, checkpoint_tuple in enumerate(checkpoints):
-                        output_lines.append(f"\n--- Checkpoint {i+1} ---")
-                        output_lines.append(f"Checkpoint ID: {checkpoint_tuple.checkpoint['id']}")
-                        output_lines.append(f"Checkpoint TS: {checkpoint_tuple.checkpoint['ts']}")
-                        output_lines.append(f"Config: {checkpoint_tuple.config}")
-                        
-                        if 'channel_values' in checkpoint_tuple.checkpoint:
-                            output_lines.append("Channel Values:")
-                            for key, value in checkpoint_tuple.checkpoint['channel_values'].items():
-                                if key == 'messages':
-                                    output_lines.append(f"  {key}: {len(value)} messages")
-                                    for j, msg in enumerate(value):
-                                        msg_type = type(msg).__name__
-                                        content_preview = str(msg.content)[:100] + "..." if len(str(msg.content)) > 100 else str(msg.content)
-                                        output_lines.append(f"    Message {j+1} ({msg_type}): {content_preview}")
-                                else:
-                                    output_lines.append(f"  {key}: {value}")
-                except Exception as e:
-                    output_lines.append(f"Error capturing checkpoints: {e}")
-            
-            output_lines.append("=== Testing Immutable BaseAgent ===")
-            
-            capture_checkpoints("INITIAL")
-            
-            output_lines.append("\n--- Round 1: Initial image question ---")
-            round1_input = {"messages": [
-                SystemMessage(content="You are a helpful assistant with vision capabilities."),
+        config = {
+            "configurable": {
+                "thread_id": "test_thread", 
+                "user_id": "test_user", 
+                "org_id": "test_org"
+            }
+        }
+        
+        async def capture_checkpoints(round_name):
+            output_lines.append(f"\n=== CHECKPOINTS AFTER {round_name} ===")
+            try:
+                checkpoints = [checkpoint async for checkpoint in compiled_agent._checkpointer.alist(config)]
+                output_lines.append(f"Total checkpoints: {len(checkpoints)}")
+                
+                for i, checkpoint_tuple in enumerate(checkpoints):
+                    output_lines.append(f"\n--- Checkpoint {i+1} ---")
+                    output_lines.append(str(checkpoint_tuple))
+            except Exception as e:
+                output_lines.append(f"Error capturing checkpoints: {e}")
+        
+        output_lines.append("=== Testing Immutable BaseAgent ===")
+        
+        await capture_checkpoints("INITIAL")
+        
+        output_lines.append("\n--- Round 1: Initial image question ---")
+        round1_input = {
+            "messages": [
                 HumanMessage(content=[
                     {"type": "text", "text": "What do you see in this image?"},
                     {"type": "image_url", "image_url": {"url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"}}
                 ])
-            ]}
-            
-            result1 = await compiled_agent.ainvoke(round1_input, config=config)
-            print(f"Result 1: {result1}")
-            output_lines.append(f"Result 1: {result1}")
-            
-            capture_checkpoints("ROUND 1")
-            
-            output_lines.append("\n--- Round 2: Follow-up about colors ---")
-            round2_input = {"messages": [HumanMessage(content="Can you describe the colors in more detail?")]}
-            
-            result2 = await compiled_agent.ainvoke(round2_input, config=config)
-            print(f"Result 2: {result2}")
-            output_lines.append(f"Result 2: {result2}")
-            
-            capture_checkpoints("ROUND 2")
-            
-            output_lines.append("\n--- Testing immutable bind_tools ---")
-            
-            def dummy_tool(query: str) -> str:
-                """A simple dummy tool that returns a formatted response for any query."""
-                return f"Tool result for: {query}"
-            
-            agent_with_tools = compiled_agent.bind_tools([dummy_tool])
-            
-            tools_agent = agent_with_tools.compile(
-                checkpointer=checkpointer,
-                name="tools_agent"
-            )
-            
-            output_lines.append("Created new agent with tools (immutable)")
-            
-            round3_input = {"messages": [HumanMessage(content="Use a tool to help me")]}
-            
-            result3 = await tools_agent.ainvoke(round3_input, config=config)
-            output_lines.append(f"Result 3 (with tools): {result3}")
-            print(f"Result 3 (with tools): {result3}")
-            
-            capture_checkpoints("ROUND 3")
-            
-            output_lines.append("\n--- Testing concurrent access safety ---")
-            
-            async def concurrent_task(agent, task_id):
-                task_config = {"configurable": {"thread_id": f"task_{task_id}"}}
-                task_input = {"messages": [HumanMessage(content=[
-                    {"type": "text", "text": "What do you see in this image?"},
-                    {"type": "image_url", "image_url": {"url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"}}
-                ])]}
-                try:
-                    result = await agent.ainvoke(task_input, config=task_config)
-                    return f"Task {task_id} completed: {result}"
-                except Exception as e:
-                    return f"Task {task_id} failed: {e}"
-            
-            tasks = [concurrent_task(compiled_agent, i) for i in range(100)]
-            concurrent_results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            for result in concurrent_results:
-                print(f"Concurrent result: {result}")
-                output_lines.append(f"Concurrent result: {result}")
-            
-            output_lines.append("\n--- Testing error handling ---")
-            
-            try:
-                uncompiled_agent = BaseAgent()
-                await uncompiled_agent.ainvoke({"messages": [HumanMessage(content="Test")]})
-            except ValueError as e:
-                output_lines.append(f"Expected error caught: {e}")
-            
-            output_lines.append("\n=== Test completed successfully ===")
-            
-        except Exception as e:
-            output_lines.append(f"Test failed with error: {e}")
-            import traceback
-            output_lines.append(f"Traceback: {traceback.format_exc()}")
+            ],
+            "user_id": config["configurable"]["user_id"],
+            "org_id": config["configurable"]["org_id"]
+        }
+        
+        result1 = await compiled_agent.ainvoke(round1_input, config=config)
+        print(f"Result 1: {result1}")
+        output_lines.append(f"Result 1: {result1}")
+        
+        await capture_checkpoints("ROUND 1")
+        
+        output_lines.append("\n--- Round 2: Follow-up about colors ---")
+        round2_input = {"messages": [HumanMessage(content="Can you describe the colors in more detail?")]}
+        
+        result2 = await compiled_agent.ainvoke(round2_input, config=config)
+        print(f"Result 2: {result2}")
+        output_lines.append(f"Result 2: {result2}")
         
         with open("single_shot_output.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(output_lines))
@@ -422,4 +466,3 @@ if __name__ == "__main__":
         print(f"\nOutput saved to single_shot_output.txt ({len(output_lines)} lines)")
 
     asyncio.run(test_base_agent())
-
