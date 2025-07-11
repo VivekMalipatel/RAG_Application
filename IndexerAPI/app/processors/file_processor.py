@@ -415,6 +415,7 @@ class FileProcessor(BaseProcessor):
             raise
 
     async def process(self, data: bytes, metadata: Optional[Dict[str, Any]] = None, source: Optional[str] = None):
+        logger.info(f"[FileProcessor] Called with source: {source}, metadata: {metadata}")
         if not data or not isinstance(data, bytes):
             error_msg = f"Invalid data type for file processing: {type(data)}"
             logger.error(error_msg)

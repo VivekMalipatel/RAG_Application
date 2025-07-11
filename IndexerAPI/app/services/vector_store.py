@@ -172,8 +172,8 @@ class VectorStore:
         except Exception as e:
             logger.error(f"Error syncing FAISS index to S3: {str(e)}")
 
-    def load(self) -> bool:
-        return asyncio.run(self._load_async())
+    async def load(self) -> bool:
+        return await self._load_async()
 
     async def _load_async(self) -> bool:
         idx_path = os.path.join(self.index_dir, 'faiss.index')

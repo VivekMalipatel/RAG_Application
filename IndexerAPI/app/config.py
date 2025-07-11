@@ -28,4 +28,10 @@ class Settings:
     AUTO_BACKUP_INTERVAL_MINUTES: int = int(os.getenv("AUTO_BACKUP_INTERVAL_MINUTES", "30"))
     S3_BACKUP_PREFIX: str = os.getenv("S3_BACKUP_PREFIX", "IndexerAPI/")
 
+    # RabbitMQ Configuration
+    RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+    RABBITMQ_QUEUE_NAME: str = os.getenv("RABBITMQ_QUEUE_NAME", "indexer_queue")
+    RABBITMQ_EXCHANGE_NAME: str = os.getenv("RABBITMQ_EXCHANGE_NAME", "indexer_exchange")
+    RABBITMQ_ROUTING_KEY: str = os.getenv("RABBITMQ_ROUTING_KEY", "indexer.task")
+
 settings = Settings()

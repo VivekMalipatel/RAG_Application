@@ -4,27 +4,49 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.schemas.schemas import StatusResponse
-from app.queue import QueueHandler
+from app.queue.rabbitmq_handler import rabbitmq_handler
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.get("/status/{item_id}", response_model=StatusResponse)
-async def get_status(
-    item_id: str,
-    db: AsyncSession = Depends(get_db)
-):
-    logger.info(f"Status check for item: {item_id}")
+@router.get("/queue/info")
+async def get_queue_info():
+    """Get RabbitMQ queue information"""
+    logger.info("Getting RabbitMQ queue information")
     
-    queue_handler = QueueHandler(db)
-    result = await queue_handler.get_item_status(item_id)
+    try:
+        queue_info = await rabbitmq_handler.get_queue_info()
+        return queue_info
+    except Exception as e:
+        logger.error(f"Error getting queue info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting queue info: {str(e)}")
+
+@router.post("/queue/purge")
+async def purge_queue():
+    """Purge all messages from the queue"""
+    logger.info("Purging RabbitMQ queue")
     
-    if not result:
-        raise HTTPException(status_code=404, detail="Item not found")
-    
-    return StatusResponse(
-        id=result["id"],
-        status=result["status"],
-        message=result["message"],
-        result=result.get("result")
-    )
+    try:
+        await rabbitmq_handler.purge_queue()
+        return {"message": "Queue purged successfully"}
+    except Exception as e:
+        logger.error(f"Error purging queue: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error purging queue: {str(e)}")
+
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    try:
+        queue_info = await rabbitmq_handler.get_queue_info()
+        return {
+            "status": "healthy",
+            "rabbitmq_connected": queue_info["is_connected"],
+            "queue_info": queue_info
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "rabbitmq_connected": False
+        }

@@ -20,3 +20,4 @@ pdf2image
 unoserver>=3.0
 aiobotocore
 psutil
+boto3
