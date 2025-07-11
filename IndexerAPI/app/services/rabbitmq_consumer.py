@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from typing import Optional
 
@@ -73,28 +74,39 @@ class RabbitMQConsumer:
             raise
 
     async def _process_file_task(self, task_message: TaskMessage):
-        """Process a file task"""
-        if "file" not in self.processors:
-            raise ValueError("File processor not registered")
-        
-        processor = self.processors["file"]
-        
-        try:
-            logger.info(f"Processing file task {task_message.task_id}: {task_message.filename}")
-            
-            # Process the file
-            async for _ in processor.process(
-                task_message.file_content,
-                metadata=task_message.metadata,
-                source=task_message.source
-            ):
+        """Process a file task using QueueConsumer logic"""
+        from app.models.queue_item import QueueItem
+        from app.services.queue_consumer import QueueConsumer
+
+        # Construct a QueueItem from the task_message
+        queue_item = QueueItem(
+            id=task_message.task_id,
+            item_type="file",
+            source=task_message.source,
+            item_metadata=json.dumps(task_message.metadata) if task_message.metadata else None,
+            indexing_datetime=getattr(task_message, 'timestamp', None),
+        )
+        # Patch: add file_content to queue_handler.get_item_data
+        # We'll monkey-patch the queue_handler to return the file content directly
+        class DummyQueueHandler:
+            async def get_item_data(self, _):
+                return task_message.file_content
+            async def update_status(self, *_):
                 pass
-            
-            logger.info(f"File task {task_message.task_id} completed successfully")
-            
-        except Exception as e:
-            logger.error(f"Error processing file task {task_message.task_id}: {str(e)}")
-            raise
+            async def move_to_failure_queue(self, *_):
+                pass
+        # Use the same processors, model_handler, and vector_store
+        consumer = QueueConsumer(
+            db_session=self.db_session,
+            model_handler=self.model_handler,
+            vector_store=self.vector_store
+        )
+        consumer.queue_handler = DummyQueueHandler()
+        for k, v in self.processors.items():
+            consumer.register_processor(k, v)
+        logger.info(f"[RabbitMQConsumer] Delegating file task {task_message.task_id} to QueueConsumer")
+        await consumer.process_queue_item(queue_item)
+        logger.info(f"File task {task_message.task_id} completed successfully")
 
     async def _process_url_task(self, task_message: TaskMessage):
         """Process a URL task"""

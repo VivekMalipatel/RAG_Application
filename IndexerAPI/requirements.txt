@@ -21,3 +21,4 @@ unoserver>=3.0
 aiobotocore
 psutil
 boto3
+aio-pika

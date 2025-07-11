@@ -5,11 +5,9 @@ import os
 from openai import AsyncOpenAI
 import httpx
 import asyncio
-import json
 from app.config import settings
 
 logger = logging.getLogger(__name__)
-
 
 class ModelHandler:
     def __init__(self, api_key: str = None, api_base: str = None):
@@ -21,7 +19,7 @@ class ModelHandler:
         self.embedding_client = AsyncOpenAI(api_key=self.embedding_api_key, base_url=self.embedding_api_base, http_client=http_client)
         self.inference_client = AsyncOpenAI(api_key=self.inference_api_key, base_url=self.inference_api_base, http_client=http_client)
     
-    async def generate_text_description(self, image_base64: str, model: str = "qwen2.5vl:7b-q8_0") -> str:
+    async def generate_text_description(self, image_base64: str, model: str = None) -> str:
         if not image_base64:
             logger.warning("Empty image_base64 provided for text generation")
             return ""
@@ -38,6 +36,10 @@ class ModelHandler:
         Your text will be attached to each document before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively.
         """
 
+        if model is None:
+            model = os.getenv("INFERENCE_MODEL", getattr(settings, "INFERENCE_MODEL", None))
+            if not model:
+                raise ValueError("INFERENCE_MODEL environment variable or config setting must be set for inference model name.")
         try:
             response = await self.inference_client.chat.completions.create(
                 model=model,
@@ -67,11 +69,15 @@ class ModelHandler:
             logger.error(f"Error generating alt text: {str(e)}")
             raise
 
-    async def embed_text(self, texts: List[str], model: str = "nomic-ai/nomic-embed-multimodal-3b") -> List[List[float]]:
+    async def embed_text(self, texts: List[str], model: str = None) -> List[List[float]]:
         if not texts:
             logger.warning("Empty texts list provided for embedding")
             return []
 
+        if model is None:
+            model = os.getenv("EMBEDDING_MODEL", getattr(settings, "EMBEDDING_MODEL", None))
+            if not model:
+                raise ValueError("EMBEDDING_MODEL environment variable or config setting must be set for embedding model name.")
         try:
             response = await self.embedding_client.embeddings.create(
                 input=texts,
@@ -87,22 +93,42 @@ class ModelHandler:
             logger.error(f"Error generating text embeddings: {str(e)}")
             raise
 
-    async def embed_image(self, image_texts: List[Dict[str, str]], model: str = "nomic-ai/nomic-embed-multimodal-3b") -> List[List[float]]:
+    async def embed_image(self, image_texts: List[Dict[str, str]], model: str = None) -> List[List[float]]:
         if not image_texts:
             logger.warning("Empty image_texts list provided for embedding")
             return []
 
+        # Convert base64 image to list of ints if needed
+        processed_images = []
+        for item in image_texts:
+            img = item.get("image")
+            if isinstance(img, str):
+                import base64
+                try:
+                    image_bytes = base64.b64decode(img)
+                    image_ints = list(image_bytes)
+                    processed_item = item.copy()
+                    processed_item["image"] = image_ints
+                    processed_images.append(processed_item)
+                except Exception as e:
+                    logger.error(f"Error decoding base64 image for embedding: {str(e)}")
+                    continue
+            else:
+                processed_images.append(item)
+
+        if model is None:
+            model = os.getenv("EMBEDDING_MODEL", getattr(settings, "EMBEDDING_MODEL", None))
+            if not model:
+                raise ValueError("EMBEDDING_MODEL environment variable or config setting must be set for embedding model name.")
         try:
             response = await self.embedding_client.embeddings.create(
-                input=image_texts,
+                input=processed_images,
                 model=model,
                 encoding_format="float"
             )
-            
             embeddings = [item.embedding for item in response.data]
             logger.info(f"Successfully generated {len(embeddings)} image embeddings")
             return embeddings
-            
         except Exception as e:
             logger.error(f"Error generating image embeddings: {str(e)}")
             raise

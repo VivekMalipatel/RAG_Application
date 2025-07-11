@@ -235,42 +235,42 @@ class FileProcessor(BaseProcessor):
                                   s3_base_path: str, metadata: Dict[str, Any]):
         try:
             loop = asyncio.get_running_loop()
-            
             extraction_task = loop.run_in_executor(None, self.markdown.convert_bytes, page_data)
-            
             cpu_pool = get_cpu_thread_pool()
             rasterize_future = cpu_pool.submit(_rasterize_and_encode, page_data, page_num)
             rasterize_task = loop.run_in_executor(None, lambda: rasterize_future.result())
-            
             extracted_text, (_, image_base64) = await asyncio.gather(extraction_task, rasterize_task)
+
+            logger.info(f"[FileProcessor] Invoking embedding model for alt text on page {page_num + 1}")
             text_description = await self.model_handler.generate_text_description(image_base64)
+            logger.info(f"[FileProcessor] Embedding model returned alt text for page {page_num + 1}")
+
             full_text = text_description + "\n Extracted Text from this document: " + extracted_text
-            
+
             upload_tasks = []
-            
             try:
                 image_bytes = base64.b64decode(image_base64)
                 image_s3_key = f"{s3_base_path}/page_{page_num + 1}.jpg"
                 upload_tasks.append(self.s3_handler.upload_bytes(image_bytes, image_s3_key))
             except Exception as img_e:
                 logger.error(f"Error preparing image for page {page_num + 1}: {img_e}")
-            
+
             try:
                 text_s3_key = f"{s3_base_path}/page_{page_num + 1}.txt"
                 upload_tasks.append(self.s3_handler.upload_string(full_text, text_s3_key))
             except Exception as txt_e:
                 logger.error(f"Error preparing text for page {page_num + 1}: {txt_e}")
-            
+
             if upload_tasks:
                 await asyncio.gather(*upload_tasks)
-            
+
             page_metadata = metadata.copy()
             page_metadata.update({
                 "page_number": page_num + 1,
                 "total_pages": total_pages,
                 "document_id": metadata.get("internal_object_id", "")
             })
-            
+
             return {
                 "page": page_num + 1,
                 "text": full_text,

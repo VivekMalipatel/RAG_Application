@@ -88,6 +88,12 @@ class VectorStore:
             self.id_to_doc[int(vid)] = (doc_id, i)
         count = arr.shape[0]
         pages = {i: int(vid) for i, vid in enumerate(ids)}
+        # Log user_id and group_id if present in metadata
+        user_id = None
+        group_id = None
+        if metadata:
+            user_id = metadata.get('user_id')
+            group_id = metadata.get('group_id')
         self.doc_to_vectors[doc_id] = {
             'count': count,
             'metadata': metadata or {},
