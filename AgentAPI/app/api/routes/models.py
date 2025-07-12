@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from app.agents import AVAILABLE_AGENTS
+from agents import AVAILABLE_AGENTS
 import time
 
 router = APIRouter()

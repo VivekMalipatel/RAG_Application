@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from app.endpoints.routes import chat, models
-from app.db.redis import redis
+from api.routes import chat, models
+from db.redis import redis
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

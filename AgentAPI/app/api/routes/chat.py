@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from .models import Message
-from app.agents import get_agent_by_id
+from models import Message
+from agents import get_agent_by_id
 from langchain_core.messages import HumanMessage, SystemMessage
 from fastapi.responses import StreamingResponse
 import json
