@@ -47,8 +47,6 @@ class LLM:
 
         self.reasoning_llm: BaseChatModel = init_chat_model(**reasoning_llm_config)
 
-        self.reasoning_llm.with_structured_output
-
         self.vlm: BaseChatModel = init_chat_model(**vlm_config)
         self.tools = []
         self.logger = logging.getLogger(__name__)

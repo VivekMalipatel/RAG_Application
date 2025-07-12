@@ -2,6 +2,7 @@ import uuid
 import typing
 import asyncio
 import logging
+import json
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Sequence, Union, Optional, Callable, AsyncIterator, Literal
@@ -85,6 +86,7 @@ class BaseAgent:
         self._interrupt_before = None
         self._interrupt_after = None
         self._name = None
+        self.is_structred_output = False
         
         self.prompt = prompt
 
@@ -100,9 +102,9 @@ class BaseAgent:
                 raise ValueError(f"Invalid tool: {tool}. Tools must be callable, BaseTool instances, or dictionaries.")
 
     def with_structured_output(self, schema: Union[dict, type[BaseModel]], **kwargs: Any) -> 'BaseAgent':
-        new_agent = self._clone()
-        new_agent._llm = new_agent._llm.with_structured_output(schema=schema, **kwargs)
-        return new_agent
+        self._llm = self._llm.with_structured_output(schema=schema, **kwargs)
+        self.is_structred_output = True
+        return self
 
     def bind_tools(self,
                    tools: Sequence[Union[typing.Dict[str, Any], type, Callable, BaseTool]],
@@ -111,25 +113,25 @@ class BaseAgent:
                    **kwargs: Any) -> 'BaseAgent':
         
         self._validate_tools(tools)
-        new_agent = self._clone()
-        new_agent._tools = tools
-        new_agent._llm = new_agent._llm.bind_tools(tools, tool_choice=tool_choice, **kwargs)
-        return new_agent
+        self._tools = tools
+        self._llm = self._llm.bind_tools(tools, tool_choice=tool_choice, **kwargs)
+        self.compile()
+        return self
 
-    def _clone(self) -> 'BaseAgent':
-        new_agent = BaseAgent(
-            model_kwargs=self._config.model_kwargs,
-            vlm_kwargs=self._config.vlm_kwargs,
-            node_kwargs=self._config.node_kwargs,
-            debug=self._config.debug
-        )
-        new_agent._tools = self._tools
-        new_agent._checkpointer = self._checkpointer
-        new_agent._store = self._store
-        new_agent._interrupt_before = self._interrupt_before
-        new_agent._interrupt_after = self._interrupt_after
-        new_agent._name = self._name
-        return new_agent
+    # def _clone(self) -> 'BaseAgent':
+    #     new_agent = BaseAgent(
+    #         model_kwargs=self._config.model_kwargs,
+    #         vlm_kwargs=self._config.vlm_kwargs,
+    #         node_kwargs=self._config.node_kwargs,
+    #         debug=self._config.debug
+    #     )
+    #     new_agent._tools = self._tools
+    #     new_agent._checkpointer = self._checkpointer
+    #     new_agent._store = self._store
+    #     new_agent._interrupt_before = self._interrupt_before
+    #     new_agent._interrupt_after = self._interrupt_after
+    #     new_agent._name = self._name
+    #     return new_agent
     
     async def remember(self, state: BaseState, config: RunnableConfig):
         user_id = config["configurable"]["user_id"]
@@ -216,16 +218,15 @@ class BaseAgent:
         memory_messages = await self.retrieve_memory(state, config)
         messages = [SystemMessage(content=self.prompt)] + memory_messages + state["messages"]
         
-        try:
-            response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
-            return {
-                "messages": [response], 
-                "user_id": config["configurable"]["user_id"], 
-                "org_id": config["configurable"]["org_id"]
-            }
-        except Exception as e:
-            self._logger.error(f"Error in llm_node: {e}")
-            raise
+        response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
+        if self.is_structred_output:
+            response = AIMessage(content=json.dumps(response))
+        return {
+            "messages": [response], 
+            "user_id": config["configurable"]["user_id"], 
+            "org_id": config["configurable"]["org_id"]
+        }
+
 
     def _compile_graph(self, has_tools: bool, **compile_kwargs) -> CompiledStateGraph:
         graph_builder = StateGraph(BaseState)

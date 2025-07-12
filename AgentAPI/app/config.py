@@ -5,8 +5,8 @@ class Config:
     # Models Configuration
     REASONING_LLM_MODEL: str = "Qwen/Qwen3-8B-AWQ"
     VLM_MODEL: str = "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
-    MULTIMODEL_EMBEDDING_MODEL: str = "nomic-ai/nomic-embed-text-v1.5" #"VivekMalipatel23/nomic-embed-multimodal-3b-8bit"
-    MULTIMODEL_EMBEDDING_MODEL_DIMS: int = 768
+    MULTIMODEL_EMBEDDING_MODEL: str = "VivekMalipatel23/nomic-embed-multimodal-3b-8bit"
+    MULTIMODEL_EMBEDDING_MODEL_DIMS: int = 2048
     TEXT_EMBEDDING_MODEL: str = "nomic-ai/nomic-embed-text-v1.5"
     TEXT_EMBEDDING_MODEL_DIMS: int = 768
     OPENAI_BASE_URL: str = "https://llm.gauravshivaprasad.com/v2"
