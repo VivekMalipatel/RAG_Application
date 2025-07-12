@@ -1,7 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from models import Message
 from agents import get_agent_by_id
 from langchain_core.messages import HumanMessage, SystemMessage
 from fastapi.responses import StreamingResponse
@@ -14,7 +12,6 @@ router = APIRouter()
 
 @dataclass
 class EventTracker:
-    """Tracks various event states and metrics"""
     node_states: Dict[str, str] = field(default_factory=dict)
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     streaming_content: List[str] = field(default_factory=list)
