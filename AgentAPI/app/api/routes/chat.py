@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 
 router = APIRouter()
 
-# --- Comprehensive Event Handler and Tracker ---
 @dataclass
 class EventTracker:
     """Tracks various event states and metrics"""
@@ -25,9 +24,7 @@ class EventTracker:
     errors: List[str] = field(default_factory=list)
 
 def comprehensive_openai_stream_event_handler(agent, state, model_id, enable_progress_updates=True):
-    """
-    Enhanced event handler that processes ALL LangGraph events and maps them to OpenWebUI
-    """
+
     async def event_stream():
         try:
             accumulated_content = ""
@@ -35,11 +32,7 @@ def comprehensive_openai_stream_event_handler(agent, state, model_id, enable_pro
             tracker = EventTracker()
             async for event in agent.astream_events(state, version="v2"):
                 event_type = event.get("event")
-                event_name = event.get("name", "")
-                event_data = event.get("data", {})
-                metadata = event.get("metadata", {})
 
-                # === Core Streaming Events ===
                 if event_type == "on_chat_model_start":
                     await _handle_chat_model_start(event, completion_id, model_id, tracker)
                 elif event_type == "on_chat_model_stream":
@@ -48,7 +41,6 @@ def comprehensive_openai_stream_event_handler(agent, state, model_id, enable_pro
                     )
                     if chunk_content:
                         accumulated_content += chunk_content
-                        # Send OpenAI-compatible streaming chunk
                         response_chunk = {
                             "id": completion_id,
                             "object": "chat.completion.chunk",
@@ -65,7 +57,6 @@ def comprehensive_openai_stream_event_handler(agent, state, model_id, enable_pro
                 elif event_type == "on_chat_model_end":
                     await _handle_chat_model_end(event, completion_id, model_id, tracker)
 
-                # === Node/Chain Events ===
                 elif event_type == "on_chain_start":
                     await _handle_chain_start(event, completion_id, model_id, tracker, enable_progress_updates)
                 elif event_type == "on_chain_end":
@@ -77,7 +68,6 @@ def comprehensive_openai_stream_event_handler(agent, state, model_id, enable_pro
                 elif event_type == "on_chain_error":
                     await _handle_chain_error(event, completion_id, model_id, tracker)
 
-                # === Tool Events ===
                 elif event_type == "on_tool_start":
                     await _handle_tool_start(event, completion_id, model_id, tracker, enable_progress_updates)
                 elif event_type == "on_tool_end":
@@ -85,33 +75,27 @@ def comprehensive_openai_stream_event_handler(agent, state, model_id, enable_pro
                 elif event_type == "on_tool_error":
                     await _handle_tool_error(event, completion_id, model_id, tracker)
 
-                # === Retriever Events ===
                 elif event_type == "on_retriever_start":
                     await _handle_retriever_start(event, completion_id, model_id, tracker)
                 elif event_type == "on_retriever_end":
                     await _handle_retriever_end(event, completion_id, model_id, tracker)
 
-                # === Custom Events ===
                 elif event_type == "on_custom_event":
                     await _handle_custom_event(event, completion_id, model_id, tracker)
 
-                # === Prompt Events ===
                 elif event_type == "on_prompt_start":
                     await _handle_prompt_start(event, completion_id, model_id, tracker)
                 elif event_type == "on_prompt_end":
                     await _handle_prompt_end(event, completion_id, model_id, tracker)
 
-                # === Parser Events ===
                 elif event_type == "on_parser_start":
                     await _handle_parser_start(event, completion_id, model_id, tracker)
                 elif event_type == "on_parser_end":
                     await _handle_parser_end(event, completion_id, model_id, tracker)
 
-                # === Retry Events ===
                 elif event_type == "on_retry":
                     await _handle_retry_event(event, completion_id, model_id, tracker)
 
-            # Final completion signal
             yield "data: [DONE]\n\n"
         except Exception as e:
             print(f"Streaming error: {e}")
@@ -125,7 +109,6 @@ def comprehensive_openai_stream_event_handler(agent, state, model_id, enable_pro
             yield "data: [DONE]\n\n"
     return event_stream
 
-# === Event Handler Functions ===
 async def _handle_chat_model_start(event, completion_id, model_id, tracker):
     print(f"🤖 LLM Model started: {event.get('name', 'Unknown')}")
     tracker.current_node = "llm_processing"
@@ -142,14 +125,14 @@ async def _handle_chat_model_stream(event, completion_id, model_id, tracker, acc
     return None
 
 async def _handle_chat_model_end(event, completion_id, model_id, tracker):
-    print(f"✅ LLM Model completed: {event.get('name', 'Unknown')}")
+    print(f"LLM Model completed: {event.get('name', 'Unknown')}")
     tracker.node_states["llm_processing"] = "completed"
 
 async def _handle_chain_start(event, completion_id, model_id, tracker, enable_progress_updates):
     node_name = event.get("metadata", {}).get("langgraph_node", "unknown")
     tracker.current_node = node_name
     tracker.node_states[node_name] = "running"
-    print(f"🔄 Node started: {node_name}")
+    print(f"Node started: {node_name}")
     if enable_progress_updates:
         pass
 
@@ -158,7 +141,7 @@ async def _handle_chain_end(event, completion_id, model_id, tracker, accumulated
     event_name = event.get("name", "")
     if node_name != "unknown":
         tracker.node_states[node_name] = "completed"
-        print(f"✅ Node completed: {node_name}")
+        print(f"Node completed: {node_name}")
     if event_name == "LangGraph":
         elapsed_time = time.time() - tracker.start_time
         final_chunk = {
@@ -184,7 +167,7 @@ async def _handle_chain_end(event, completion_id, model_id, tracker, accumulated
 async def _handle_chain_error(event, completion_id, model_id, tracker):
     error_info = event.get("data", {}).get("error", {})
     node_name = event.get("metadata", {}).get("langgraph_node", "unknown")
-    print(f"❌ Node error in {node_name}: {error_info}")
+    print(f"Node error in {node_name}: {error_info}")
     tracker.errors.append(f"Node {node_name}: {error_info}")
     tracker.node_states[node_name] = "error"
 
@@ -198,7 +181,7 @@ async def _handle_tool_start(event, completion_id, model_id, tracker, enable_pro
         "node": tracker.current_node,
         "start_time": time.time()
     })
-    print(f"🛠️ Tool started: {tool_name}")
+    print(f"Tool started: {tool_name}")
     if enable_progress_updates:
         pass
 
@@ -212,7 +195,7 @@ async def _handle_tool_end(event, completion_id, model_id, tracker, enable_progr
             tool_call["end_time"] = time.time()
             tool_call["duration"] = tool_call["end_time"] - tool_call["start_time"]
             break
-    print(f"✅ Tool completed: {tool_name}")
+    print(f"Tool completed: {tool_name}")
 
 async def _handle_tool_error(event, completion_id, model_id, tracker):
     tool_name = event.get("name", "unknown_tool")
@@ -223,34 +206,34 @@ async def _handle_tool_error(event, completion_id, model_id, tracker):
             tool_call["error"] = error_info
             tool_call["end_time"] = time.time()
             break
-    print(f"❌ Tool error: {tool_name} - {error_info}")
+    print(f"Tool error: {tool_name} - {error_info}")
     tracker.errors.append(f"Tool {tool_name}: {error_info}")
 
 async def _handle_retriever_start(event, completion_id, model_id, tracker):
-    print(f"🔍 Retriever started: {event.get('name', 'Unknown')}")
+    print(f"Retriever started: {event.get('name', 'Unknown')}")
 
 async def _handle_retriever_end(event, completion_id, model_id, tracker):
-    print(f"✅ Retriever completed: {event.get('name', 'Unknown')}")
+    print(f"Retriever completed: {event.get('name', 'Unknown')}")
 
 async def _handle_custom_event(event, completion_id, model_id, tracker):
     custom_name = event.get("name", "unknown_custom")
     custom_data = event.get("data", {})
-    print(f"🎯 Custom event: {custom_name} - {custom_data}")
+    print(f"Custom event: {custom_name} - {custom_data}")
 
 async def _handle_prompt_start(event, completion_id, model_id, tracker):
-    print(f"📝 Prompt processing started: {event.get('name', 'Unknown')}")
+    print(f"Prompt processing started: {event.get('name', 'Unknown')}")
 
 async def _handle_prompt_end(event, completion_id, model_id, tracker):
-    print(f"✅ Prompt processing completed: {event.get('name', 'Unknown')}")
+    print(f"Prompt processing completed: {event.get('name', 'Unknown')}")
 
 async def _handle_parser_start(event, completion_id, model_id, tracker):
-    print(f"⚙️ Parser started: {event.get('name', 'Unknown')}")
+    print(f"Parser started: {event.get('name', 'Unknown')}")
 
 async def _handle_parser_end(event, completion_id, model_id, tracker):
-    print(f"✅ Parser completed: {event.get('name', 'Unknown')}")
+    print(f"Parser completed: {event.get('name', 'Unknown')}")
 
 async def _handle_retry_event(event, completion_id, model_id, tracker):
-    print(f"🔄 Retry event: {event.get('name', 'Unknown')}")
+    print(f"Retry event: {event.get('name', 'Unknown')}")
 
 def openai_nonstream_completion(agent, state, model_id):
     async def nonstream():
@@ -309,7 +292,6 @@ async def agent_completions(request: dict):
                 )(),
                 media_type="text/event-stream"
             )
-        # Non-streaming implementation
         return await openai_nonstream_completion(agent, state, model_id)()
     except Exception as e:
         print(f"Error in agent_completions: {str(e)}")

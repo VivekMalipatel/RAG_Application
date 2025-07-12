@@ -194,7 +194,6 @@ class DeepResearchAgent(BaseAgent):
         original_org_id = original_configurable.get("org_id", "default")
         
         node_config = original_config.copy()
-        node_config["recursion_limit"] = self._research_config.recursionlimit
         node_config["configurable"] = {
             "thread_id": f"{original_thread_id}_{str(uuid.uuid4())}",
             "user_id": f"{original_user_id}_{node_name}",

@@ -20,8 +20,6 @@ class AgentCompletionResponse(BaseModel):
 
 @router.get("/v1/models")
 async def openai_models():
-    """OpenAI-compatible models endpoint for Open WebUI."""
-    # Map AVAILABLE_AGENTS to OpenAI model format
     models = []
     for agent in AVAILABLE_AGENTS:
         model_id = agent.get("id")

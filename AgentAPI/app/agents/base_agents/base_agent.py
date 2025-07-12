@@ -66,6 +66,7 @@ class BaseAgent:
                  model_kwargs: Optional[dict[str, Any]] = None,
                  vlm_kwargs: Optional[dict[str, Any]] = None,
                  node_kwargs: Optional[dict[str, Any]] = None,
+                 recursion_limit: Optional[int] = 25,
                  debug: bool = False):
         
         self._config = AgentConfig(
@@ -86,7 +87,8 @@ class BaseAgent:
         self._interrupt_before = None
         self._interrupt_after = None
         self._name = None
-        self.is_structred_output = False
+        self._is_structred_output= False
+        self._resursion_limit = recursion_limit
         
         self.prompt = prompt
 
@@ -103,7 +105,7 @@ class BaseAgent:
 
     def with_structured_output(self, schema: Union[dict, type[BaseModel]], **kwargs: Any) -> 'BaseAgent':
         self._llm = self._llm.with_structured_output(schema=schema, **kwargs)
-        self.is_structred_output = True
+        self._is_structred_output= True
         return self
 
     def bind_tools(self,
@@ -118,21 +120,6 @@ class BaseAgent:
         self.compile()
         return self
 
-    # def _clone(self) -> 'BaseAgent':
-    #     new_agent = BaseAgent(
-    #         model_kwargs=self._config.model_kwargs,
-    #         vlm_kwargs=self._config.vlm_kwargs,
-    #         node_kwargs=self._config.node_kwargs,
-    #         debug=self._config.debug
-    #     )
-    #     new_agent._tools = self._tools
-    #     new_agent._checkpointer = self._checkpointer
-    #     new_agent._store = self._store
-    #     new_agent._interrupt_before = self._interrupt_before
-    #     new_agent._interrupt_after = self._interrupt_after
-    #     new_agent._name = self._name
-    #     return new_agent
-    
     async def remember(self, state: BaseState, config: RunnableConfig):
         user_id = config["configurable"]["user_id"]
         org_id = config["configurable"]["org_id"]
@@ -315,6 +302,7 @@ class BaseAgent:
                       debug: bool | None = None,
                       **kwargs: Any) -> dict[str, Any] | Any:
         
+        config["recursion_limit"] = self._resursion_limit
         return await self._compiled_graph.ainvoke(
             input, 
             config=config, 
