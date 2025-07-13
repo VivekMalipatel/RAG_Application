@@ -2,9 +2,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import get_db
-from app.schemas.schemas import StatusResponse
-from app.queue.rabbitmq_handler import rabbitmq_handler
+from core.db.database import get_db
+from schemas.schemas import StatusResponse
+from core.queue.rabbitmq_handler import rabbitmq_handler
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

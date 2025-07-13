@@ -1,17 +1,17 @@
 import asyncio
 import logging
-from app.services.file_processor.entity_relation_extractor import EntityRelationExtractor
-from app.core.models.model_handler import ModelRouter
-from app.core.models.model_provider import Provider
-from app.core.models.model_type import ModelType
+from services.file_processor.entity_relation_extractor import EntityRelationExtractor
+from core.models.model_handler import ModelRouter
+from core.models.model_provider import Provider
+from core.models.model_type import ModelType
 from langchain_unstructured import UnstructuredLoader
-from app.core.embedding.embedding_handler import EmbeddingHandler
-from app.core.db_handler.document_handler import DocumentHandler
-from app.core.storage_bin.minio.minio_handler import MinIOHandler
-from app.core.vector_store.qdrant.qdrant_handler import QdrantHandler
-from app.core.cache.redis_cache import RedisCache
+from core.embedding.embedding_handler import EmbeddingHandler
+from core.db_handler.document_handler import DocumentHandler
+from core.storage_bin.minio.minio_handler import MinIOHandler
+from core.vector_store.qdrant.qdrant_handler import QdrantHandler
+from core.cache.redis_cache import RedisCache
 from pydantic import BaseModel
-from app.config import settings
+from config import settings
 import asyncio
 
 class ChunkContextSchema(BaseModel):

@@ -4,9 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 import json
 import boto3
-from app.db.database import get_db
-from app.schemas.schemas import UrlIngestRequest, RawTextIngestRequest, IngestResponse
-from app.queue.rabbitmq_handler import rabbitmq_handler
+from core.db.database import get_db
+from schemas.schemas import UrlIngestRequest, RawTextIngestRequest, IngestResponse
+from core.queue.rabbitmq_handler import rabbitmq_handler
 from pydantic import BaseModel
 from typing import Optional
 import logging

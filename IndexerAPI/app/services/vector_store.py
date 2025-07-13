@@ -5,11 +5,13 @@ import pickle
 import logging
 import time
 import asyncio
-from typing import List, Dict, Any
-from app.core.storage.s3_handler import S3Handler
-from app.config import settings
+from typing import List, Dict, Any, Optional
+from core.storage.s3_handler import S3Handler
+from config import settings
 
 logger = logging.getLogger(__name__)
+
+_global_vector_store: Optional['VectorStore'] = None
 
 class VectorStore:
     def __init__(self, index_dir: str = "storage/faiss_indexes", embedding_dim: int = 2048, use_ivf: bool = False, use_pq: bool = False, use_gpu: bool = False):
@@ -338,3 +340,15 @@ class VectorStore:
         self.save()
         await self._save_to_s3()
         logger.info("VectorStore shutdown complete")
+
+def get_global_vector_store() -> VectorStore:
+    global _global_vector_store
+    if _global_vector_store is None:
+        _global_vector_store = VectorStore()
+    return _global_vector_store
+
+async def cleanup_global_vector_store():
+    global _global_vector_store
+    if _global_vector_store:
+        await _global_vector_store.shutdown()
+        _global_vector_store = None

@@ -3,10 +3,12 @@ import logging
 import asyncio
 import shutil
 from typing import Optional
-from app.core.storage.s3_handler import S3Handler
-from app.config import settings
+from core.storage.s3_handler import S3Handler
+from config import settings
 
 logger = logging.getLogger(__name__)
+
+_global_db_persistence: Optional['DatabasePersistence'] = None
 
 class DatabasePersistence:
     def __init__(self):
@@ -73,3 +75,9 @@ class DatabasePersistence:
     @property 
     def s3_key(self):
         return f"{self.s3_prefix}app.db"
+
+def get_global_db_persistence() -> DatabasePersistence:
+    global _global_db_persistence
+    if _global_db_persistence is None:
+        _global_db_persistence = DatabasePersistence()
+    return _global_db_persistence

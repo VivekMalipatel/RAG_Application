@@ -1,13 +1,15 @@
 import base64
 import logging
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
 import os
 from openai import AsyncOpenAI
 import httpx
 import asyncio
-from app.config import settings
+from config import settings
 
 logger = logging.getLogger(__name__)
+
+_global_model_handler: Optional['ModelHandler'] = None
 
 class ModelHandler:
     def __init__(self, api_key: str = None, api_base: str = None):
@@ -175,6 +177,12 @@ async def main_test():
     except Exception as e:
         logger.error(f"Error during testing: {str(e)}")
         print(f"Test failed: {str(e)}")
+
+def get_global_model_handler() -> ModelHandler:
+    global _global_model_handler
+    if _global_model_handler is None:
+        _global_model_handler = ModelHandler()
+    return _global_model_handler
 
 if __name__ == "__main__":
     asyncio.run(main_test())

@@ -1,3 +1,3 @@
-from .queue_consumer import QueueConsumer
+from .rabbitmq_consumer import RabbitMQConsumer
 
-__all__ = ["QueueConsumer"]
+__all__ = ["RabbitMQConsumer"]

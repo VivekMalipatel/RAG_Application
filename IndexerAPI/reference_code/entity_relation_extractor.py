@@ -1,11 +1,11 @@
 import logging
 from typing import List, Dict, Any, Tuple
-from app.core.graph_db.neo4j.neo4j_handler import Neo4jHandler
-from app.core.embedding.embedding_handler import EmbeddingHandler
-from app.core.models.model_handler import ModelRouter
-from app.core.models.model_provider import Provider
-from app.core.models.model_type import ModelType
-from app.config import settings
+from core.graph_db.neo4j.neo4j_handler import Neo4jHandler
+from core.embedding.embedding_handler import EmbeddingHandler
+from core.models.model_handler import ModelRouter
+from core.models.model_provider import Provider
+from core.models.model_type import ModelType
+from config import settings
 from pydantic import BaseModel
 import asyncio
 

@@ -6,7 +6,7 @@ import requests
 from openai import OpenAI
 from markitdown import MarkItDown
 from markitdown._base_converter import DocumentConverterResult
-from app.config import settings
+from config import settings
 import base64
 
 

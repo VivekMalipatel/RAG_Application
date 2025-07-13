@@ -9,7 +9,7 @@ from pathlib import Path
 # Add the project root to the Python path to allow imports
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-from app.processors.file_processor import FileProcessor
+from processors.file_processor import FileProcessor
 
 # Configure logging
 logging.basicConfig(

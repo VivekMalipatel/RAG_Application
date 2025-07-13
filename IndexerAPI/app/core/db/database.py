@@ -1,16 +1,14 @@
 import logging
+from typing import Optional
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from app.config import settings
+from config import settings
 
-from app.db.base import Base
-from app.models.queue_item import QueueItem
-from app.models.file_data import FileData
-from app.models.text_data import TextData
-from app.models.url_data import URLData
-from app.models.failure_queue_item import FailureQueueItem
+from core.db.base import Base
 
 logger = logging.getLogger(__name__)
+
+_global_db_session: Optional[AsyncSession] = None
 
 SQLALCHEMY_DATABASE_URL = settings.DB_URL
 
@@ -39,6 +37,18 @@ async def get_db():
         yield db
     finally:
         await db.close()
+
+def get_global_db_session() -> AsyncSession:
+    global _global_db_session
+    if _global_db_session is None:
+        _global_db_session = AsyncSessionLocal()
+    return _global_db_session
+
+async def cleanup_global_db_session():
+    global _global_db_session
+    if _global_db_session:
+        await _global_db_session.close()
+        _global_db_session = None
 
 async def init_db():
     try:

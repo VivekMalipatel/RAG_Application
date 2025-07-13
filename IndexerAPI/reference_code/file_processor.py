@@ -1,16 +1,16 @@
 import asyncio
 import logging
-from app.core.queue.redis_priority_queue import RedisPriorityQueue
-from app.core.db_handler.document_handler import DocumentHandler
-from app.core.storage_bin.minio.minio_handler import MinIOHandler
-from app.config import settings
+from core.queue.redis_priority_queue import RedisPriorityQueue
+from core.db_handler.document_handler import DocumentHandler
+from core.storage_bin.minio.minio_handler import MinIOHandler
+from config import settings
 
-from app.services.file_processor.text_processor import TextProcessor
-from app.services.file_processor.image_processor import ImageProcessor
-from app.services.file_processor.audio_processor import AudioProcessor
-from app.services.file_processor.video_processor import VideoProcessor
-from app.services.file_processor.multimodal_processor import MultimodalProcessor
-from app.services.file_processor.structured_data_processor import StructuredDataProcessor
+from services.file_processor.text_processor import TextProcessor
+from services.file_processor.image_processor import ImageProcessor
+from services.file_processor.audio_processor import AudioProcessor
+from services.file_processor.video_processor import VideoProcessor
+from services.file_processor.multimodal_processor import MultimodalProcessor
+from services.file_processor.structured_data_processor import StructuredDataProcessor
 
 import magic
 

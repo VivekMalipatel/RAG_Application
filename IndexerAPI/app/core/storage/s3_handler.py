@@ -3,7 +3,7 @@ import logging
 import asyncio
 from aiobotocore.session import get_session
 from botocore.exceptions import ClientError
-from app.config import settings
+from config import settings
 
 logger = logging.getLogger(__name__)
 
