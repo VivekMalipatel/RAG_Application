@@ -22,7 +22,7 @@ from agents.base_agents.memory.base_store import BaseMemoryStore
 from db.redis import redis
 from llm.llm import LLM
 from config import config as envconfig
-from prompts import get_research_prompt
+from .prompts import get_research_prompt
 
 
 @dataclass(frozen=True)

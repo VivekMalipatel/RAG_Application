@@ -50,7 +50,3 @@ async def openai_models():
         })
     return {"object": "list", "data": models}
 
-@router.get("/v1/api/models")
-async def list_agents():
-    """List all available agents with id, name, and description."""
-    return {"agents": AVAILABLE_AGENTS}
