@@ -20,7 +20,7 @@ class EventTracker:
     start_time: float = field(default_factory=time.time)
     errors: List[str] = field(default_factory=list)
 
-def comprehensive_openai_stream_event_handler(agent, state, model_id, enable_progress_updates=True):
+def comprehensive_openai_stream_event_handler(agent, state, model_id, enable_progress_updates=True, config: Optional[Dict[str, Any]] = None):
 
     async def event_stream():
         try:
@@ -272,24 +272,124 @@ async def agent_completions(request: dict):
         agent_cls = get_agent_by_id(model_id)
         if not agent_cls:
             raise HTTPException(status_code=400, detail=f"Unknown agent/model: {model_id}")
-        agent = agent_cls().compile()
+        agent = await agent_cls().compile()
         messages = request.get("messages", [])
         if not messages:
             raise HTTPException(status_code=400, detail="No messages provided")
-        state = {"messages": [
-            HumanMessage(content=m["content"]) if m["role"] == "user" else SystemMessage(content=m["content"])
-            for m in messages
-        ]}
+        # Require config object only
+        config = request.get("config")
+        if not config:
+            raise HTTPException(status_code=400, detail="Missing required 'config' object.")
+        if not isinstance(config, dict):
+            raise HTTPException(status_code=400, detail="Invalid 'config' object.")
+        configurable = config.get("configurable")
+        if not configurable or not isinstance(configurable, dict):
+            raise HTTPException(status_code=400, detail="Missing required 'configurable' object in config.")
+        required_keys = ["thread_id", "user_id", "org_id"]
+        for key in required_keys:
+            if key not in configurable:
+                raise HTTPException(status_code=400, detail=f"Missing required config key: {key}")
+        # Accept both OpenAI and BaseAgent style state
+        if "messages" in request:
+            input_data = {
+                "messages": [
+                    HumanMessage(content=m["content"]) if m["role"] == "user" else SystemMessage(content=m["content"])
+                    for m in messages
+                ]
+            }
+        else:
+            # Accept direct state dict
+            input_data = dict(request)
         stream = request.get("stream", False)
         enable_progress_updates = request.get("enable_progress_updates", True)
         if stream:
-            return StreamingResponse(
-                comprehensive_openai_stream_event_handler(
-                    agent, state, model_id, enable_progress_updates
-                )(),
-                media_type="text/event-stream"
-            )
-        return await openai_nonstream_completion(agent, state, model_id)()
+            async def event_stream():
+                try:
+                    accumulated_content = ""
+                    completion_id = f"chatcmpl-{uuid.uuid4().hex[:16]}"
+                    tracker = EventTracker()
+                    async for event in agent.astream_events(input_data, config=config, version="v2"):
+                        event_type = event.get("event")
+                        if event_type == "on_chat_model_start":
+                            await _handle_chat_model_start(event, completion_id, model_id, tracker)
+                        elif event_type == "on_chat_model_stream":
+                            chunk_content = await _handle_chat_model_stream(
+                                event, completion_id, model_id, tracker, accumulated_content
+                            )
+                            if chunk_content:
+                                accumulated_content += chunk_content
+                                response_chunk = {
+                                    "id": completion_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": model_id,
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {"content": chunk_content},
+                                        "finish_reason": None
+                                    }],
+                                    "usage": None
+                                }
+                                yield f"data: {json.dumps(response_chunk, ensure_ascii=False)}\n\n"
+                        elif event_type == "on_chat_model_end":
+                            await _handle_chat_model_end(event, completion_id, model_id, tracker)
+                        elif event_type == "on_chain_start":
+                            await _handle_chain_start(event, completion_id, model_id, tracker, enable_progress_updates)
+                        elif event_type == "on_chain_end":
+                            completion_signal = await _handle_chain_end(
+                                event, completion_id, model_id, tracker, accumulated_content
+                            )
+                            if completion_signal:
+                                yield f"data: {json.dumps(completion_signal, ensure_ascii=False)}\n\n"
+                        elif event_type == "on_chain_error":
+                            await _handle_chain_error(event, completion_id, model_id, tracker)
+                        elif event_type == "on_tool_start":
+                            await _handle_tool_start(event, completion_id, model_id, tracker, enable_progress_updates)
+                        elif event_type == "on_tool_end":
+                            await _handle_tool_end(event, completion_id, model_id, tracker, enable_progress_updates)
+                        elif event_type == "on_tool_error":
+                            await _handle_tool_error(event, completion_id, model_id, tracker)
+                        elif event_type == "on_retriever_start":
+                            await _handle_retriever_start(event, completion_id, model_id, tracker)
+                        elif event_type == "on_retriever_end":
+                            await _handle_retriever_end(event, completion_id, model_id, tracker)
+                        elif event_type == "on_custom_event":
+                            await _handle_custom_event(event, completion_id, model_id, tracker)
+                        elif event_type == "on_prompt_start":
+                            await _handle_prompt_start(event, completion_id, model_id, tracker)
+                        elif event_type == "on_prompt_end":
+                            await _handle_prompt_end(event, completion_id, model_id, tracker)
+                        elif event_type == "on_parser_start":
+                            await _handle_parser_start(event, completion_id, model_id, tracker)
+                        elif event_type == "on_parser_end":
+                            await _handle_parser_end(event, completion_id, model_id, tracker)
+                        elif event_type == "on_retry":
+                            await _handle_retry_event(event, completion_id, model_id, tracker)
+                    yield "data: [DONE]\n\n"
+                except Exception as e:
+                    print(f"Streaming error: {e}")
+                    error_chunk = {
+                        "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
+                        "object": "error",
+                        "created": int(time.time()),
+                        "error": {"message": str(e), "type": "agent_error"}
+                    }
+                    yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+            return StreamingResponse(event_stream(), media_type="text/event-stream")
+        result = await agent.ainvoke(input_data, config=config)
+        return {
+            "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model_id,
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": result["messages"][-1].content if result and "messages" in result and result["messages"] else "No response generated"},
+                "finish_reason": "stop"
+            }],
+            "usage": None
+        }
     except Exception as e:
         print(f"Error in agent_completions: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")

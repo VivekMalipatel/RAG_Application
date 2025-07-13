@@ -87,7 +87,7 @@ class BaseAgent:
         self._interrupt_before = None
         self._interrupt_after = None
         self._name = None
-        self._is_structred_output= False
+        self._is_structured_output = False
         self._resursion_limit = recursion_limit
         
         self.prompt = prompt
@@ -105,7 +105,7 @@ class BaseAgent:
 
     def with_structured_output(self, schema: Union[dict, type[BaseModel]], **kwargs: Any) -> 'BaseAgent':
         self._llm = self._llm.with_structured_output(schema=schema, **kwargs)
-        self._is_structred_output= True
+        self._is_structured_output = True
         return self
 
     def bind_tools(self,
@@ -206,7 +206,7 @@ class BaseAgent:
         messages = [SystemMessage(content=self.prompt)] + memory_messages + state["messages"]
         
         response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
-        if self.is_structred_output:
+        if self._is_structured_output:
             response = AIMessage(content=json.dumps(response))
         return {
             "messages": [response], 
