@@ -265,6 +265,7 @@ def openai_nonstream_completion(agent, state, model_id):
 
 @router.post("/v1/chat/completions")
 async def agent_completions(request: dict):
+    print("[agent_completions] Received request body:", json.dumps(request, ensure_ascii=False))
     try:
         model_id = request.get("model") or request.get("agent")
         if not model_id:
@@ -276,10 +277,22 @@ async def agent_completions(request: dict):
         messages = request.get("messages", [])
         if not messages:
             raise HTTPException(status_code=400, detail="No messages provided")
-        # Require config object only
         config = request.get("config")
         if not config:
-            raise HTTPException(status_code=400, detail="Missing required 'config' object.")
+            # Try to build config from OpenAI-style fields
+            thread_id = request.get("thread_id")
+            user_id = request.get("user")
+            org_id = request.get("organization")
+            if thread_id and user_id and org_id:
+                config = {
+                    "configurable": {
+                        "thread_id": thread_id,
+                        "user_id": user_id,
+                        "org_id": org_id
+                    }
+                }
+            else:
+                raise HTTPException(status_code=400, detail="Missing required 'config' object or OpenAI-style fields (thread_id, user, organization).")
         if not isinstance(config, dict):
             raise HTTPException(status_code=400, detail="Invalid 'config' object.")
         configurable = config.get("configurable")
