@@ -1,6 +1,7 @@
 import logging
 from typing import Optional, Union, Dict, Any, AsyncGenerator
 from openai import AsyncOpenAI
+import httpx
 
 class OpenAIClientV2:
     def __init__(
@@ -14,6 +15,8 @@ class OpenAIClientV2:
             api_key=api_key,
             base_url=base_url
         )
+        self.base_url=base_url
+        self.api_key=api_key
         self.model_name = model_name
         self.logger = logging.getLogger(__name__)
 
@@ -41,9 +44,23 @@ class OpenAIClientV2:
 
     async def embeddings(self, **kwargs) -> Dict[str, Any]:
         try:
+            url = f"{self.base_url}/embeddings"
+            headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+            }
             kwargs['model'] = self.model_name
-            response = await self.client.embeddings.create(**kwargs)
-            return response.model_dump()
+            payload = {
+                **kwargs
+            }
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(url, json=payload, headers=headers)
+                    response.raise_for_status()
+                    return response.json()
+            except httpx.HTTPStatusError as e:
+                self.logger.error(f"HTTP error in embeddings: {e.response.status_code} - {e.response.text}")
+                raise
         except Exception as e:
-            self.logger.error(f"Error in embeddings: {str(e)}")
+            self.logger.error(f"Unexpected error in embeddings: {str(e)}")
             raise

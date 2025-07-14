@@ -49,6 +49,8 @@ async def create_embeddings(
             )
         
         input_data = request_data.get("input")
+        if input_data is None:
+            input_data = request_data.get("messages")
         if isinstance(input_data, list):
             is_image_input = all(isinstance(item, dict) for item in input_data) if input_data else False
         else:
