@@ -1,22 +1,13 @@
 import time
 import logging
-from typing import List, Dict, Any
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-
-from db.session import get_db
-from core.security import get_api_key
-from db.models import ApiKey
+from fastapi import APIRouter
 from config import settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.get("", response_model=None)
-async def list_models(
-    api_key: ApiKey = Depends(get_api_key),
-    db: Session = Depends(get_db),
-):
+async def list_models():
     models = []
     
     all_models = (
@@ -46,8 +37,6 @@ async def list_models(
 @router.get("/{model_id}", response_model=None)
 async def get_model(
     model_id: str,
-    api_key: ApiKey = Depends(get_api_key),
-    db: Session = Depends(get_db),
 ):
     all_models = (
         settings.TEXT_GENERATION_MODELS +

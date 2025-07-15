@@ -3,7 +3,7 @@ from typing import Optional, Union, Dict, Any, AsyncGenerator
 from openai import AsyncOpenAI
 import httpx
 
-class OpenAIClientV2:
+class OpenAIClient:
     def __init__(
         self,
         model_name: str,

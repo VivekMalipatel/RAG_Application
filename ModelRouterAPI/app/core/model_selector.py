@@ -2,15 +2,15 @@ import logging
 from typing import Tuple
 
 from config import settings
-from model_type import ModelType
-from model_provider import Provider
+from core.model_type import ModelType
+from core.model_provider import Provider
 
 logger = logging.getLogger(__name__)
 
 class ModelNotFoundException(Exception):
     pass
 
-class ModelSelectorV2:
+class ModelSelector:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         
