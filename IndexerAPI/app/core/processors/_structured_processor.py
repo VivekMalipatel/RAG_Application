@@ -138,6 +138,21 @@ class StructuredProcessor(BaseProcessor):
                 if i < len(column_embeddings):
                     profile["embedding"] = column_embeddings[i]
             
+            row_nodes = []
+            for row_idx, row in df.iterrows():
+                row_data = {}
+                for col_name in df.columns:
+                    cell_value = row[col_name]
+                    if pd.notna(cell_value):
+                        row_data[col_name] = str(cell_value)
+                    else:
+                        row_data[col_name] = ""
+                
+                row_nodes.append({
+                    "row_index": int(row_idx),
+                    "row_data": row_data
+                })
+            
             return {
                 "sheet_name": sheet_name,
                 "page_number": 1,
@@ -148,6 +163,7 @@ class StructuredProcessor(BaseProcessor):
                 "embedding": summary_embedding[0] if summary_embedding else None,
                 "summary": summary,
                 "column_profiles": column_profiles,
+                "row_nodes": row_nodes,
                 "dataframe_sample": dataframe_text,
                 "total_rows": len(df),
                 "total_columns": len(df.columns),
@@ -165,6 +181,7 @@ class StructuredProcessor(BaseProcessor):
                 "embedding": None,
                 "summary": f"Error processing sheet: {str(e)}",
                 "column_profiles": [],
+                "row_nodes": [],
                 "dataframe_sample": "",
                 "total_rows": 0,
                 "total_columns": 0,
