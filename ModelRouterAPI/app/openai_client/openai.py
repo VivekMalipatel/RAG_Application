@@ -3,7 +3,7 @@ from typing import Optional, Union, Dict, Any, AsyncGenerator
 from openai import AsyncOpenAI
 import httpx
 
-class OpenAIClientV2:
+class OpenAIClient:
     def __init__(
         self,
         model_name: str,
@@ -54,7 +54,7 @@ class OpenAIClientV2:
                 **kwargs
             }
             try:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(timeout=3600.0) as client:
                     response = await client.post(url, json=payload, headers=headers)
                     response.raise_for_status()
                     return response.json()

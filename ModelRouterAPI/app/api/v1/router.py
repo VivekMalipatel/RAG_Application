@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from api.v2.endpoints import chat, embeddings, models
+from api.v1.endpoints import chat, embeddings, models
 
 api_router = APIRouter()
 

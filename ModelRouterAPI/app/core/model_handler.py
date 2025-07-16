@@ -2,16 +2,16 @@ import logging
 from typing import Optional, Dict, List, Union, AsyncGenerator, Any, Type
 from pydantic import BaseModel
 
-from openai_client import OpenAIClientV2
-from model_provider import Provider
-from model_type import ModelType
-from core.model_selector_v2 import ModelSelectorV2
-from core.model_selector_v2 import ModelNotFoundException
+from openai_client import OpenAIClient
+from core.model_provider import Provider
+from core.model_type import ModelType
+from core.model_selector import ModelSelector
+from core.model_selector import ModelNotFoundException
 
 class UnsupportedFeatureError(Exception):
     pass
 
-class ModelRouterV2:
+class ModelRouter:
     def __init__(
         self,
         provider: Union[Provider, str],
@@ -36,21 +36,21 @@ class ModelRouterV2:
             if not provider_config:
                 raise ValueError("provider_config required for OpenAI provider")
             
-            self.client = OpenAIClientV2(
+            self.client = OpenAIClient(
                 model_name=model_name,
                 api_key=provider_config.get('api_key'),
                 base_url=provider_config.get('base_url')
             )
         else:
-            raise ValueError(f"Unsupported provider: {provider}. Only OpenAI-compatible providers are supported in v2")
+            raise ValueError(f"Unsupported provider: {provider}.")
 
     @staticmethod
     async def initialize_from_model_name(
         model_name: str,
         model_type: ModelType,
         **kwargs
-    ) -> 'ModelRouterV2':
-        selector = ModelSelectorV2()
+    ) -> 'ModelRouter':
+        selector = ModelSelector()
         
         try:
             provider, actual_model_name, provider_config = await selector.select_best_model(
@@ -61,7 +61,7 @@ class ModelRouterV2:
             if provider_config:
                 kwargs['provider_config'] = provider_config
             
-            return ModelRouterV2(
+            return ModelRouter(
                 provider=provider,
                 model_name=actual_model_name,
                 model_type=model_type,
@@ -92,7 +92,7 @@ class ModelRouterV2:
         documents: List[str], 
         max_documents: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        raise UnsupportedFeatureError("Document reranking not implemented in v2 yet")
+        raise UnsupportedFeatureError("Document reranking not implemented yet")
 
     async def generate_structured_output(self, **kwargs) -> Dict[str, Any]:
         try:
