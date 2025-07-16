@@ -203,8 +203,8 @@ class Neo4jHandler:
                                 "is_tabular": True
                             }
                             
-                            if "summary_embedding" in sheet_data:
-                                page_properties["embedding"] = sheet_data["summary_embedding"]
+                            if "embedding" in sheet_data:
+                                page_properties["embedding"] = sheet_data["embedding"]
                             
                             page_query = """
                             MATCH (d:Document {internal_object_id: $internal_object_id})
