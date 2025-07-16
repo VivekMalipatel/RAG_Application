@@ -43,6 +43,7 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     restart: unless-stopped
+    
   unoserver:
     container_name: unoserver
     image: ghcr.io/unoconv/unoserver-docker

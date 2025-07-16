@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, BackgroundTasks
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import uvicorn
@@ -7,14 +7,11 @@ from contextlib import asynccontextmanager
 
 from config import settings
 from api.routes import ingest, status, vector
-from api.routes.backup import router as backup_router
-from core.db.database import init_db, cleanup_global_db_session
-from core.model.model_handler import get_global_model_handler
 from services.vector_store import get_global_vector_store, cleanup_global_vector_store
-from services.database_persistence import get_global_db_persistence
-from services.rabbitmq_consumer import get_global_rabbitmq_consumer, cleanup_global_rabbitmq_consumer
+from services.orchestrator import get_global_orchestrator, cleanup_global_orchestrator
 from core.processors import register_processors
 from core.queue.rabbitmq_handler import rabbitmq_handler
+from core.storage.neo4j_handler import initialize_neo4j, cleanup_neo4j, get_neo4j_handler
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
@@ -23,49 +20,29 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
-    db_persistence = get_global_db_persistence()
-    logging.info("Checking for database backup in S3...")
-    await db_persistence.restore_from_s3()
     
-    logging.info("Initializing database...")
-    await init_db()
-    logging.info("Database initialized successfully")
-    
-    model_handler = get_global_model_handler()
-    vector_store = get_global_vector_store()
-    
-    logging.info("Loading vector store from local storage or S3...")
-    await vector_store._load_async()
-    
+    logging.info("Initializing Neo4j connection and indexes...")
+    await initialize_neo4j()
     await rabbitmq_handler.connect()
+    orchestrator = get_global_orchestrator()
+    register_processors(orchestrator)
     
-    rabbitmq_consumer = get_global_rabbitmq_consumer()
-    
-    register_processors(rabbitmq_consumer)
-    
-    process_task = asyncio.create_task(rabbitmq_consumer.start_processing())
-    backup_task = asyncio.create_task(db_persistence.schedule_periodic_backup(settings.AUTO_BACKUP_INTERVAL_MINUTES))
-    logging.info("RabbitMQ consumer and database backup scheduler started successfully")
+    process_task = asyncio.create_task(rabbitmq_handler.start_consuming(orchestrator))
+    logging.info("RabbitMQ consumer scheduler started successfully")
     
     yield
     
-    await cleanup_global_vector_store()
-    
-    await db_persistence.backup_to_s3()
-    
-    await cleanup_global_rabbitmq_consumer()
+    await cleanup_global_orchestrator()
+    await rabbitmq_handler.stop_consuming()
     logging.info("RabbitMQ consumer stopped")
-    
     await rabbitmq_handler.disconnect()
-
-    await cleanup_global_db_session()
-
+    
+    logging.info("Cleaning up Neo4j connection...")
+    await cleanup_neo4j()
+    
     try:
         process_task.cancel()
-        backup_task.cancel()
         await asyncio.wait_for(process_task, timeout=5.0)
-        await asyncio.wait_for(backup_task, timeout=2.0)
     except asyncio.CancelledError:
         logging.info("Background tasks were cancelled during shutdown")
     except asyncio.TimeoutError:
@@ -91,11 +68,17 @@ app.add_middleware(
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
 app.include_router(status.router, tags=["status"])
 app.include_router(vector.router, prefix="/vector", tags=["vector"])
-app.include_router(backup_router, prefix="/backup", tags=["backup"])
 
 @app.get("/health")
-def health_check():
-    return {"status": "ok"}
+async def health_check():
+    neo4j_handler = get_neo4j_handler()
+    neo4j_status = await neo4j_handler.test_connection()
+    
+    return {
+        "status": "ok",
+        "neo4j_connected": neo4j_status,
+        "timestamp": asyncio.get_event_loop().time()
+    }
 
 if __name__ == "__main__":
     uvicorn.run("app.main:app", host="0.0.0.0", port=8009, reload=True)

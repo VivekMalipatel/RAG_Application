@@ -22,3 +22,7 @@ aiobotocore
 psutil
 boto3
 aio-pika
+pandas
+openpyxl
+xlsxwriter
+neo4j

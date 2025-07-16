@@ -29,9 +29,23 @@ class Settings:
     S3_BACKUP_PREFIX: str = os.getenv("S3_BACKUP_PREFIX", "IndexerAPI/")
 
     # RabbitMQ Configuration
-    RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
-    RABBITMQ_QUEUE_NAME: str = os.getenv("RABBITMQ_QUEUE_NAME", "indexer_queue")
-    RABBITMQ_EXCHANGE_NAME: str = os.getenv("RABBITMQ_EXCHANGE_NAME", "indexer_exchange")
-    RABBITMQ_ROUTING_KEY: str = os.getenv("RABBITMQ_ROUTING_KEY", "indexer.task")
+    RABBITMQ_URL: str = os.getenv("RABBITMQ_URL")
+    RABBITMQ_QUEUE_NAME: str = os.getenv("RABBITMQ_QUEUE_NAME")
+    RABBITMQ_EXCHANGE_NAME: str = os.getenv("RABBITMQ_EXCHANGE_NAME")
+    RABBITMQ_ROUTING_KEY: str = os.getenv("RABBITMQ_ROUTING_KEY")
+    
+    # Consumer Configuration
+    MAX_CONCURRENCY: int = int(os.getenv("MAX_CONCURRENCY", "10"))
+
+    # Neo4j Configuration
+    NEO4J_URI: str = os.getenv("NEO4J_URI")
+    NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME")
+    NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD")
+    NEO4J_DATABASE: str = os.getenv("NEO4J_DATABASE")
+    
+    # Model Configuration
+    INFERENCE_MODEL: str = os.getenv("INFERENCE_MODEL")
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL")
+    EMBEDDING_DIMENSIONS: int = int(os.getenv("EMBEDDING_DIMENSIONS", "1024"))
 
 settings = Settings()

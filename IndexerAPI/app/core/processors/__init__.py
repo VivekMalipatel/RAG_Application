@@ -5,8 +5,7 @@ from core.processors.file_processor import FileProcessor
 
 __all__ = ["BaseProcessor", "RawTextProcessor", "URLProcessor", "FileProcessor", "register_processors"]
 
-def register_processors(rabbitmq_consumer):
-
+def register_processors(orchestrator):
     processors = [
         ("text", RawTextProcessor()),
         ("url", URLProcessor()),
@@ -14,6 +13,6 @@ def register_processors(rabbitmq_consumer):
     ]
     
     for item_type, processor in processors:
-        rabbitmq_consumer.register_processor(item_type, processor)
+        orchestrator.register_processor(item_type, processor)
     
-    return rabbitmq_consumer
+    return orchestrator

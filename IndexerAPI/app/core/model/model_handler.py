@@ -1,15 +1,40 @@
 import base64
 import logging
-from typing import List, Dict, Any, Union, Optional
+from typing import List, Dict, Any, Optional
 import os
 from openai import AsyncOpenAI
 import httpx
 import asyncio
+from pydantic import BaseModel
+import requests
 from config import settings
 
 logger = logging.getLogger(__name__)
 
 _global_model_handler: Optional['ModelHandler'] = None
+
+class EntitySchema(BaseModel):
+    id: str
+    text: str 
+    entity_type: str
+    entity_profile: str
+
+class RelationSchema(BaseModel):
+    source: str 
+    target: str 
+    relation_type: str
+    relation_profile: str 
+
+class EntityRelationSchema(BaseModel):
+    entities: List[EntitySchema]
+    relationships: List[RelationSchema]
+
+class ColumnSchema(BaseModel):
+    column_name: str
+    column_profile: str
+
+class ColumnProfilesSchema(BaseModel):
+    columns: List[ColumnSchema]
 
 class ModelHandler:
     def __init__(self, api_key: str = None, api_base: str = None):
@@ -37,14 +62,9 @@ class ModelHandler:
 
         Your text will be attached to each document before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively.
         """
-
-        if model is None:
-            model = os.getenv("INFERENCE_MODEL", getattr(settings, "INFERENCE_MODEL", None))
-            if not model:
-                raise ValueError("INFERENCE_MODEL environment variable or config setting must be set for inference model name.")
         try:
             response = await self.inference_client.chat.completions.create(
-                model=model,
+                model=settings.INFERENCE_MODEL,
                 messages=[  
                             {
                                 "role": "system",
@@ -71,19 +91,37 @@ class ModelHandler:
             logger.error(f"Error generating alt text: {str(e)}")
             raise
 
-    async def embed_text(self, texts: List[str], model: str = None) -> List[List[float]]:
-        if not texts:
-            logger.warning("Empty texts list provided for embedding")
-            return []
+    async def embed(self, messages: List[dict]) -> List[List[float]]:
 
-        if model is None:
-            model = os.getenv("EMBEDDING_MODEL", getattr(settings, "EMBEDDING_MODEL", None))
-            if not model:
-                raise ValueError("EMBEDDING_MODEL environment variable or config setting must be set for embedding model name.")
+        url = f"{self.embedding_api_base}/embeddings"
+        headers = {
+            "Authorization": "Bearer " + self.embedding_api_key,
+            "Content-Type": "application/json"
+        }
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    url,
+                    headers=headers,
+                    json={
+                        "model": settings.EMBEDDING_MODEL,
+                        "messages": messages,
+                        "encoding_format": "float"
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                embeddings = [item["embedding"] for item in data["data"]]
+                return embeddings
+        except Exception as e:
+            logger.error(f"Error generating image embeddings: {str(e)}")
+            raise
+    
+    async def embed_text(self, texts: List[str]) -> List[List[float]]:
         try:
             response = await self.embedding_client.embeddings.create(
                 input=texts,
-                model=model,
+                model=settings.EMBEDDING_MODEL,
                 encoding_format="float"
             )
             
@@ -95,46 +133,6 @@ class ModelHandler:
             logger.error(f"Error generating text embeddings: {str(e)}")
             raise
 
-    async def embed_image(self, image_texts: List[Dict[str, str]], model: str = None) -> List[List[float]]:
-        if not image_texts:
-            logger.warning("Empty image_texts list provided for embedding")
-            return []
-
-        # Convert base64 image to list of ints if needed
-        processed_images = []
-        for item in image_texts:
-            img = item.get("image")
-            if isinstance(img, str):
-                import base64
-                try:
-                    image_bytes = base64.b64decode(img)
-                    image_ints = list(image_bytes)
-                    processed_item = item.copy()
-                    processed_item["image"] = image_ints
-                    processed_images.append(processed_item)
-                except Exception as e:
-                    logger.error(f"Error decoding base64 image for embedding: {str(e)}")
-                    continue
-            else:
-                processed_images.append(item)
-
-        if model is None:
-            model = os.getenv("EMBEDDING_MODEL", getattr(settings, "EMBEDDING_MODEL", None))
-            if not model:
-                raise ValueError("EMBEDDING_MODEL environment variable or config setting must be set for embedding model name.")
-        try:
-            response = await self.embedding_client.embeddings.create(
-                input=processed_images,
-                model=model,
-                encoding_format="float"
-            )
-            embeddings = [item.embedding for item in response.data]
-            logger.info(f"Successfully generated {len(embeddings)} image embeddings")
-            return embeddings
-        except Exception as e:
-            logger.error(f"Error generating image embeddings: {str(e)}")
-            raise
-
     def encode_image_to_base64(self, image_path: str) -> str:
         try:
             with open(image_path, "rb") as image_file:
@@ -142,6 +140,220 @@ class ModelHandler:
         except Exception as e:
             logger.error(f"Error encoding image to base64: {str(e)}")
             raise
+
+    async def extract_entities_relationships(self, messages: List[dict]) -> Dict[str, Any]:
+        try:
+            extraction_prompt = """Extract comprehensive entities, relationships, and document metadata from the given content for general and personal document analysis.
+
+            CRITICAL EXTRACTION REQUIREMENTS:
+            1. Extract ALL identifiable information with high precision for general use cases
+            2. Create entity IDs using lowercase with underscores: "John Smith" -> "john_smith"
+            3. Extract relationships with confidence scores (0.0-1.0) and contextual information
+            4. Provide detailed entity profiles with roles, descriptions, and contextual standing
+            5. Handle coreference resolution (he/she -> actual name)
+            6. Extract document structure and content elements
+            7. For images, extract visual entities, charts, diagrams, and relationships
+
+            COMPREHENSIVE ENTITY TYPES:
+            - PERSON: Individuals, authors, speakers, contacts, stakeholders, customers, family members
+            - ORGANIZATION: Companies, institutions, groups, teams, departments, agencies
+            - LOCATION: Places, addresses, cities, countries, regions, facilities, venues
+            - DOCUMENT: Files, reports, articles, books, papers, presentations, manuals
+            - IDENTIFIER: IDs, codes, numbers, references, accounts, serial numbers
+            - CONCEPT: Ideas, topics, subjects, themes, methodologies, principles
+            - FINANCIAL: Money, costs, prices, budgets, investments, transactions
+            - DATE_TIME: Dates, times, deadlines, schedules, periods, durations
+            - REQUIREMENT: Goals, objectives, specifications, criteria, standards
+            - POSITION_TITLE: Job titles, roles, positions, responsibilities
+            - CONTACT_INFO: Phone numbers, emails, addresses, social media
+            - ASSET: Equipment, tools, resources, technology, systems
+            - PROCESS: Procedures, workflows, methods, operations, activities
+            - CLASSIFICATION: Categories, types, levels, priorities, statuses
+            - PRODUCT_SERVICE: Products, services, offerings, solutions
+            - METRIC: Measurements, statistics, performance indicators, benchmarks
+
+            COMPREHENSIVE RELATIONSHIP TYPES:
+            - WORKS_FOR: Employment or service relationship
+            - MANAGES: Management or supervisory relationship
+            - REPORTS_TO: Hierarchical reporting structure
+            - COLLABORATES_WITH: Working partnership or cooperation
+            - ASSOCIATED_WITH: General association or connection
+            - LOCATED_AT: Physical or logical location
+            - VALID_FROM/UNTIL: Temporal validity and duration
+            - RESPONSIBLE_FOR: Accountability and ownership
+            - AUTHORED_BY: Creation or authorship
+            - REFERENCES: Citations, mentions, cross-references
+            - CONTAINS: Structural containment or inclusion
+            - PARTICIPATES_IN: Involvement or engagement
+            - RELATED_TO: General relationship or connection
+            - DEPENDS_ON: Dependencies and prerequisites
+            - ASSIGNED_TO: Task or responsibility assignment
+            - DESCRIBES: Descriptive or explanatory relationship
+            - BELONGS_TO: Ownership or membership
+            - COMMUNICATES_WITH: Communication or interaction
+
+            DOCUMENT STRUCTURE EXTRACTION:
+            - Document title, subtitle, and purpose
+            - Section headings and organization
+            - Document type and category
+            - Version information and dates
+            - Author and contributor information
+            - Key topics and themes
+            - Important data and statistics
+            - Contact information and references
+
+            TABULAR DATA EXTRACTION:
+            - Extract structured data from tables and charts
+            - Identify headers, columns, and data relationships
+            - Capture numerical data and statistics
+            - Extract schedules and timeline information
+            - Process organizational charts and diagrams
+            - Extract performance metrics and data
+
+            GENERAL DOCUMENT EXTRACTION:
+            - Main topics and themes
+            - Key concepts and ideas
+            - Important facts and information
+            - Procedures and instructions
+            - Recommendations and conclusions
+            - Contact information and references
+            - Dates and temporal information
+            - Quantitative data and measurements
+
+            The goal is to provide comprehensive document intelligence with entities and relationships extraction for any general or personal context, capturing every significant detail relevant for understanding, analysis, and knowledge management.
+            """
+
+            if messages is not None:
+                messages = [{"role": "system", "content": extraction_prompt}] + messages
+            else:
+                raise ValueError("Either messages or text must be provided")
+
+            response = await self.inference_client.beta.chat.completions.parse(
+                model=settings.INFERENCE_MODEL,
+                messages=messages,
+                response_format=EntityRelationSchema,
+            )
+            
+            if response.choices[0].message.parsed:
+                parsed_result = response.choices[0].message.parsed
+                entities = [entity.model_dump() for entity in parsed_result.entities]
+                relationships = [rel.model_dump() for rel in parsed_result.relationships]
+                
+                for entity in entities:
+                    entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
+                
+                for rel in relationships:
+                    rel["source"] = rel["source"].lower().replace(" ", "_").replace("-", "_")
+                    rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
+                
+                return {"entities": entities, "relationships": relationships}
+            else:
+                logger.error("Failed to parse structured entity extraction output")
+                return {"entities": [], "relationships": []}
+            
+        except Exception as e:
+            logger.error(f"Entity extraction failed: {e}")
+            return {"entities": [], "relationships": []}
+
+    async def embed_entity_relationship_profiles(self, entities: List[Dict[str, Any]], relationships: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        try:
+            entity_profiles = [entity.get("entity_profile", "") for entity in entities]
+            relationship_profiles = [rel.get("relation_profile", "") for rel in relationships]
+            
+            all_profiles = entity_profiles + relationship_profiles
+            
+            if not all_profiles:
+                return entities, relationships
+            
+            embeddings = await self.embed_text(all_profiles)
+            
+            entity_embeddings = embeddings[:len(entity_profiles)]
+            relationship_embeddings = embeddings[len(entity_profiles):]
+            
+            for i, entity in enumerate(entities):
+                if i < len(entity_embeddings):
+                    entity["embedding"] = entity_embeddings[i]
+            
+            for i, rel in enumerate(relationships):
+                if i < len(relationship_embeddings):
+                    rel["embedding"] = relationship_embeddings[i]
+            
+            return entities, relationships
+            
+        except Exception as e:
+            logger.error(f"Error embedding entity/relationship profiles: {e}")
+            return entities, relationships
+
+    async def generate_structured_summary(self, dataframe_text: str) -> str:
+        try:
+
+            system_prompt = """You are an AI assistant that analyzes structured data and provides comprehensive summaries. 
+            Given a tabular dataset representation, provide a clear, informative summary that includes:
+            1. Overall purpose and content of the dataset
+            2. Key patterns and insights
+            3. Data quality observations
+            4. Notable trends or anomalies
+            5. Potential use cases or applications
+            
+            Keep the summary concise but comprehensive, suitable for embedding and retrieval."""
+
+            user_prompt = f"Analyze this structured dataset and provide a comprehensive summary:\n\n{dataframe_text}"
+
+            response = await self.inference_client.chat.completions.create(
+                model=settings.INFERENCE_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            logger.error(f"Error generating structured summary: {e}")
+            return f"Error generating summary: {str(e)}"
+
+    async def generate_column_profiles(self, dataframe_text: str) -> List[Dict[str, str]]:
+        try:
+
+            system_prompt = """You are an AI assistant that analyzes structured data columns. 
+            Given a tabular dataset, analyze each column and provide detailed profiles.
+            
+            For each column, provide:
+            1. Column name (exactly as it appears in the dataset)
+            2. Comprehensive column profile including:
+               - Data type and format
+               - Content description and meaning
+               - Data quality assessment
+               - Statistical characteristics (if applicable)
+               - Potential relationships with other columns
+               - Business or analytical significance
+               - Common patterns or unique characteristics
+            
+            Extract ALL columns present in the dataset and provide thorough analysis for each."""
+
+            user_prompt = f"Analyze each column in this dataset and provide detailed profiles:\n\n{dataframe_text}"
+
+            response = await self.inference_client.beta.chat.completions.parse(
+                model=settings.INFERENCE_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format=ColumnProfilesSchema,
+            )
+            
+            if response.choices[0].message.parsed:
+                parsed_result = response.choices[0].message.parsed
+                columns = [column.model_dump() for column in parsed_result.columns]
+                return columns
+            else:
+                logger.error("Failed to parse structured column profiles output")
+                return []
+            
+        except Exception as e:
+            logger.error(f"Error generating column profiles: {e}")
+            return []
 
 
 async def main_test():

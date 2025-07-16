@@ -1,3 +1,3 @@
-from .rabbitmq_consumer import RabbitMQConsumer
+from .orchestrator import Orchestrator
 
-__all__ = ["RabbitMQConsumer"]
+__all__ = ["Orchestrator"]

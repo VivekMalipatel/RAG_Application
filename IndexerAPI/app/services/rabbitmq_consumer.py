@@ -1,16 +1,19 @@
 import asyncio
 import logging
 import hashlib
+import json
 from typing import Optional
 
-from core.queue.rabbitmq_handler import rabbitmq_handler, TaskMessage, TaskType
+from config import settings
+
+from core.queue.rabbitmq_handler import rabbitmq_handler
+from core.queue.task_types import TaskMessage, TaskType
 from core.model.model_handler import ModelHandler, get_global_model_handler
 from services.vector_store import VectorStore, get_global_vector_store
 
 logger = logging.getLogger(__name__)
 
 _global_rabbitmq_consumer: Optional['RabbitMQConsumer'] = None
-
 
 class RabbitMQConsumer:
     def __init__(self, model_handler: ModelHandler = None, vector_store: VectorStore = None):
@@ -31,23 +34,70 @@ class RabbitMQConsumer:
             logger.warning("Consumer is already running")
             return
 
+        await rabbitmq_handler.connect()
+        self.is_running = True
+        logger.info(f"Starting RabbitMQ consumer with max concurrency: {settings.MAX_CONCURRENCY}")
+        self._consumer_task = asyncio.create_task(self._consume_loop())
+
+    async def _consume_loop(self):
+        tasks = set()
+        logger.info("Consumer loop started")
+        while self.is_running:
+            try:
+                incoming_message = await self._get_next_message()
+                if incoming_message is None:
+                    await asyncio.sleep(0.2)
+                    continue
+
+                task = asyncio.create_task(self._handle_message(incoming_message))
+                tasks.add(task)
+                tasks = {t for t in tasks if not t.done()}
+            except Exception as e:
+                logger.error(f"Error in consumer loop: {str(e)}")
+                await asyncio.sleep(1)
+
+    async def _get_next_message(self):
         try:
-            await rabbitmq_handler.connect()
-            self.is_running = True
-            
-            logger.info("Starting RabbitMQ message consumption...")
-            await rabbitmq_handler.consume_messages(self._process_message)
-            
+            await rabbitmq_handler._ensure_connected()
+            message = await rabbitmq_handler.queue.get(no_ack=False, fail=False)
+            if message is None:
+                return None
+            return message
         except Exception as e:
-            logger.error(f"Error starting RabbitMQ consumer: {str(e)}")
-            self.is_running = False
-            raise
+            logger.error(f"Error getting message from queue: {str(e)}")
+            return None
+
+    async def _handle_message(self, message):
+        try:
+            try:
+                message_data = json.loads(message.body.decode())
+                task_message = TaskMessage.from_dict(message_data)
+                logger.info(f"Processing task: {task_message.task_id} of type {task_message.task_type.value}")
+                
+                await self._process_message(task_message)
+                
+                message.ack()
+                logger.info(f"Task {task_message.task_id} processed successfully and acknowledged")
+                
+            except Exception as e:
+                logger.error(f"Error processing message: {str(e)}")
+                message.reject(requeue=False)
+                logger.error(f"Task {task_message.task_id if 'task_message' in locals() else 'unknown'} rejected and sent to dead letter queue")
+                raise
+                
+        except Exception:
+            pass
 
     async def stop_processing(self):
         if not self.is_running:
             return
-
         self.is_running = False
+        if self._consumer_task:
+            self._consumer_task.cancel()
+            try:
+                await self._consumer_task
+            except asyncio.CancelledError:
+                logger.info("Consumer task cancelled")
         await rabbitmq_handler.disconnect()
         logger.info("RabbitMQ consumer stopped")
 

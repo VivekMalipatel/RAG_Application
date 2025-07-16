@@ -1,54 +1,18 @@
 import asyncio
 import json
 import logging
-import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional, Callable
-from dataclasses import dataclass, asdict
-from enum import Enum
-
+from typing import Dict, Any, TYPE_CHECKING
 import aio_pika
 from aio_pika import Message, DeliveryMode
-from aio_pika.abc import AbstractIncomingMessage
 
+from core.queue.task_types import TaskMessage, TaskType
 from config import settings
 
+if TYPE_CHECKING:
+    from services.orchestrator import Orchestrator
+
 logger = logging.getLogger(__name__)
-
-
-class TaskType(Enum):
-    FILE = "file"
-    URL = "url"
-    TEXT = "text"
-
-
-@dataclass
-class TaskMessage:
-    task_id: str
-    task_type: TaskType
-    source: str
-    metadata: Dict[str, Any]
-    created_at: str
-    file_content: Optional[bytes] = None
-    filename: Optional[str] = None
-    url: Optional[str] = None
-    text_content: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        data = asdict(self)
-        data['task_type'] = self.task_type.value
-        if self.file_content:
-            import base64
-            data['file_content'] = base64.b64encode(self.file_content).decode('utf-8')
-        return data
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'TaskMessage':
-        data['task_type'] = TaskType(data['task_type'])
-        if data.get('file_content'):
-            import base64
-            data['file_content'] = base64.b64decode(data['file_content'].encode('utf-8'))
-        return cls(**data)
 
 
 class RabbitMQHandler:
@@ -58,6 +22,9 @@ class RabbitMQHandler:
         self.exchange = None
         self.queue = None
         self.is_connected = False
+        self.is_consuming = False
+        self._consumer_task = None
+        self._orchestrator: 'Orchestrator' = None
 
     async def connect(self):
         try:
@@ -67,7 +34,7 @@ class RabbitMQHandler:
                 blocked_connection_timeout=300,
             )
             self.channel = await self.connection.channel()
-            await self.channel.set_qos(prefetch_count=1)
+            await self.channel.set_qos(prefetch_count=settings.MAX_CONCURRENCY)
             
             self.exchange = await self.channel.declare_exchange(
                 settings.RABBITMQ_EXCHANGE_NAME,
@@ -102,68 +69,12 @@ class RabbitMQHandler:
         if not self.is_connected or self.connection.is_closed:
             await self.connect()
 
-    async def enqueue_file(self, file_content: bytes, filename: str, source: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    async def enqueue_task(self, task_message: TaskMessage) -> str:
         await self._ensure_connected()
         
-        task_id = str(uuid.uuid4())
-        if metadata is None:
-            metadata = {}
-        if 'filename' not in metadata:
-            metadata['filename'] = filename
-            
-        task_message = TaskMessage(
-            task_id=task_id,
-            task_type=TaskType.FILE,
-            source=source,
-            metadata=metadata,
-            created_at=datetime.now().isoformat(),
-            file_content=file_content,
-            filename=filename
-        )
-        
         await self._publish_message(task_message)
-        logger.info(f"File task enqueued with ID: {task_id}")
-        return task_id
-
-    async def enqueue_url(self, url: str, source: str, metadata: Optional[Dict[str, Any]] = None) -> str:
-        await self._ensure_connected()
-        
-        task_id = str(uuid.uuid4())
-        if metadata is None:
-            metadata = {}
-            
-        task_message = TaskMessage(
-            task_id=task_id,
-            task_type=TaskType.URL,
-            source=source,
-            metadata=metadata,
-            created_at=datetime.now().isoformat(),
-            url=url
-        )
-        
-        await self._publish_message(task_message)
-        logger.info(f"URL task enqueued with ID: {task_id}")
-        return task_id
-
-    async def enqueue_text(self, text: str, source: str, metadata: Optional[Dict[str, Any]] = None) -> str:
-        await self._ensure_connected()
-        
-        task_id = str(uuid.uuid4())
-        if metadata is None:
-            metadata = {}
-            
-        task_message = TaskMessage(
-            task_id=task_id,
-            task_type=TaskType.TEXT,
-            source=source,
-            metadata=metadata,
-            created_at=datetime.now().isoformat(),
-            text_content=text
-        )
-        
-        await self._publish_message(task_message)
-        logger.info(f"Text task enqueued with ID: {task_id}")
-        return task_id
+        logger.info(f"Task enqueued with ID: {task_message.task_id}")
+        return task_message.task_id
 
     async def _publish_message(self, task_message: TaskMessage):
         message_body = json.dumps(task_message.to_dict())
@@ -175,7 +86,6 @@ class RabbitMQHandler:
             timestamp=datetime.now(),
             headers={
                 'task_type': task_message.task_type.value,
-                'source': task_message.source,
             }
         )
         
@@ -184,27 +94,77 @@ class RabbitMQHandler:
             routing_key=settings.RABBITMQ_ROUTING_KEY
         )
 
-    async def consume_messages(self, callback: Callable[[TaskMessage], None]):
+    async def start_consuming(self, orchestrator):
+        if self.is_consuming:
+            logger.warning("Consumer is already running")
+            return
+
         await self._ensure_connected()
-        
-        async def process_message(message: AbstractIncomingMessage):
-            async with message.process():
-                try:
-                    message_data = json.loads(message.body.decode())
-                    task_message = TaskMessage.from_dict(message_data)
-                    
-                    logger.info(f"Processing task: {task_message.task_id} of type {task_message.task_type.value}")
-                    
-                    await callback(task_message)
-                    
-                    logger.info(f"Task {task_message.task_id} processed successfully")
-                    
-                except Exception as e:
-                    logger.error(f"Error processing message: {str(e)}")
-                    raise
-        
-        await self.queue.consume(process_message)
-        logger.info("Started consuming messages from RabbitMQ queue")
+        self.is_consuming = True
+        self._orchestrator = orchestrator
+        logger.info(f"Starting RabbitMQ consumer with max concurrency: {settings.MAX_CONCURRENCY}")
+        self._consumer_task = asyncio.create_task(self._consume_loop())
+
+    async def _consume_loop(self):
+        tasks = set()
+        logger.info("Consumer loop started")
+        while self.is_consuming:
+            try:
+                incoming_message = await self._get_next_message()
+                if incoming_message is None:
+                    await asyncio.sleep(0.2)
+                    continue
+
+                task = asyncio.create_task(self._handle_message(incoming_message))
+                tasks.add(task)
+                tasks = {t for t in tasks if not t.done()}
+            except Exception as e:
+                logger.error(f"Error in consumer loop: {str(e)}")
+                await asyncio.sleep(1)
+
+    async def _get_next_message(self):
+        try:
+            await self._ensure_connected()
+            message = await self.queue.get(no_ack=False, fail=False)
+            if message is None:
+                return None
+            return message
+        except Exception as e:
+            logger.error(f"Error getting message from queue: {str(e)}")
+            return None
+
+    async def _handle_message(self, message):
+        try:
+            try:
+                message_data = json.loads(message.body.decode())
+                task_message = TaskMessage.from_dict(message_data)
+                logger.info(f"Processing task: {task_message.task_id} of type {task_message.task_type.value}")
+                
+                await self._orchestrator.process(task_message)
+                
+                await message.ack()
+                logger.info(f"Task {task_message.task_id} processed successfully and acknowledged")
+                
+            except Exception as e:
+                logger.error(f"Error processing message: {str(e)}")
+                message.reject(requeue=False)
+                logger.error(f"Task {task_message.task_id if 'task_message' in locals() else 'unknown'} rejected and sent to dead letter queue")
+                raise
+                
+        except Exception:
+            pass
+
+    async def stop_consuming(self):
+        if not self.is_consuming:
+            return
+        self.is_consuming = False
+        if self._consumer_task:
+            self._consumer_task.cancel()
+            try:
+                await self._consumer_task
+            except asyncio.CancelledError:
+                logger.info("Consumer task cancelled")
+        logger.info("RabbitMQ consumer stopped")
 
     async def get_queue_info(self) -> Dict[str, Any]:
         await self._ensure_connected()
@@ -216,11 +176,5 @@ class RabbitMQHandler:
             "consumer_count": queue_info.consumers,
             "is_connected": self.is_connected
         }
-
-    async def purge_queue(self):
-        await self._ensure_connected()
-        await self.queue.purge()
-        logger.info("Queue purged successfully")
-
 
 rabbitmq_handler = RabbitMQHandler()
