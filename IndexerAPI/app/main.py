@@ -6,7 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from config import settings
-from api.routes import ingest, search
+from api.routes import ingest, search, delete
 from services.orchestrator import get_global_orchestrator, cleanup_global_orchestrator
 from core.processors import register_processors
 from core.queue.rabbitmq_handler import rabbitmq_handler
@@ -74,6 +74,7 @@ app.add_middleware(
 
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
 app.include_router(search.router, prefix="/search", tags=["search"])
+app.include_router(delete.router, prefix="/delete", tags=["delete"])
 
 @app.get("/health")
 async def health_check():

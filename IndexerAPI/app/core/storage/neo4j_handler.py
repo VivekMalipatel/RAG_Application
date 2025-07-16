@@ -453,7 +453,9 @@ class Neo4jHandler:
             logger.error(f"Error executing Cypher query: {e}")
             return []
     
-    async def delete_document(self, user_id: str, org_id: str, internal_object_id: str) -> bool:
+    async def delete_document(self, user_id: str, org_id: str, source: str, filename: str) -> bool:
+
+        internal_object_id = f"{org_id}_{user_id}_{source}_{filename}"
         try:
             async with self.driver.session(database=self.database) as session:
                 query = """

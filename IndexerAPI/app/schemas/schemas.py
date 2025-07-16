@@ -1,4 +1,3 @@
-from typing import Optional, Dict, Any
 from pydantic import BaseModel
 
 class FileIngestRequest(BaseModel):
@@ -24,3 +23,13 @@ class RawTextIngestRequest(BaseModel):
 
 class IngestResponse(BaseModel):
     task_id: str
+
+class DeleteFileRequest(BaseModel):
+    user_id: str
+    org_id: str
+    source: str
+    filename: str
+
+class DeleteResponse(BaseModel):
+    success: bool
+    message: str
