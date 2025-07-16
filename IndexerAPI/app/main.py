@@ -11,6 +11,7 @@ from services.orchestrator import get_global_orchestrator, cleanup_global_orches
 from core.processors import register_processors
 from core.queue.rabbitmq_handler import rabbitmq_handler
 from core.storage.neo4j_handler import initialize_neo4j, cleanup_neo4j
+from core.storage.s3_handler import get_global_s3_handler, cleanup_global_s3_handler
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
@@ -22,6 +23,10 @@ async def lifespan(app: FastAPI):
     
     logging.info("Initializing Neo4j connection and indexes...")
     await initialize_neo4j()
+    
+    logging.info("Initializing global S3 handler...")
+    await get_global_s3_handler()
+    
     await rabbitmq_handler.connect()
     orchestrator = get_global_orchestrator()
     register_processors(orchestrator)
@@ -38,6 +43,9 @@ async def lifespan(app: FastAPI):
     
     logging.info("Cleaning up Neo4j connection...")
     await cleanup_neo4j()
+    
+    logging.info("Cleaning up global S3 handler...")
+    await cleanup_global_s3_handler()
     
     try:
         process_task.cancel()

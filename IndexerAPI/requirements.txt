@@ -14,7 +14,7 @@ magika
 pypdf
 aiohttp
 pdf2image
-unoserver>=3.0
+unoserver
 aiobotocore
 psutil
 aio-pika

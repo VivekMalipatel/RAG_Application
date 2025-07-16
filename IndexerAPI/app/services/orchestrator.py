@@ -1,11 +1,8 @@
-import asyncio
 import logging
-import hashlib
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from core.queue.task_types import TaskMessage, TaskType
-from core.model.model_handler import ModelHandler, get_global_model_handler
-from services.vector_store import VectorStore, get_global_vector_store
+from core.model.model_handler import get_global_model_handler
 from core.processors import FileProcessor, BaseProcessor
 
 logger = logging.getLogger(__name__)

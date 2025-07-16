@@ -10,7 +10,7 @@ from core.processors._structured_processor import StructuredProcessor
 from core.processors._unstructured_processor import UnstructuredProcessor
 from core.markitdown.markdown_handler import MarkDown
 from core.model.model_handler import get_global_model_handler
-from core.storage.s3_handler import S3Handler
+from core.storage.s3_handler import get_global_s3_handler
 from core.storage.neo4j_handler import get_neo4j_handler
 from core.queue.task_types import TaskMessage
 from config import settings
@@ -22,7 +22,6 @@ class FileProcessor(BaseProcessor):
     def __init__(self):
         self.markdown = MarkDown()
         self.model_handler = get_global_model_handler()
-        self.s3_handler = S3Handler()
         self.neo4j_handler = get_neo4j_handler()
         
         self.direct_processor = DirectProcessor()
@@ -31,11 +30,6 @@ class FileProcessor(BaseProcessor):
         
         self.unoserver_host = settings.UNOSERVER_HOST
         self.unoserver_port = settings.UNOSERVER_PORT
-
-        total_cpus = os.cpu_count() or 1
-        reserved = 2 if total_cpus > 2 + 1 else 1
-        max_workers = max(1, total_cpus - reserved)
-        self._executor = ProcessPoolExecutor(max_workers=max_workers)
         
         self.unstructured_docs = [
             'pdf', 

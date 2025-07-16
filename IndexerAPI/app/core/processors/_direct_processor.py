@@ -5,7 +5,7 @@ from typing import Dict, Any
 from core.processors.base_processor import BaseProcessor
 from core.markitdown.markdown_handler import MarkDown
 from core.model.model_handler import get_global_model_handler
-from core.storage.s3_handler import S3Handler
+from core.storage.s3_handler import get_global_s3_handler
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,6 @@ class DirectProcessor(BaseProcessor):
     def __init__(self):
         self.markdown = MarkDown()
         self.model_handler = get_global_model_handler()
-        self.s3_handler = S3Handler()
 
     async def process(self, task_message) -> Dict[str, Any]:
         raise NotImplementedError("Use process_direct_document method instead")

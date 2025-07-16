@@ -7,7 +7,7 @@ import base64
 from urllib.parse import urlparse
 from pdf2image import convert_from_bytes
 from magika import Magika
-from core.storage.s3_handler import S3Handler
+from core.storage.s3_handler import get_global_s3_handler
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ async def detect_file_type(file_data: bytes) -> str:
 async def download_file_from_s3_url(s3_url: str) -> bytes:
     try:
         parsed_url = urlparse(s3_url)
-        s3_handler = S3Handler()
+        s3_handler = await get_global_s3_handler()
         
         if parsed_url.scheme in ['s3']:
             bucket_name = parsed_url.netloc

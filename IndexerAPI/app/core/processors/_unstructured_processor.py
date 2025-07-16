@@ -11,7 +11,7 @@ from core.processors.base_processor import BaseProcessor
 from core.processors.utils import rasterize_and_encode, convert_to_pdf, detect_file_type
 from core.markitdown.markdown_handler import MarkDown
 from core.model.model_handler import get_global_model_handler
-from core.storage.s3_handler import S3Handler
+from core.storage.s3_handler import get_global_s3_handler
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +20,14 @@ class UnstructuredProcessor(BaseProcessor):
     def __init__(self):
         self.markdown = MarkDown()
         self.model_handler = get_global_model_handler()
-        self.s3_handler = S3Handler()
 
     async def process(self, task_message) -> Dict[str, Any]:
         raise NotImplementedError("Use process_unstructured_document method instead")
 
     async def process_single_page(self, page_data: bytes, page_num: int, s3_base_path: str) -> Dict[str, Any]:
         try:
+            s3_handler = await get_global_s3_handler()
+            
             loop = asyncio.get_running_loop()
             extracted_text_task = loop.run_in_executor(None, self.markdown.convert_bytes, page_data)
             image_task = loop.run_in_executor(None, rasterize_and_encode, page_data, page_num)
@@ -69,8 +70,8 @@ class UnstructuredProcessor(BaseProcessor):
             
             image_bytes_data = base64.b64decode(image_base64)
             image_s3_key = f"metadata/{s3_base_path}/page_{page_num + 1}.jpg"
-            await self.s3_handler.upload_bytes(image_bytes_data, image_s3_key)
-            image_s3_url = f"{self.s3_handler.endpoint_url}/{self.s3_handler.bucket_name}/{image_s3_key}"
+            await s3_handler.upload_bytes(image_bytes_data, image_s3_key)
+            image_s3_url = f"{s3_handler.endpoint_url}/{s3_handler.bucket_name}/{image_s3_key}"
             
             return {
                 "page_number": page_num + 1,

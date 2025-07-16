@@ -7,6 +7,10 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+_global_s3_session = None
+_global_s3_handler = None
+_s3_handler_lock = asyncio.Lock()
+
 class S3Handler:
     def __init__(self):
         self.endpoint_url = settings.MINIO_ENDPOINT_URL
@@ -17,7 +21,7 @@ class S3Handler:
         
         logger.info(f"Initializing S3 handler with endpoint: {self.endpoint_url}, bucket: {self.bucket_name}")
         
-        self.session = get_session()
+        self.session = _get_global_s3_session()
         self._initialized = False
         self._init_lock = asyncio.Lock()
     
@@ -198,3 +202,22 @@ class S3Handler:
         except Exception as e:
             logger.error(f"Error checking if {object_key} exists: {str(e)}")
             return False
+
+def _get_global_s3_session():
+    global _global_s3_session
+    if _global_s3_session is None:
+        _global_s3_session = get_session()
+    return _global_s3_session
+
+async def get_global_s3_handler():
+    global _global_s3_handler
+    async with _s3_handler_lock:
+        if _global_s3_handler is None:
+            _global_s3_handler = S3Handler()
+            await _global_s3_handler.initialize()
+        return _global_s3_handler
+
+async def cleanup_global_s3_handler():
+    global _global_s3_handler, _global_s3_session
+    _global_s3_handler = None
+    _global_s3_session = None
