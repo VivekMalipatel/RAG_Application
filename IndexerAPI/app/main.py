@@ -6,12 +6,11 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from config import settings
-from api.routes import ingest, status, vector
-from services.vector_store import get_global_vector_store, cleanup_global_vector_store
+from api.routes import ingest, search
 from services.orchestrator import get_global_orchestrator, cleanup_global_orchestrator
 from core.processors import register_processors
 from core.queue.rabbitmq_handler import rabbitmq_handler
-from core.storage.neo4j_handler import initialize_neo4j, cleanup_neo4j, get_neo4j_handler
+from core.storage.neo4j_handler import initialize_neo4j, cleanup_neo4j
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
@@ -66,7 +65,7 @@ app.add_middleware(
 )
 
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
-app.include_router(vector.router, prefix="/vector", tags=["vector"])
+app.include_router(search.router, prefix="/search", tags=["search"])
 
 @app.get("/health")
 async def health_check():
