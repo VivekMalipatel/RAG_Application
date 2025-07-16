@@ -64,12 +64,16 @@ class DirectProcessor(BaseProcessor):
                 
                 entities_relationships = await self.model_handler.extract_entities_relationships(messages)
                 
-                entities, relationships = await self.model_handler.embed_entity_relationship_profiles(
+                entities_relationships_task = self.model_handler.embed_entity_relationship_profiles(
                     entities_relationships["entities"], 
                     entities_relationships["relationships"]
                 )
+                chunk_embedding_task = self.model_handler.embed_text([chunk])
                 
-                chunk_embedding = await self.model_handler.embed_text([chunk])
+                (entities, relationships), chunk_embedding = await asyncio.gather(
+                    entities_relationships_task,
+                    chunk_embedding_task
+                )
                 
                 chunks_with_entities.append({
                     "page_number": i + 1,

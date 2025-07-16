@@ -22,89 +22,6 @@ class StructuredProcessor(BaseProcessor):
     async def process(self, task_message) -> Dict[str, Any]:
         raise NotImplementedError("Use process_structured_document method instead")
 
-    async def process_structured_as_text(self, file_data: bytes, s3_base_path: str) -> Dict[str, Any]:
-        try:
-            loop = asyncio.get_running_loop()
-            markdown_text = await loop.run_in_executor(None, self.markdown.convert_bytes, file_data)
-
-            MAX_CHARS = 8000
-            batches = []
-            
-            if len(markdown_text) <= MAX_CHARS:
-                batches.append(markdown_text)
-            else:
-                lines = markdown_text.splitlines(True)
-                has_header = False
-                try:
-                    sample = ''.join(lines[:min(len(lines), 10)])
-                    has_header = csv.Sniffer().has_header(sample)
-                except Exception:
-                    pass
-                    
-                header = lines[0] if lines and has_header else ''
-                data_lines = lines[1:] if len(lines) > 1 and has_header else lines
-                current_batch = []
-                current_length = len(header)
-                
-                for line in data_lines:
-                    if current_length + len(line) > MAX_CHARS and current_batch:
-                        batches.append(header + ''.join(current_batch))
-                        current_batch = [line]
-                        current_length = len(header) + len(line)
-                    else:
-                        current_batch.append(line)
-                        current_length += len(line)
-                        
-                if current_batch:
-                    batches.append(header + ''.join(current_batch))
-
-            batches_with_entities = []
-            for i, batch in enumerate(batches):
-                messages = [
-                    {
-                        "role": "user", 
-                        "content": [
-                            {"type": "text", "text": batch}
-                        ]
-                    }
-                ]
-                
-                entities_relationships = await self.model_handler.extract_entities_relationships(messages)
-                
-                entities, relationships = await self.model_handler.embed_entity_relationship_profiles(
-                    entities_relationships["entities"], 
-                    entities_relationships["relationships"]
-                )
-                
-                batch_embedding = await self.model_handler.embed_text([batch])
-                
-                batches_with_entities.append({
-                    "page_number": i + 1,
-                    "messages": messages,
-                    "entities": entities,
-                    "relationships": relationships,
-                    "image_s3_url": "",
-                    "embedding": batch_embedding[0] if batch_embedding else None
-                })
-
-            return {
-                "data": batches_with_entities,
-                "category": "structured"
-            }
-        except Exception as e:
-            logger.error(f"Error processing structured document as text: {e}")
-            return {
-                "data": [{
-                    "page_number": 1,
-                    "messages": f"Error processing document: {str(e)}",
-                    "entities": [],
-                    "relationships": [],
-                    "image_s3_url": "",
-                    "embedding": None
-                }],
-                "category": "structured"
-            }
-
     async def process_tabular_sheet(self, df: pd.DataFrame, sheet_name: str, s3_base_path: str) -> Dict[str, Any]:
         try:
             sample_rows = min(20, len(df))
@@ -112,8 +29,13 @@ class StructuredProcessor(BaseProcessor):
             
             dataframe_text = df_sample.to_markdown(index=False)
             
-            summary = await self.model_handler.generate_structured_summary(dataframe_text)
-            column_profiles = await self.model_handler.generate_column_profiles(dataframe_text)
+            summary_task = self.model_handler.generate_structured_summary(dataframe_text)
+            column_profiles_task = self.model_handler.generate_column_profiles(dataframe_text)
+            
+            summary, column_profiles = await asyncio.gather(
+                summary_task,
+                column_profiles_task
+            )
             
             messages = [
                 {
@@ -124,15 +46,13 @@ class StructuredProcessor(BaseProcessor):
                 }
             ]
             
-            entities_relationships = await self.model_handler.extract_entities_relationships(messages)
+            summary_embedding_task = self.model_handler.embed_text([summary])
+            column_embeddings_task = self.model_handler.embed_text([cp["column_profile"] for cp in column_profiles])
             
-            entities, relationships = await self.model_handler.embed_entity_relationship_profiles(
-                entities_relationships["entities"], 
-                entities_relationships["relationships"]
+            summary_embedding, column_embeddings = await asyncio.gather(
+                summary_embedding_task,
+                column_embeddings_task
             )
-            
-            summary_embedding = await self.model_handler.embed_text([summary])
-            column_embeddings = await self.model_handler.embed_text([cp["column_profile"] for cp in column_profiles])
             
             for i, profile in enumerate(column_profiles):
                 if i < len(column_embeddings):
@@ -157,8 +77,6 @@ class StructuredProcessor(BaseProcessor):
                 "sheet_name": sheet_name,
                 "page_number": 1,
                 "messages": messages,
-                "entities": entities,
-                "relationships": relationships,
                 "image_s3_url": "",
                 "embedding": summary_embedding[0] if summary_embedding else None,
                 "summary": summary,
@@ -175,8 +93,6 @@ class StructuredProcessor(BaseProcessor):
                 "sheet_name": sheet_name,
                 "page_number": 1,
                 "messages": f"Error processing sheet: {str(e)}",
-                "entities": [],
-                "relationships": [],
                 "image_s3_url": "",
                 "embedding": None,
                 "summary": f"Error processing sheet: {str(e)}",
@@ -367,10 +283,9 @@ class StructuredProcessor(BaseProcessor):
         try:
             if file_type in ['xls', 'xlsx']:
                 return await self.process_excel_file(file_data, s3_base_path)
-            elif file_type == 'csv':
-                return await self.process_csv_file(file_data, s3_base_path)
             else:
-                return await self.process_structured_as_text(file_data, s3_base_path)
+                return await self.process_csv_file(file_data, s3_base_path)
+            
         except Exception as e:
             logger.error(f"Error processing structured document: {e}")
             return {

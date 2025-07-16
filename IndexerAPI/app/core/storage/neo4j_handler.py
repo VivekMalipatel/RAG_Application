@@ -250,8 +250,9 @@ class Neo4jHandler:
                                         }
                                         
                                         row_query = """
+                                        MATCH (p:Page {sheet_name: $sheet_name, user_id: $user_id, org_id: $org_id})
                                         MATCH (c:Column {column_name: $column_name})
-                                        WHERE exists((p:Page {sheet_name: $sheet_name, user_id: $user_id, org_id: $org_id})-[:MENTIONS]->(c))
+                                        WHERE (p)-[:MENTIONS]->(c)
                                         CREATE (r:RowValue $row_properties)
                                         CREATE (c)-[:HAS_VALUE]->(r)
                                         RETURN r
@@ -393,7 +394,7 @@ class Neo4jHandler:
             return False
     
     async def _process_entities_relationships(self, tx, chunk_data: Dict[str, Any], document_data: Dict[str, Any]):
-        async def process_entity(entity_data):
+        for entity_data in chunk_data.get("entities", []):
             entity_properties = {
                 "id": entity_data["id"],
                 "text": entity_data["text"],
@@ -420,7 +421,7 @@ class Neo4jHandler:
                        user_id=document_data["user_id"],
                        org_id=document_data["org_id"])
 
-        async def process_relationship(rel_data):
+        for rel_data in chunk_data.get("relationships", []):
             rel_properties = {
                 "relation_type": rel_data["relation_type"],
                 "relation_profile": rel_data["relation_profile"]
@@ -440,14 +441,6 @@ class Neo4jHandler:
                        source_id=rel_data["source"],
                        target_id=rel_data["target"],
                        rel_properties=rel_properties)
-        
-        entity_tasks = [process_entity(entity_data) for entity_data in chunk_data.get("entities", [])]
-        
-        await asyncio.gather(*entity_tasks)
-        
-        relationship_tasks = [process_relationship(rel_data) for rel_data in chunk_data.get("relationships", [])]
-        
-        await asyncio.gather(*relationship_tasks)
     
     async def execute_cypher_query(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         try:

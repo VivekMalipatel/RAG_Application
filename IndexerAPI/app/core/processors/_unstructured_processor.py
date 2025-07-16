@@ -45,13 +45,6 @@ class UnstructuredProcessor(BaseProcessor):
                 }
             ]
             
-            entities_relationships = await self.model_handler.extract_entities_relationships(messages)
-            
-            entities, relationships = await self.model_handler.embed_entity_relationship_profiles(
-                entities_relationships["entities"], 
-                entities_relationships["relationships"]
-            )
-            
             embed_page = [
                 {
                     "role": "user", 
@@ -61,7 +54,18 @@ class UnstructuredProcessor(BaseProcessor):
                 }
             ]
 
-            page_embedding = await self.model_handler.embed(embed_page)
+            entities_relationships_task = self.model_handler.extract_entities_relationships(messages)
+            page_embedding_task = self.model_handler.embed(embed_page)
+            
+            entities_relationships, page_embedding = await asyncio.gather(
+                entities_relationships_task,
+                page_embedding_task
+            )
+            
+            entities, relationships = await self.model_handler.embed_entity_relationship_profiles(
+                entities_relationships["entities"], 
+                entities_relationships["relationships"]
+            )
             
             image_bytes_data = base64.b64decode(image_base64)
             image_s3_key = f"metadata/{s3_base_path}/page_{page_num + 1}.jpg"
