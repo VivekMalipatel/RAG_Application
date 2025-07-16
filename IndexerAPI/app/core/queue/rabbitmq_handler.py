@@ -34,7 +34,7 @@ class RabbitMQHandler:
                 blocked_connection_timeout=300,
             )
             self.channel = await self.connection.channel()
-            await self.channel.set_qos(prefetch_count=settings.MAX_CONCURRENCY)
+            await self.channel.set_qos(prefetch_count=settings.MAX_DEQUEUE_CONCURRENCY)
             
             self.exchange = await self.channel.declare_exchange(
                 settings.RABBITMQ_EXCHANGE_NAME,
@@ -102,7 +102,7 @@ class RabbitMQHandler:
         await self._ensure_connected()
         self.is_consuming = True
         self._orchestrator = orchestrator
-        logger.info(f"Starting RabbitMQ consumer with max concurrency: {settings.MAX_CONCURRENCY}")
+        logger.info(f"Starting RabbitMQ consumer with max concurrency: {settings.MAX_DEQUEUE_CONCURRENCY}")
         self._consumer_task = asyncio.create_task(self._consume_loop())
 
     async def _consume_loop(self):

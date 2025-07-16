@@ -25,9 +25,6 @@ class Settings:
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
     AWS_REGION: str = os.getenv("AWS_REGION")
 
-    AUTO_BACKUP_INTERVAL_MINUTES: int = int(os.getenv("AUTO_BACKUP_INTERVAL_MINUTES", "30"))
-    S3_BACKUP_PREFIX: str = os.getenv("S3_BACKUP_PREFIX", "IndexerAPI/")
-
     # RabbitMQ Configuration
     RABBITMQ_URL: str = os.getenv("RABBITMQ_URL")
     RABBITMQ_QUEUE_NAME: str = os.getenv("RABBITMQ_QUEUE_NAME")
@@ -35,7 +32,7 @@ class Settings:
     RABBITMQ_ROUTING_KEY: str = os.getenv("RABBITMQ_ROUTING_KEY")
     
     # Consumer Configuration
-    MAX_CONCURRENCY: int = int(os.getenv("MAX_CONCURRENCY", "10"))
+    MAX_DEQUEUE_CONCURRENCY: int = int(os.getenv("MAX_DEQUEUE_CONCURRENCY", "5"))
 
     # Neo4j Configuration
     NEO4J_URI: str = os.getenv("NEO4J_URI")

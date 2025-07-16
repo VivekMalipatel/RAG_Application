@@ -36,7 +36,7 @@ class RabbitMQConsumer:
 
         await rabbitmq_handler.connect()
         self.is_running = True
-        logger.info(f"Starting RabbitMQ consumer with max concurrency: {settings.MAX_CONCURRENCY}")
+        logger.info(f"Starting RabbitMQ consumer with max concurrency: {settings.MAX_DEQUEUE_CONCURRENCY}")
         self._consumer_task = asyncio.create_task(self._consume_loop())
 
     async def _consume_loop(self):
