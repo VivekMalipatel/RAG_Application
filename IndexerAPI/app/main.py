@@ -66,17 +66,12 @@ app.add_middleware(
 )
 
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
-app.include_router(status.router, tags=["status"])
 app.include_router(vector.router, prefix="/vector", tags=["vector"])
 
 @app.get("/health")
 async def health_check():
-    neo4j_handler = get_neo4j_handler()
-    neo4j_status = await neo4j_handler.test_connection()
-    
     return {
         "status": "ok",
-        "neo4j_connected": neo4j_status,
         "timestamp": asyncio.get_event_loop().time()
     }
 
