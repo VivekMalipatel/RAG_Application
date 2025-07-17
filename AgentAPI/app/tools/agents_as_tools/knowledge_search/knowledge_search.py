@@ -14,7 +14,7 @@ TOOL_NAME = "knowledge_search_agent"
 
 class KnowledgeSearchRequest(BaseModel):
     prompt: str = Field(
-        description="Prompt to guide the knowledge search agent's behavior."
+        description="Clear task description (with full details and context) as a prompt to the knowledge search agent."
     )
 
 def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml") -> str:
