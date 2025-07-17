@@ -463,10 +463,9 @@ class Neo4jHandler:
                 result = await session.run(query, parameters or {})
                 records = await result.data()
                 return [dict(record) for record in records]
-                
-        except Exception as e:
+        except Exception as e:  
             logger.error(f"Error executing Cypher query: {e}")
-            return []
+            raise e
     
     async def delete_document(self, user_id: str, org_id: str, source: str, filename: str) -> bool:
 
