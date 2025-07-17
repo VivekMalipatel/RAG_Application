@@ -21,3 +21,4 @@ redisvl
 langgraph-checkpoint
 langgraph-checkpoint-redis
 transformers
+debugpy

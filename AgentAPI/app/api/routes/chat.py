@@ -277,42 +277,30 @@ async def agent_completions(request: dict):
         messages = request.get("messages", [])
         if not messages:
             raise HTTPException(status_code=400, detail="No messages provided")
-        config = request.get("config")
-        if not config:
-            # Try to build config from OpenAI-style fields
-            thread_id = request.get("thread_id")
-            user_id = request.get("user")
-            org_id = request.get("organization")
-            if thread_id and user_id and org_id:
-                config = {
-                    "configurable": {
-                        "thread_id": thread_id,
-                        "user_id": user_id,
-                        "org_id": org_id
-                    }
-                }
-            else:
-                raise HTTPException(status_code=400, detail="Missing required 'config' object or OpenAI-style fields (thread_id, user, organization).")
-        if not isinstance(config, dict):
-            raise HTTPException(status_code=400, detail="Invalid 'config' object.")
-        configurable = config.get("configurable")
-        if not configurable or not isinstance(configurable, dict):
-            raise HTTPException(status_code=400, detail="Missing required 'configurable' object in config.")
-        required_keys = ["thread_id", "user_id", "org_id"]
-        for key in required_keys:
-            if key not in configurable:
-                raise HTTPException(status_code=400, detail=f"Missing required config key: {key}")
         # Accept both OpenAI and BaseAgent style state
+        thread_id = request.get("thread_id")
+        user_id = request.get("user_id")
+        org_id = request.get("org_id")
         if "messages" in request:
             input_data = {
                 "messages": [
                     HumanMessage(content=m["content"]) if m["role"] == "user" else SystemMessage(content=m["content"])
                     for m in messages
-                ]
+                ],
+                "user_id": user_id,
+                "org_id": org_id
             }
         else:
             # Accept direct state dict
             input_data = dict(request)
+        # Always provide a config with configurable keys for Checkpointer compatibility
+        config = {"configurable": {}}
+        if thread_id is not None:
+            config["configurable"]["thread_id"] = thread_id
+        if user_id is not None:
+            config["configurable"]["user_id"] = user_id
+        if org_id is not None:
+            config["configurable"]["org_id"] = org_id
         stream = request.get("stream", False)
         enable_progress_updates = request.get("enable_progress_updates", True)
         if stream:

@@ -8,14 +8,13 @@ services:
     container_name: agentapp
     ports:
       - "8000:8000"
+      - "5678:5678"  # Add debugger port
     environment:
       - PYTHONPATH=/app/app
       - PYTHONUNBUFFERED=1
     volumes:
-      # Mount logs directory for persistent logging
       - ./logs:/app/logs
-      # Mount source code for development (comment out for production)
       - .:/app
     restart: unless-stopped
-    # Run as a web service exposing the agent API
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # Updated command to use debugpy
+    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]

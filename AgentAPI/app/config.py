@@ -3,26 +3,28 @@ import os
 class Config:
 
     # Models Configuration
-    REASONING_LLM_MODEL: str = "Qwen/Qwen3-8B-AWQ"
-    VLM_MODEL: str = "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
-    MULTIMODEL_EMBEDDING_MODEL: str = "VivekMalipatel23/nomic-embed-multimodal-3b-8bit"
-    MULTIMODEL_EMBEDDING_MODEL_DIMS: int = 2048
-    TEXT_EMBEDDING_MODEL: str = "nomic-ai/nomic-embed-text-v1.5"
-    TEXT_EMBEDDING_MODEL_DIMS: int = 768
-    OPENAI_BASE_URL: str = "https://llm.gauravshivaprasad.com/v2"
-    OPENAI_API_KEY: str = "sk-372c69b72fb14a90a2e1b0b17884d9b4"
-    MODEL_PROVIDER: str = "openai"
+    REASONING_LLM_MODEL: str = os.getenv("REASONING_LLM_MODEL")
+    VLM_MODEL: str = os.getenv("VLM_MODEL")
+    MULTIMODEL_EMBEDDING_MODEL: str = os.getenv("MULTIMODEL_EMBEDDING_MODEL")
+    MULTIMODEL_EMBEDDING_MODEL_DIMS: int = int(os.getenv("MULTIMODEL_EMBEDDING_MODEL_DIMS"))
+    TEXT_EMBEDDING_MODEL: str = os.getenv("TEXT_EMBEDDING_MODEL")
+    TEXT_EMBEDDING_MODEL_DIMS: int = int(os.getenv("TEXT_EMBEDDING_MODEL_DIMS"))
+    OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL")
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
+    MODEL_PROVIDER: str = os.getenv("MODEL_PROVIDER")
 
     # Redis Configuration
-    REDIS_HOST: str = "192.168.0.20"
-    REDIS_PORT: int = 6379
-    REDIS_PASSWORD: str = "password"
-    REDIS_DB: int = 0
-    
-    #Prompt Configuration
-    MEDIA_DESCRIPTION_PROMPT: str = "Provide an extremely detailed description of this media content. Include every visible/audible element, text, object, person, color, layout, sounds, speech, and any other relevant details without missing anything."
+    REDIS_HOST: str = os.getenv("REDIS_HOST")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT"))
+    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD")
+    REDIS_DB: int = int(os.getenv("REDIS_DB"))
+
+    # Prompt Configuration
+    MEDIA_DESCRIPTION_PROMPT: str = os.getenv(
+        "MEDIA_DESCRIPTION_PROMPT",
+    )
 
     # State Management
-    MAX_STATE_TOKENS: int = 40000
+    MAX_STATE_TOKENS: int = int(os.getenv("MAX_STATE_TOKENS", 40000))
 
 config = Config()

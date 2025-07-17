@@ -23,6 +23,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy application code
 COPY . .
+COPY ./app /app
+
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash app && \
@@ -31,6 +33,7 @@ USER app
 
 # Expose port (if running as a web service)
 EXPOSE 8000
-
+EXPOSE 5678
 # Default command to run the semantic store demo
-CMD ["python", "pretests/semantic_store_langgraph.py"]
+
+CMD ["python3", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
