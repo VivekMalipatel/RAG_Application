@@ -1,4 +1,5 @@
 import yaml
+import hashlib
 from pathlib import Path
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
@@ -32,3 +33,19 @@ async def knowledge_search_agent(state : BaseState, config: RunnableConfig) :
                             )
     
     compiled_agent: BaseAgent = await knowledge_search_agent.compile(name=TOOL_NAME)
+
+    org_id : str = config.get("configurable").get("org_id")
+
+    if len(org_id.split("$")) > 1:
+        org_id = f"{config.get("configurable").get("org_id")}${hashlib.sha256(f"{TOOL_NAME}".encode()).hexdigest()}"
+
+    config = {
+        "configurable": {
+            "thread_id": f"{config.get("configurable").get("thread_id")}${hashlib.sha256(f"{TOOL_NAME}".encode()).hexdigest()}",
+            "user_id": f"{config.get("configurable").get("user_id")}${hashlib.sha256(f"{TOOL_NAME}".encode()).hexdigest()}",
+            "org_id": org_id
+        }
+    }
+
+    result = await compiled_agent.ainvoke(state["messages"][-1], config=config)
+    return {"messages": result["messages"], "user_id": config["configurable"]["user_id"], "org_id": config["configurable"]["org_id"]}
