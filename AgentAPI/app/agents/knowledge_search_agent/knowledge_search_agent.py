@@ -3,7 +3,7 @@ import yaml
 from typing import Optional, Dict, Any
 
 from agents.base_agents.base_agent import BaseAgent
-from tools.knowledge_search.knowledge_search_tool import knowledge_search_tool
+from tools.core_tools.knowledge_search.knowledge_search_tool import knowledge_search_tool
 
 
 class KnowledgeSearchAgent(BaseAgent):
