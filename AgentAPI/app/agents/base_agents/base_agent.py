@@ -21,6 +21,7 @@ from langchain_core.runnables.utils import Output
 from langchain_core.runnables.base import Input
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
 from langchain_openai import OpenAIEmbeddings
+import tiktoken
 
 from openai import BaseModel
 
@@ -89,8 +90,73 @@ class BaseAgent:
         self._name = None
         self._is_structured_output = False
         self._resursion_limit = recursion_limit
+        self._tokenizer = tiktoken.encoding_for_model("gpt-4")
+        self._token_cache = {}
         
         self.prompt = prompt
+
+    def _count_tokens_cached(self, text: str) -> int:
+        text_hash = hash(text)
+        if text_hash not in self._token_cache:
+            self._token_cache[text_hash] = len(self._tokenizer.encode(text))
+        return self._token_cache[text_hash]
+
+    def token_safety(self, messages: list[BaseMessage]) -> list[BaseMessage]:
+        total_tokens = 0
+        text_refs = []
+        
+        for msg_idx, message in enumerate(messages):
+            if isinstance(message.content, str):
+                tokens = self._count_tokens_cached(message.content)
+                total_tokens += tokens
+                text_refs.append((msg_idx, None, tokens, message.content))
+            elif isinstance(message.content, list):
+                for item_idx, item in enumerate(message.content):
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text = item.get("text", "")
+                        if text:
+                            tokens = self._count_tokens_cached(text)
+                            total_tokens += tokens
+                            text_refs.append((msg_idx, item_idx, tokens, text))
+        
+        if total_tokens <= envconfig.MAX_STATE_TOKENS:
+            return messages
+        
+        if not text_refs:
+            return messages
+        
+        text_refs.sort(key=lambda x: x[2], reverse=True)
+        tokens_to_reduce = total_tokens - envconfig.MAX_STATE_TOKENS
+        
+        for msg_idx, item_idx, text_tokens, original_text in text_refs:
+            if tokens_to_reduce <= 0:
+                break
+                
+            if text_tokens > tokens_to_reduce:
+                target_tokens = text_tokens - tokens_to_reduce
+                encoded = self._tokenizer.encode(original_text)
+                if len(encoded) > target_tokens:
+                    truncated_text = self._tokenizer.decode(encoded[:target_tokens]) + "... [TEXT TRUNCATED DUE TO LONGER LENGTH IF THIS MESSAGE IS A TOOL TRY TO REDO TOOL CALL TO GET LIMITED RESULTS]"
+                else:
+                    truncated_text = original_text
+                
+                if item_idx is None:
+                    messages[msg_idx].content = truncated_text
+                else:
+                    messages[msg_idx].content[item_idx]["text"] = truncated_text
+                
+                tokens_to_reduce = 0
+            else:
+                replacement_text = "[TEXT TRUNCATED DUE TO LONGER LENGTH IF THIS MESSAGE IS A TOOL TRY TO REDO TOOL CALL TO GET LIMITED RESULTS]"
+                
+                if item_idx is None:
+                    messages[msg_idx].content = replacement_text
+                else:
+                    messages[msg_idx].content[item_idx]["text"] = replacement_text
+                
+                tokens_to_reduce -= text_tokens
+        
+        return messages
 
     def _validate_tools(self, tools: Sequence[Union[typing.Dict[str, Any], type, Callable, BaseTool]]):
         for tool in tools:
@@ -154,6 +220,7 @@ class BaseAgent:
         if num_tokens >= envconfig.MAX_STATE_TOKENS:
             if second_last_ai_index != -1:
                 state["messages"] = messages[second_last_ai_index:]
+            state["messages"] = self.token_safety(state["messages"])
             return state
         
         return
@@ -214,7 +281,9 @@ class BaseAgent:
 
     async def llm_node(self, state: BaseState, config: RunnableConfig):
         memory_messages = await self.retrieve_memory(state, config)
+
         messages = [SystemMessage(content=self.prompt)] + memory_messages + state["messages"]
+        messages = self.token_safety(messages)
         
         response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
         if self._is_structured_output:

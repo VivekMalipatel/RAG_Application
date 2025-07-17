@@ -13,15 +13,17 @@ class Config:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     MODEL_PROVIDER: str = os.getenv("MODEL_PROVIDER")
 
+    INDEXER_API_BASE_URL: str = os.getenv("INDEXER_API_BASE_URL")
+
     # Redis Configuration
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "192.168.0.20")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
-    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "your_redis_password")
-    REDIS_DB: int = int(os.getenv("REDIS_DB", 0))
+    REDIS_HOST: str = os.getenv("REDIS_HOST")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT"))
+    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD")
+    REDIS_DB: int = int(os.getenv("REDIS_DB"))
 
     # Prompt Configuration
     MEDIA_DESCRIPTION_PROMPT: str = os.getenv(
-        "MEDIA_DESCRIPTION_PROMPT",
+        "MEDIA_DESCRIPTION_PROMPT"
     )
 
     # State Management

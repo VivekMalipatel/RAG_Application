@@ -1,0 +1,186 @@
+knowledge_search_tool: |
+
+    Execute multiple Cypher queries against the knowledge graph database to retrieve relevant information. Supports batch operations for efficient querying with mandatory security filtering.
+    
+    This tool allows batch execution of Cypher queries against the knowledge graph database through the Indexer API. 
+    It performs concurrent API calls for efficiency and returns structured results for each query.
+    
+    SECURITY REQUIREMENTS:
+    - ALL queries MUST include $user_id and $org_id parameters
+    - Queries without both parameters will be rejected
+    - These parameters are automatically injected from the user's session
+    - Use dollar sign syntax ($param) for all parameters, NOT curly braces ({param})
+    
+    EMBEDDING SUPPORT:
+    - Use $embedding parameter in queries for vector similarity search
+    - Provide text_to_embed parameter to generate embeddings automatically
+    - The system will call OpenAI embeddings API and replace $embedding with the vector
+    - Available on Page, Entity, Column, and Relationship nodes
+    - **CRITICAL**: NEVER retrieve embedding columns in queries (they are large vectors for search only)
+    - **EMBEDDING FIELDS TO NEVER RETURN**: Page.embedding, Entity.embedding, Column.embedding, RELATIONSHIP.embedding
+    - Use embeddings ONLY in vector index queries with db.index.vector.queryNodes()
+    - Including embedding fields in RETURN clauses will cause performance issues and return unusable data
+    
+    GRAPH SCHEMA:
+    
+    Document Node Properties:
+    - user_id, org_id, s3_url, source, filename, file_type, category, internal_object_id, task_id
+    - Additional metadata fields prefixed with "metadata_"
+    
+    Page Node Properties:
+    - user_id, org_id, page_number, content (JSON), image_s3_url (for unstructured)
+    - sheet_name, summary, total_rows, total_columns, is_tabular (for structured)
+    - embedding (NEVER retrieve - for vector search only)
+    
+    Entity Node Properties:
+    - user_id, org_id, id, text, entity_type, entity_profile
+    - embedding (NEVER retrieve - for vector search only)
+    
+    Column Node Properties:
+    - user_id, org_id, column_name, column_profile
+    - embedding (NEVER retrieve - for vector search only)
+    
+    RowValue Node Properties:
+    - user_id, org_id, row_index, column_name, value
+    
+    RELATIONSHIP Properties:
+    - user_id, org_id, relation_type, relation_profile
+    - embedding (NEVER retrieve - for vector search only)
+    
+    Graph Relationships:
+    - Document -[:HAS_PAGE]-> Page
+    - Page -[:MENTIONS]-> Entity
+    - Page -[:MENTIONS]-> Column
+    - Column -[:HAS_VALUE]-> RowValue
+    - Entity -[:RELATIONSHIP]-> Entity
+    - RowValue -[:RELATES_TO]-> RowValue
+    
+    QUERY LIMITS:
+    - **CRITICAL**: NEVER execute queries without LIMIT clause - all queries MUST include LIMIT
+    - **MAXIMUM LIMIT**: Never exceed LIMIT 150 unless absolutely necessary for specific use cases
+    - Unstructured documents: Max 4 Page nodes (contains images)
+    - Structured documents: Higher limits for text-only data (max 150)
+    - Entity searches: Limit 10-20 entities based on profile length (max 150)
+    - Relationship searches: Limit 5-10 relationships with profiles (max 150)
+    - **WARNING**: Queries without LIMIT will cause performance issues and may be rejected
+    
+    CYPHER QUERY EXAMPLES:
+    
+    1. Vector Search on Page Content:
+    ```
+    CALL db.index.vector.queryNodes('page_embedding_index', 5, $embedding)
+    YIELD node, score
+    WHERE node.user_id = $user_id AND node.org_id = $org_id
+    RETURN node.page_number, node.content, node.image_s3_url, score
+    LIMIT 4
+    ```
+    
+    2. Vector Search on Entity Embeddings:
+    ```
+    CALL db.index.vector.queryNodes('entity_embedding_index', 10, $embedding)
+    YIELD node, score
+    WHERE node.user_id = $user_id AND node.org_id = $org_id
+    RETURN node.id, node.text, node.entity_type, node.entity_profile, score
+    LIMIT 10
+    ```
+    
+    3. Text-based Document Search:
+    ```
+    MATCH (d:Document {user_id: $user_id, org_id: $org_id})
+    WHERE d.filename CONTAINS $search_term OR d.category = $category
+    RETURN d.filename, d.file_type, d.category, d.source, d.s3_url
+    LIMIT 20
+    ```
+    
+    4. Entity Type Search with Relationships:
+    ```
+    MATCH (e1:Entity {user_id: $user_id, org_id: $org_id})-[r:RELATIONSHIP]->(e2:Entity)
+    WHERE e1.entity_type = $entity_type
+    RETURN e1.id, e1.text, e1.entity_type, e1.entity_profile,
+           r.relation_type, r.relation_profile,
+           e2.id, e2.text, e2.entity_type, e2.entity_profile
+    LIMIT 10
+    ```
+    
+    5. Structured Data Column Search:
+    ```
+    MATCH (c:Column {user_id: $user_id, org_id: $org_id})-[:HAS_VALUE]->(r:RowValue)
+    WHERE c.column_name CONTAINS $column_name
+    RETURN c.column_name, c.column_profile, collect(r.value) as values
+    LIMIT 20
+    ```
+    
+    6. Page Content with Entity Mentions:
+    ```
+    MATCH (p:Page {user_id: $user_id, org_id: $org_id})-[:MENTIONS]->(e:Entity)
+    WHERE p.page_number = $page_number
+    RETURN p.page_number, p.content, p.image_s3_url, 
+           collect(e.text) as entity_texts, collect(e.entity_type) as entity_types
+    LIMIT 5
+    ```
+    
+    7. Document with All Pages and Entities:
+    ```
+    MATCH (d:Document {user_id: $user_id, org_id: $org_id, filename: $filename})
+    OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page)
+    OPTIONAL MATCH (p)-[:MENTIONS]->(e:Entity)
+    RETURN d.filename, d.category, d.file_type,
+           collect(DISTINCT p.page_number) as page_numbers,
+           collect(DISTINCT e.text) as entity_texts
+    ```
+    
+    8. Relationship Vector Search:
+    ```
+    CALL db.index.vector.queryNodes('relationship_embedding_index', 5, $embedding)
+    YIELD relationship, score
+    WHERE relationship.user_id = $user_id AND relationship.org_id = $org_id
+    MATCH (source)-[relationship]->(target)
+    RETURN source.text, source.entity_type, 
+           relationship.relation_type, relationship.relation_profile,
+           target.text, target.entity_type, score
+    LIMIT 5
+    ```
+    
+    9. Structured Data Row Search:
+    ```
+    MATCH (r:RowValue {user_id: $user_id, org_id: $org_id})
+    WHERE r.value CONTAINS $search_value
+    MATCH (c:Column)-[:HAS_VALUE]->(r)
+    RETURN c.column_name, r.row_index, r.value
+    LIMIT 50
+    ```
+    
+    10. Entity Profile Search:
+    ```
+    MATCH (e:Entity {user_id: $user_id, org_id: $org_id})
+    WHERE e.entity_profile CONTAINS $profile_term
+    RETURN e.id, e.text, e.entity_type, e.entity_profile
+    LIMIT 15
+    ```
+    
+    11. BFS Document Discovery:
+    ```
+    MATCH (d:Document {user_id: $user_id, org_id: $org_id})
+    WHERE d.category = $category OR d.file_type = $file_type
+    RETURN d.filename, d.category, d.file_type, d.source
+    LIMIT 10
+    ```
+    
+    12. DFS Entity Relationship Traversal:
+    ```
+    MATCH path = (e1:Entity {user_id: $user_id, org_id: $org_id})-[:RELATIONSHIP*1..3]->(e2:Entity)
+    WHERE e1.text = $entity_text
+    RETURN [node in nodes(path) | node.text] as entity_path,
+           [rel in relationships(path) | rel.relation_type] as relationship_types
+    LIMIT 5
+    ```
+    
+    Args:
+        requests: List of search requests (max 10), each containing:
+                 - query (str): Cypher query with $user_id and $org_id parameters (use dollar sign syntax)
+                 - parameters (dict): Optional query parameters (user_id/org_id auto-injected)
+                 - text_to_embed (str, optional): Text to convert to embedding vector for $embedding parameter
+    
+    Returns:
+        List of stringified JSON results from each query execution, maintaining input order.
+        Results include formatted content with metadata and error handling.
