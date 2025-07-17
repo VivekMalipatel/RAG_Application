@@ -164,10 +164,20 @@ class BaseAgent:
         last_message: BaseMessage = state["messages"][-1]
         store = get_store()
         
+        def extract_text_from_content(content):
+            if isinstance(content, list):
+                text_parts = []
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text_parts.append(item.get("text"))
+                return " ".join(text_parts)
+            return str(content)
+
         async def get_user_memory():
             namespace = ("memories", user_id)
             try:
-                return await store.asearch(namespace, query=str(last_message.content))
+                search_query = extract_text_from_content(last_message.content)
+                return await store.asearch(namespace, query=search_query)
             except Exception as e:
                 self._logger.error(f"Error retrieving user memory: {e}")
                 return []
@@ -175,7 +185,8 @@ class BaseAgent:
         async def get_org_memory():
             namespace = ("memories", org_id)
             try:
-                return await store.asearch(namespace, query=str(last_message.content))
+                search_query = extract_text_from_content(last_message.content)
+                return await store.asearch(namespace, query=search_query)
             except Exception as e:
                 self._logger.error(f"Error retrieving organization memory: {e}")
                 return []
@@ -191,13 +202,13 @@ class BaseAgent:
             memory_messages.append(SystemMessage(content="No user memory found."))
         else:
             for user_msg in user_memory:
-                memory_messages.append(SystemMessage(content=str(user_msg.value.get("data", ""))))
+                memory_messages.append(SystemMessage(content=user_msg.value.get("data", "")))
 
         if not org_memory:
             memory_messages.append(SystemMessage(content="No organization memory found."))
         else:
             for org_msg in org_memory:
-                memory_messages.append(SystemMessage(content=str(org_msg.value.get("data", ""))))
+                memory_messages.append(SystemMessage(content=org_msg.value.get("data", "")))
 
         return memory_messages
 
