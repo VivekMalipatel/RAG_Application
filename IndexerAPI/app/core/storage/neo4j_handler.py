@@ -57,8 +57,11 @@ class Neo4jHandler:
                 "CREATE INDEX page_user_org_index IF NOT EXISTS FOR (p:Page) ON (p.user_id, p.org_id)",
                 "CREATE INDEX entity_id_index IF NOT EXISTS FOR (e:Entity) ON (e.id)",
                 "CREATE INDEX entity_type_index IF NOT EXISTS FOR (e:Entity) ON (e.entity_type)",
+                "CREATE INDEX entity_user_org_index IF NOT EXISTS FOR (e:Entity) ON (e.user_id, e.org_id)",
                 "CREATE INDEX column_name_index IF NOT EXISTS FOR (c:Column) ON (c.column_name)",
+                "CREATE INDEX column_user_org_index IF NOT EXISTS FOR (c:Column) ON (c.user_id, c.org_id)",
                 "CREATE INDEX row_value_index IF NOT EXISTS FOR (r:RowValue) ON (r.row_index, r.column_name)",
+                "CREATE INDEX row_value_user_org_index IF NOT EXISTS FOR (r:RowValue) ON (r.user_id, r.org_id)",
             ]
             
             async def create_single_index(index_query):
@@ -219,7 +222,9 @@ class Neo4jHandler:
                             for col_data in sheet_data.get("column_profiles", []):
                                 col_properties = {
                                     "column_name": col_data["column_name"],
-                                    "column_profile": col_data["column_profile"]
+                                    "column_profile": col_data["column_profile"],
+                                    "user_id": document_data["user_id"],
+                                    "org_id": document_data["org_id"]
                                 }
                                 
                                 if "embedding" in col_data:
@@ -246,12 +251,14 @@ class Neo4jHandler:
                                         row_properties = {
                                             "row_index": row_index,
                                             "column_name": column_name,
-                                            "value": cell_value
+                                            "value": cell_value,
+                                            "user_id": document_data["user_id"],
+                                            "org_id": document_data["org_id"]
                                         }
                                         
                                         row_query = """
                                         MATCH (p:Page {sheet_name: $sheet_name, user_id: $user_id, org_id: $org_id})
-                                        MATCH (c:Column {column_name: $column_name})
+                                        MATCH (c:Column {column_name: $column_name, user_id: $user_id, org_id: $org_id})
                                         WHERE (p)-[:MENTIONS]->(c)
                                         CREATE (r:RowValue $row_properties)
                                         CREATE (c)-[:HAS_VALUE]->(r)
@@ -270,8 +277,8 @@ class Neo4jHandler:
                                     next_col, next_val = row_values_list[i + 1]
                                     
                                     relation_query = """
-                                    MATCH (r1:RowValue {row_index: $row_index, column_name: $current_col, value: $current_val})
-                                    MATCH (r2:RowValue {row_index: $row_index, column_name: $next_col, value: $next_val})
+                                    MATCH (r1:RowValue {row_index: $row_index, column_name: $current_col, value: $current_val, user_id: $user_id, org_id: $org_id})
+                                    MATCH (r2:RowValue {row_index: $row_index, column_name: $next_col, value: $next_val, user_id: $user_id, org_id: $org_id})
                                     CREATE (r1)-[:RELATES_TO]->(r2)
                                     """
                                     await tx.run(relation_query,
@@ -279,7 +286,9 @@ class Neo4jHandler:
                                                current_col=current_col,
                                                current_val=current_val,
                                                next_col=next_col,
-                                               next_val=next_val)
+                                               next_val=next_val,
+                                               user_id=document_data["user_id"],
+                                               org_id=document_data["org_id"])
                         else:
                             for chunk_data in sheet_data.get("data", []):
                                 page_properties = {
@@ -399,14 +408,16 @@ class Neo4jHandler:
                 "id": entity_data["id"],
                 "text": entity_data["text"],
                 "entity_type": entity_data["entity_type"],
-                "entity_profile": entity_data["entity_profile"]
+                "entity_profile": entity_data["entity_profile"],
+                "user_id": document_data["user_id"],
+                "org_id": document_data["org_id"]
             }
             
             if "embedding" in entity_data:
                 entity_properties["embedding"] = entity_data["embedding"]
             
             entity_query = """
-            MERGE (e:Entity {id: $entity_id})
+            MERGE (e:Entity {id: $entity_id, user_id: $user_id, org_id: $org_id})
             ON CREATE SET e = $entity_properties
             ON MATCH SET e += $entity_properties
             WITH e
@@ -416,23 +427,25 @@ class Neo4jHandler:
             """
             await tx.run(entity_query,
                        entity_id=entity_data["id"],
-                       entity_properties=entity_properties,
-                       page_number=chunk_data["page_number"],
                        user_id=document_data["user_id"],
-                       org_id=document_data["org_id"])
+                       org_id=document_data["org_id"],
+                       entity_properties=entity_properties,
+                       page_number=chunk_data["page_number"])
 
         for rel_data in chunk_data.get("relationships", []):
             rel_properties = {
                 "relation_type": rel_data["relation_type"],
-                "relation_profile": rel_data["relation_profile"]
+                "relation_profile": rel_data["relation_profile"],
+                "user_id": document_data["user_id"],
+                "org_id": document_data["org_id"]
             }
             
             if "embedding" in rel_data:
                 rel_properties["embedding"] = rel_data["embedding"]
             
             rel_query = """
-            MATCH (source:Entity {id: $source_id})
-            MATCH (target:Entity {id: $target_id})
+            MATCH (source:Entity {id: $source_id, user_id: $user_id, org_id: $org_id})
+            MATCH (target:Entity {id: $target_id, user_id: $user_id, org_id: $org_id})
             MERGE (source)-[r:RELATIONSHIP]->(target)
             SET r += $rel_properties
             RETURN r
@@ -440,6 +453,8 @@ class Neo4jHandler:
             await tx.run(rel_query,
                        source_id=rel_data["source"],
                        target_id=rel_data["target"],
+                       user_id=document_data["user_id"],
+                       org_id=document_data["org_id"],
                        rel_properties=rel_properties)
     
     async def execute_cypher_query(self, query: str, parameters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
