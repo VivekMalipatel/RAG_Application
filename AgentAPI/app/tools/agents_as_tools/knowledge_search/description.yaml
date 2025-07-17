@@ -1,3 +1,15 @@
 knowledge_search_tool: |
+  A specialized agent for searching and querying user's knowledge base through a knowledge graph database. This tool provides intelligent search capabilities across documents, entities, relationships, and structured data that has been ingested into the knowledge graph system.
 
-       fsadfsdafdsf
+  Key capabilities:
+  - Search across unstructured documents (PDFs, images, text files)
+  - Query structured data (CSV, Excel files) 
+  - Find entities and their relationships
+  - Perform vector similarity searches using embeddings
+  - Retrieve document metadata and content
+  - Analyze connections between different data points
+
+  The agent can handle complex queries about the user's knowledge base and returns relevant information with proper filtering based on user and organization context. It supports both text-based searches and semantic similarity searches to find the most relevant information from the ingested documents and data sources.
+
+  Use this tool when you need to search for specific information, documents, entities, or relationships within the user's knowledge base that has been processed and stored in the knowledge graph system.
+

@@ -3,12 +3,19 @@ import hashlib
 from pathlib import Path
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import HumanMessage
 
 from agents.base_agents.base_state import BaseState
 from agents.base_agents.base_agent import BaseAgent
+from pydantic import BaseModel, Field
 from agents.knowledge_search_agent.knowledge_search_agent import KnowledgeSearchAgent
 
 TOOL_NAME = "knowledge_search_agent"
+
+class KnowledgeSearchRequest(BaseModel):
+    prompt: str = Field(
+        description="Prompt to guide the knowledge search agent's behavior."
+    )
 
 def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml") -> str:
     yaml_path = Path(__file__).parent / yaml_filename
@@ -19,11 +26,12 @@ def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml"
 @tool(
     name=TOOL_NAME,
     description=get_tool_description(TOOL_NAME),
+    args_schema=KnowledgeSearchRequest,
     parse_docstring=False,
     infer_schema=True,
     response_format="content"
 )
-async def knowledge_search_agent(state : BaseState, config: RunnableConfig) :
+async def knowledge_search_agent(prompt : str, config: RunnableConfig) :
 
     knowledge_search_agent = KnowledgeSearchAgent(
                                 model_kwargs={},
@@ -47,5 +55,13 @@ async def knowledge_search_agent(state : BaseState, config: RunnableConfig) :
         }
     }
 
-    result = await compiled_agent.ainvoke(state["messages"][-1], config=config)
+    input={
+            "messages": [
+                HumanMessage(content=prompt)
+            ],
+            "user_id": config["configurable"]["user_id"],
+            "org_id": config["configurable"]["org_id"]
+        }
+
+    result = await compiled_agent.ainvoke(input, config=config)
     return {"messages": result["messages"], "user_id": config["configurable"]["user_id"], "org_id": config["configurable"]["org_id"]}
