@@ -8,7 +8,9 @@ services:
     container_name: agentapp
     ports:
       - "8000:8000"
-      - "5678:5678"  # Add debugger port
+      - "5678:5678"  
+    env_file:
+      - .env
     environment:
       - PYTHONPATH=/app/app
       - PYTHONUNBUFFERED=1
