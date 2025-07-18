@@ -40,14 +40,23 @@ class UnstructuredProcessor(BaseProcessor):
                 {
                     "role": "user", 
                     "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
                         {"type": "text", "text": f"{text_description}, Extracted text from page: {extracted_text}"}
                     ]
                 }
             ]
 
             entities_relationships_task = self.model_handler.extract_entities_relationships(messages)
-            page_embedding_task = self.model_handler.embed(messages)
+
+            embed_messages = [
+                {
+                    "role": "user", 
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
+                        {"type": "text", "text": f"{text_description}, Extracted text from page: {extracted_text}"}
+                    ]
+                }
+            ]
+            page_embedding_task = self.model_handler.embed(embed_messages)
             
             entities_relationships, page_embedding = await asyncio.gather(
                 entities_relationships_task,

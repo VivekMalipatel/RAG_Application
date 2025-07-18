@@ -92,8 +92,8 @@ class ModelHandler:
         self.inference_client = AsyncOpenAI(api_key=self.inference_api_key, base_url=self.inference_api_base, http_client=http_client)
         
         self.embedding_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=1)
-        self.text_description_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=8)
-        self.entity_extraction_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=8)
+        self.text_description_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=64)
+        self.entity_extraction_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=64)
         
         self.embedding_queue_processor_task = None
         self.text_description_queue_processor_task = None
@@ -272,11 +272,29 @@ class ModelHandler:
             CRITICAL EXTRACTION REQUIREMENTS:
             1. Extract ALL identifiable information with high precision for general use cases
             2. Create entity IDs using lowercase with underscores: "John Smith" -> "john_smith"
-            3. Extract relationships with confidence scores (0.0-1.0) and contextual information
+            3. Extract relationships with contextual information
             4. Provide detailed entity profiles with roles, descriptions, and contextual standing
             5. Handle coreference resolution (he/she -> actual name)
             6. Extract document structure and content elements
-            7. For images, extract visual entities, charts, diagrams, and relationships
+            7. For images, consider visual entities, charts, diagrams, and relationships
+  
+            Output Schema:
+
+            class EntitySchema(BaseModel):
+                id: str
+                text: str 
+                entity_type: str
+                entity_profile: str
+
+            class RelationSchema(BaseModel):
+                source: str 
+                target: str 
+                relation_type: str
+                relation_profile: str 
+
+            class EntityRelationSchema(BaseModel):
+                entities: List[EntitySchema]
+                relationships: List[RelationSchema]
 
             COMPREHENSIVE ENTITY TYPES:
             - PERSON: Individuals, authors, speakers, contacts, stakeholders, customers, family members
@@ -316,7 +334,7 @@ class ModelHandler:
             - BELONGS_TO: Ownership or membership
             - COMMUNICATES_WITH: Communication or interaction
 
-            DOCUMENT STRUCTURE EXTRACTION:
+            DOCUMENT STRUCTURE Considerations:
             - Document title, subtitle, and purpose
             - Section headings and organization
             - Document type and category
@@ -326,7 +344,7 @@ class ModelHandler:
             - Important data and statistics
             - Contact information and references
 
-            TABULAR DATA EXTRACTION:
+            TABULAR DATA Considerations:
             - Extract structured data from tables and charts
             - Identify headers, columns, and data relationships
             - Capture numerical data and statistics
@@ -334,7 +352,7 @@ class ModelHandler:
             - Process organizational charts and diagrams
             - Extract performance metrics and data
 
-            GENERAL DOCUMENT EXTRACTION:
+            GENERAL DOCUMENT Considerations:
             - Main topics and themes
             - Key concepts and ideas
             - Important facts and information
@@ -344,26 +362,7 @@ class ModelHandler:
             - Dates and temporal information
             - Quantitative data and measurements
 
-            The goal is to provide comprehensive document intelligence with entities (Maximum of 50 top most entities) and relationships extraction for any general or personal context, capturing every significant detail relevant for understanding, analysis, and knowledge management.
-            
-            Output Schema:
-
-            class EntitySchema(BaseModel):
-                id: str
-                text: str 
-                entity_type: str
-                entity_profile: str
-
-            class RelationSchema(BaseModel):
-                source: str 
-                target: str 
-                relation_type: str
-                relation_profile: str 
-
-            class EntityRelationSchema(BaseModel):
-                entities: List[EntitySchema]
-                relationships: List[RelationSchema]
-            
+            The goal is to provide comprehensive document intelligence with entities and relationships extraction for any general or personal context, capturing every significant detail relevant for understanding, analysis, and knowledge management.            
             """
 
             if messages is not None:
@@ -374,22 +373,17 @@ class ModelHandler:
             max_retries = 10
             for attempt in range(max_retries):
                 try:
-                    response = await self.inference_client.chat.completions.create(
+                    response = await self.inference_client.chat.completions.parse(
                         model=settings.INFERENCE_MODEL,
                         messages=messages,
-                        response_format={
-                            "type": "json_schema",
-                            "json_schema": {
-                                "name": "EntityRelationSchema",
-                                "schema": EntityRelationSchema.model_json_schema()
-                            },
-                        },
+                        response_format=EntityRelationSchema,
                     )
                     
-                    if response.choices[0].message.content:
-                        parsed_result = json.loads(response.choices[0].message.content)
-                        entities = [entity for entity in parsed_result["entities"]]
-                        relationships = [rel for rel in parsed_result["relationships"]]
+                    
+                    if response.choices[0].message.parsed:
+                        parsed_result = response.choices[0].message.parsed
+                        entities = [entity.model_dump() for entity in parsed_result.entities]
+                        relationships = [rel.model_dump() for rel in parsed_result.relationships]
                         
                         for entity in entities:
                             entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
@@ -399,9 +393,6 @@ class ModelHandler:
                             rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
                         
                         return {"entities": entities, "relationships": relationships}
-                    else:
-                        logger.error("Failed to parse structured entity extraction output")
-                        return {"entities": [], "relationships": []}
                         
                 except Exception as e:
                     if attempt == max_retries - 1:
