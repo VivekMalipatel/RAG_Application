@@ -1,7 +1,7 @@
 import base64
 import logging
 from typing import List, Dict, Any, Optional
-import os
+import json
 from openai import AsyncOpenAI
 import httpx
 import asyncio
@@ -344,7 +344,26 @@ class ModelHandler:
             - Dates and temporal information
             - Quantitative data and measurements
 
-            The goal is to provide comprehensive document intelligence with entities and relationships extraction for any general or personal context, capturing every significant detail relevant for understanding, analysis, and knowledge management.
+            The goal is to provide comprehensive document intelligence with entities (Maximum of 50 top most entities) and relationships extraction for any general or personal context, capturing every significant detail relevant for understanding, analysis, and knowledge management.
+            
+            Output Schema:
+
+            class EntitySchema(BaseModel):
+                id: str
+                text: str 
+                entity_type: str
+                entity_profile: str
+
+            class RelationSchema(BaseModel):
+                source: str 
+                target: str 
+                relation_type: str
+                relation_profile: str 
+
+            class EntityRelationSchema(BaseModel):
+                entities: List[EntitySchema]
+                relationships: List[RelationSchema]
+            
             """
 
             if messages is not None:
@@ -355,16 +374,22 @@ class ModelHandler:
             max_retries = 10
             for attempt in range(max_retries):
                 try:
-                    response = await self.inference_client.beta.chat.completions.parse(
+                    response = await self.inference_client.chat.completions.create(
                         model=settings.INFERENCE_MODEL,
                         messages=messages,
-                        response_format=EntityRelationSchema,
+                        response_format={
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "EntityRelationSchema",
+                                "schema": EntityRelationSchema.model_json_schema()
+                            },
+                        },
                     )
                     
-                    if response.choices[0].message.parsed:
-                        parsed_result = response.choices[0].message.parsed
-                        entities = [entity.model_dump() for entity in parsed_result.entities]
-                        relationships = [rel.model_dump() for rel in parsed_result.relationships]
+                    if response.choices[0].message.content:
+                        parsed_result = json.loads(response.choices[0].message.content)
+                        entities = [entity for entity in parsed_result["entities"]]
+                        relationships = [rel for rel in parsed_result["relationships"]]
                         
                         for entity in entities:
                             entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
