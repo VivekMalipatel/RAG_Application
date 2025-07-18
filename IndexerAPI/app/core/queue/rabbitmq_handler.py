@@ -44,7 +44,10 @@ class RabbitMQHandler:
             
             self.queue = await self.channel.declare_queue(
                 settings.RABBITMQ_QUEUE_NAME,
-                durable=True
+                durable=True,
+                arguments={
+                    "x-consumer-timeout": 36000000,
+                }
             )
             
             await self.queue.bind(
@@ -53,7 +56,7 @@ class RabbitMQHandler:
             )
             
             self.is_connected = True
-            logger.info("Connected to RabbitMQ successfully")
+            logger.info("Connected to RabbitMQ successfully with 10-hour consumer timeout")
             
         except Exception as e:
             logger.error(f"Failed to connect to RabbitMQ: {str(e)}")
@@ -125,7 +128,8 @@ class RabbitMQHandler:
     async def _get_next_message(self):
         try:
             await self._ensure_connected()
-            message = await self.queue.get(no_ack=False, fail=False)
+            # Get message with 10-hour timeout
+            message = await self.queue.get(no_ack=False, fail=False, timeout=36000)
             if message is None:
                 return None
             return message
@@ -147,7 +151,7 @@ class RabbitMQHandler:
                 
             except Exception as e:
                 logger.error(f"Error processing message: {str(e)}")
-                message.reject(requeue=False)
+                await message.reject(requeue=False)
                 logger.error(f"Task {task_message.task_id if 'task_message' in locals() else 'unknown'} rejected and sent to dead letter queue")
                 raise
                 

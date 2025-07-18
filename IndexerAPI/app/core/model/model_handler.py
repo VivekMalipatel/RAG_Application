@@ -13,6 +13,51 @@ logger = logging.getLogger(__name__)
 
 _global_model_handler: Optional['ModelHandler'] = None
 
+class EmbeddingRateLimiter:
+    def __init__(self, max_concurrent_requests: int = 1):
+        self.semaphore = asyncio.Semaphore(max_concurrent_requests)
+        self.request_queue = asyncio.Queue()
+        self.processing_tasks = set()
+        self._shutdown = False
+    
+    async def process_queue(self, embed_func):
+        while not self._shutdown:
+            try:
+                request_data = await asyncio.wait_for(self.request_queue.get(), timeout=1.0)
+                if request_data is None:
+                    break
+                
+                messages, future = request_data
+                task = asyncio.create_task(self._process_request(embed_func, messages, future))
+                self.processing_tasks.add(task)
+                task.add_done_callback(self.processing_tasks.discard)
+                
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Error in queue processor: {e}")
+    
+    async def _process_request(self, embed_func, messages, future):
+        async with self.semaphore:
+            try:
+                result = await embed_func(messages)
+                if not future.cancelled():
+                    future.set_result(result)
+            except Exception as e:
+                if not future.cancelled():
+                    future.set_exception(e)
+    
+    async def add_request(self, messages: List[dict]) -> List[List[float]]:
+        future = asyncio.Future()
+        await self.request_queue.put((messages, future))
+        return await future
+    
+    async def shutdown(self):
+        self._shutdown = True
+        await self.request_queue.put(None)
+        if self.processing_tasks:
+            await asyncio.gather(*self.processing_tasks, return_exceptions=True)
+
 class EntitySchema(BaseModel):
     id: str
     text: str 
@@ -45,8 +90,66 @@ class ModelHandler:
         http_client = httpx.AsyncClient(timeout=7200.0)
         self.embedding_client = AsyncOpenAI(api_key=self.embedding_api_key, base_url=self.embedding_api_base, http_client=http_client)
         self.inference_client = AsyncOpenAI(api_key=self.inference_api_key, base_url=self.inference_api_base, http_client=http_client)
+        
+        self.embedding_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=1)
+        self.text_description_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=8)
+        self.entity_extraction_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=8)
+        
+        self.embedding_queue_processor_task = None
+        self.text_description_queue_processor_task = None
+        self.entity_extraction_queue_processor_task = None
+        
+        self._start_queue_processors()
+    
+    def _start_queue_processors(self):
+        if self.embedding_queue_processor_task is None or self.embedding_queue_processor_task.done():
+            self.embedding_queue_processor_task = asyncio.create_task(
+                self.embedding_rate_limiter.process_queue(self._embed_internal)
+            )
+        
+        if self.text_description_queue_processor_task is None or self.text_description_queue_processor_task.done():
+            self.text_description_queue_processor_task = asyncio.create_task(
+                self.text_description_rate_limiter.process_queue(self._generate_text_description_internal)
+            )
+        
+        if self.entity_extraction_queue_processor_task is None or self.entity_extraction_queue_processor_task.done():
+            self.entity_extraction_queue_processor_task = asyncio.create_task(
+                self.entity_extraction_rate_limiter.process_queue(self._extract_entities_relationships_internal)
+            )
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.shutdown()
+    
+    async def shutdown(self):
+        if self.embedding_rate_limiter:
+            await self.embedding_rate_limiter.shutdown()
+        if self.text_description_rate_limiter:
+            await self.text_description_rate_limiter.shutdown()
+        if self.entity_extraction_rate_limiter:
+            await self.entity_extraction_rate_limiter.shutdown()
+            
+        tasks_to_cancel = [
+            self.embedding_queue_processor_task,
+            self.text_description_queue_processor_task,
+            self.entity_extraction_queue_processor_task
+        ]
+        
+        for task in tasks_to_cancel:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
     
     async def generate_text_description(self, image_base64: str, model: str = None) -> str:
+        self._start_queue_processors()
+        return await self.text_description_rate_limiter.add_request(image_base64)
+
+    async def _generate_text_description_internal(self, image_base64: str) -> str:
         if not image_base64:
             logger.warning("Empty image_base64 provided for text generation")
             return ""
@@ -62,60 +165,77 @@ class ModelHandler:
 
         Your text will be attached to each document before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively.
         """
-        try:
-            response = await self.inference_client.chat.completions.create(
-                model=settings.INFERENCE_MODEL,
-                messages=[  
-                            {
-                                "role": "system",
-                                "content": system_prompt,
-                            },   
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "text", "text": "Generate alt text for the following document. Just the alt text, no other text like 'Here is the alt text:',etc"},
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {
-                                            "url": "data:image/png;base64," + image_base64,
-                                        }
-                                    },
-                                ],
-                            }
-                        ],
-            )
-            alt_text = response.choices[0].message.content.strip()
-            return alt_text
-            
-        except Exception as e:
-            logger.error(f"Error generating alt text: {str(e)}")
-            raise
+        
+        max_retries = 10
+        for attempt in range(max_retries):
+            try:
+                response = await self.inference_client.chat.completions.create(
+                    model=settings.INFERENCE_MODEL,
+                    messages=[  
+                                {
+                                    "role": "system",
+                                    "content": system_prompt,
+                                },   
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "text", "text": "Generate alt text for the following document. Just the alt text, no other text like 'Here is the alt text:',etc"},
+                                        {
+                                            "type": "image_url",
+                                            "image_url": {
+                                                "url": "data:image/png;base64," + image_base64,
+                                            }
+                                        },
+                                    ],
+                                }
+                            ],
+                )
+                alt_text = response.choices[0].message.content.strip()
+                return alt_text
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.error(f"Error generating alt text after {max_retries} attempts: {str(e)}")
+                    raise
+                else:
+                    logger.warning(f"Attempt {attempt + 1} failed for text description: {str(e)}. Retrying...")
+                    await asyncio.sleep(2 ** attempt)
 
     async def embed(self, messages: List[dict]) -> List[List[float]]:
+        self._start_queue_processors()
+        return await self.embedding_rate_limiter.add_request(messages)
+
+    async def _embed_internal(self, messages: List[dict]) -> List[List[float]]:
 
         url = f"{self.embedding_api_base}/embeddings"
         headers = {
             "Authorization": "Bearer " + self.embedding_api_key,
             "Content-Type": "application/json"
         }
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    url,
-                    headers=headers,
-                    json={
-                        "model": settings.EMBEDDING_MODEL,
-                        "messages": messages,
-                        "encoding_format": "float"
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
-                embeddings = [item["embedding"] for item in data["data"]]
-                return embeddings
-        except Exception as e:
-            logger.error(f"Error generating image embeddings: {str(e)}")
-            raise
+        
+        max_retries = 10
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=3600.0) as client:
+                    response = await client.post(
+                        url,
+                        headers=headers,
+                        json={
+                            "model": settings.EMBEDDING_MODEL,
+                            "messages": messages,
+                            "encoding_format": "float"
+                        }
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    embeddings = [item["embedding"] for item in data["data"]]
+                    return embeddings
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.error(f"Error generating image embeddings after {max_retries} attempts: {str(e)}")
+                    raise
+                else:
+                    logger.warning(f"Attempt {attempt + 1} failed for image embeddings: {str(e)}. Retrying...")
+                    await asyncio.sleep(10 ** attempt)
     
     async def embed_text(self, texts: List[str]) -> List[List[float]]:
         try:
@@ -142,6 +262,10 @@ class ModelHandler:
             raise
 
     async def extract_entities_relationships(self, messages: List[dict]) -> Dict[str, Any]:
+        self._start_queue_processors()
+        return await self.entity_extraction_rate_limiter.add_request(messages)
+
+    async def _extract_entities_relationships_internal(self, messages: List[dict]) -> Dict[str, Any]:
         try:
             extraction_prompt = """Extract comprehensive entities, relationships, and document metadata from the given content for general and personal document analysis.
 
@@ -228,28 +352,39 @@ class ModelHandler:
             else:
                 raise ValueError("Either messages or text must be provided")
 
-            response = await self.inference_client.beta.chat.completions.parse(
-                model=settings.INFERENCE_MODEL,
-                messages=messages,
-                response_format=EntityRelationSchema,
-            )
-            
-            if response.choices[0].message.parsed:
-                parsed_result = response.choices[0].message.parsed
-                entities = [entity.model_dump() for entity in parsed_result.entities]
-                relationships = [rel.model_dump() for rel in parsed_result.relationships]
-                
-                for entity in entities:
-                    entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
-                
-                for rel in relationships:
-                    rel["source"] = rel["source"].lower().replace(" ", "_").replace("-", "_")
-                    rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
-                
-                return {"entities": entities, "relationships": relationships}
-            else:
-                logger.error("Failed to parse structured entity extraction output")
-                return {"entities": [], "relationships": []}
+            max_retries = 10
+            for attempt in range(max_retries):
+                try:
+                    response = await self.inference_client.beta.chat.completions.parse(
+                        model=settings.INFERENCE_MODEL,
+                        messages=messages,
+                        response_format=EntityRelationSchema,
+                    )
+                    
+                    if response.choices[0].message.parsed:
+                        parsed_result = response.choices[0].message.parsed
+                        entities = [entity.model_dump() for entity in parsed_result.entities]
+                        relationships = [rel.model_dump() for rel in parsed_result.relationships]
+                        
+                        for entity in entities:
+                            entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
+                        
+                        for rel in relationships:
+                            rel["source"] = rel["source"].lower().replace(" ", "_").replace("-", "_")
+                            rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
+                        
+                        return {"entities": entities, "relationships": relationships}
+                    else:
+                        logger.error("Failed to parse structured entity extraction output")
+                        return {"entities": [], "relationships": []}
+                        
+                except Exception as e:
+                    if attempt == max_retries - 1:
+                        logger.error(f"Entity extraction failed after {max_retries} attempts: {e}")
+                        return {"entities": [], "relationships": []}
+                    else:
+                        logger.warning(f"Attempt {attempt + 1} failed for entity extraction: {str(e)}. Retrying...")
+                        await asyncio.sleep(2 ** attempt)
             
         except Exception as e:
             logger.error(f"Entity extraction failed: {e}")
@@ -395,6 +530,12 @@ def get_global_model_handler() -> ModelHandler:
     if _global_model_handler is None:
         _global_model_handler = ModelHandler()
     return _global_model_handler
+
+async def cleanup_global_model_handler():
+    global _global_model_handler
+    if _global_model_handler is not None:
+        await _global_model_handler.shutdown()
+        _global_model_handler = None
 
 if __name__ == "__main__":
     asyncio.run(main_test())

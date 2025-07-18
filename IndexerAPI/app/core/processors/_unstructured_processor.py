@@ -45,18 +45,9 @@ class UnstructuredProcessor(BaseProcessor):
                     ]
                 }
             ]
-            
-            embed_page = [
-                {
-                    "role": "user", 
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                    ]
-                }
-            ]
 
             entities_relationships_task = self.model_handler.extract_entities_relationships(messages)
-            page_embedding_task = self.model_handler.embed(embed_page)
+            page_embedding_task = self.model_handler.embed(messages)
             
             entities_relationships, page_embedding = await asyncio.gather(
                 entities_relationships_task,

@@ -13,7 +13,7 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 def rasterize_and_encode(page_bytes: bytes, page_num: int) -> tuple[int, str]:
-    images = convert_from_bytes(page_bytes, dpi=300)
+    images = convert_from_bytes(page_bytes, dpi=150)
     img = images[0]
     buf = io.BytesIO()
     img.save(buf, format="JPEG")
