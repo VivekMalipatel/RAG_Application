@@ -1,0 +1,133 @@
+web_search_tool: |
+    Execute intelligent web search queries to retrieve relevant, up-to-date information from the internet. This tool provides access to multiple search engines and specialized sources to find exactly what you need.
+    
+    CORE CAPABILITIES:
+    - Search across multiple engines simultaneously or target specific ones
+    - Filter results by language, region, and content type
+    - Access specialized search engines for different types of content
+    - Batch multiple searches for efficiency
+    - Get structured, formatted results with relevance scoring
+    
+    HOW TO USE:
+    1. Formulate clear, specific search queries using relevant keywords
+    2. Choose appropriate search engines based on the type of information needed
+    3. Specify parameters like number of results and language if needed
+    4. The tool returns ranked results with titles, descriptions, and URLs
+    
+    SEARCH QUERY BEST PRACTICES:
+    - Use specific, descriptive keywords: "machine learning deployment AWS" instead of "AI cloud"
+    - Include relevant modifiers: "latest", "2025", "tutorial", "comparison", "review"
+    - Use quotes for exact phrases: "climate change effects 2025"
+    - Add context keywords: "Python pandas dataframe merge tutorial"
+    - For troubleshooting: include error messages, version numbers, specific technologies
+    
+    Examples of effective queries:
+    * "React hooks useEffect cleanup patterns 2025"
+    * "PostgreSQL performance optimization large tables"
+    * "Kubernetes security best practices RBAC"
+    * "TypeScript generic constraints advanced examples"
+    * "Docker multi-stage builds optimization techniques"
+    
+    SEARCH ENGINE SELECTION GUIDE:
+    
+    **General Web Search & Current Events:**
+    - google: Best overall coverage, recent content, trending topics
+    - bing: Good for current events, Microsoft ecosystem content
+    - duckduckgo: Privacy-focused, unbiased results
+    
+    **Technical & Programming:**
+    - stackoverflow: Programming questions, code examples, troubleshooting
+    - github: Open source projects, code repositories, documentation
+    - reddit: Community discussions, real-world experiences
+    
+    **Academic & Research:**
+    - google_scholar: Peer-reviewed papers, academic publications
+    - arxiv: Preprint research papers, especially STEM fields
+    - pubmed: Medical and life sciences research
+    
+    **Specialized Content:**
+    - wikipedia: Encyclopedic information, definitions, overviews
+    - youtube: Video tutorials, demonstrations, lectures
+    - amazon/ebay: Product information, reviews, pricing
+    - soundcloud: Audio content, podcasts, music
+    
+    **Privacy & Alternative:**
+    - startpage: Google results without tracking
+    - qwant: European privacy-focused search
+    - brave: Independent search with privacy focus
+    
+    SEARCH STRATEGIES BY USE CASE:
+    
+    **Learning & Tutorials:**
+    ```
+    query: "advanced Python decorators tutorial examples"
+    engines: ["google", "stackoverflow", "youtube"]
+    num_results: 15
+    ```
+    
+    **Research & Facts:**
+    ```
+    query: "climate change impact agriculture 2024 studies"
+    engines: ["google_scholar", "google", "wikipedia"]
+    num_results: 20
+    ```
+    
+    **Troubleshooting:**
+    ```
+    query: "Docker container networking bridge mode issues"
+    engines: ["stackoverflow", "github", "reddit"]
+    num_results: 10
+    ```
+    
+    **Current News & Trends:**
+    ```
+    query: "artificial intelligence regulation EU 2025"
+    engines: ["google", "bing"]
+    num_results: 12
+    ```
+    
+    **Product Research:**
+    ```
+    query: "laptop programming development 2025 reviews"
+    engines: ["google", "reddit", "amazon"]
+    num_results: 15
+    ```
+    
+    PARAMETERS:
+    - query (required): Search terms and keywords
+    - num_results: Number of results (default: 10, max: 50)
+    - language: Language code (default: "en", supports: "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh")
+    - engines: List of search engines (see guide above)
+    - categories: Content categories for filtering (e.g., ["general"], ["news"], ["images"])
+    
+    RESULT FORMAT:
+    Each search result includes:
+    - **Title**: Clickable headline of the result
+    - **Description/Snippet**: Summary of the content
+    - **URL**: Direct link to the source
+    - **Source**: Website or domain name
+    - **Relevance Score**: How well it matches your query
+    
+    ADVANCED FEATURES:
+    - Concurrent multi-engine searches for comprehensive results
+    - Automatic deduplication of similar results
+    - Language detection and filtering
+    - Safe search filtering for inappropriate content
+    - Rate limiting and respectful crawling
+    
+    ERROR HANDLING:
+    - Graceful fallback when specific engines are unavailable
+    - Clear error messages for failed searches
+    - Timeout handling for slow responses
+    - Alternative suggestions for zero-result queries
+    
+    BEST PRACTICES:
+    - Start with broad queries, then narrow down if needed
+    - Use multiple engines for comprehensive coverage
+    - Adjust num_results based on how much information you need
+    - For specialized topics, use domain-specific engines
+    - Combine with web scraping for detailed content extraction
+    - Always verify information from multiple sources
+    
+    Use this tool when you need to find current information, research topics, solve problems, learn new concepts, or stay updated on trends and developments.
+    

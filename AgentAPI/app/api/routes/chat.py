@@ -7,6 +7,12 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
+from agents.base_agents.base_agent import BaseAgent
+from tools.agents_as_tools.knowledge_search.knowledge_search import knowledge_search_agent  
+from tools.agents_as_tools.web_search.web_search import web_search_scrape_agent
+import hashlib
+
+
 
 router = APIRouter()
 
@@ -232,6 +238,166 @@ async def _handle_parser_end(event, completion_id, model_id, tracker):
 async def _handle_retry_event(event, completion_id, model_id, tracker):
     print(f"Retry event: {event.get('name', 'Unknown')}")
 
+# --- Orchestration Helper Functions ---
+
+def validate_request(request: dict) -> str:
+    model_id = request.get("model") or request.get("agent")
+    if not model_id:
+        raise HTTPException(status_code=400, detail="No model specified")
+    
+    messages = request.get("messages", [])
+    if not messages:
+        raise HTTPException(status_code=400, detail="No messages provided")
+    
+    return model_id
+
+def setup_agent_with_tools(model_id: str, request: dict) -> BaseAgent:
+    """Get agent class and bind tools if specified."""
+    agent_cls: BaseAgent = get_agent_by_id(model_id)
+    
+    if not agent_cls:
+        raise HTTPException(status_code=400, detail=f"Unknown agent/model: {model_id}")
+    
+    if request.get("tools") is not None:
+        tools = []
+        for tool in request.get("tools", []):
+            if tool == "knowledge_search":
+                tools.append(knowledge_search_agent)
+            elif tool == "web_search_scrape_agent":
+                tools.append(web_search_scrape_agent)
+        # Create an instance first, then bind tools
+        agent_instance = agent_cls()
+        agent_cls = agent_instance.bind_tools(tools)
+    
+    return agent_cls
+
+def build_input_data_and_config(request: dict) -> tuple:
+    """Build input data and config from request."""
+    thread_id = request.get("thread_id")
+    user_id = request.get("user_id")
+    org_id = f"{request.get('org_id')}${hashlib.sha256('chat_agent'.encode()).hexdigest()}"
+    
+    if "messages" in request:
+        input_data = {
+            "messages": [
+                HumanMessage(content=m["content"]) if m["role"] == "user" else SystemMessage(content=m["content"])
+                for m in request.get("messages", [])
+            ],
+            "user_id": user_id,
+            "org_id": org_id
+        }
+    else:
+        # Accept direct state dict
+        input_data = dict(request)
+    
+    # Build config
+    config = {"configurable": {}}
+    if thread_id is not None:
+        config["configurable"]["thread_id"] = thread_id
+    if user_id is not None:
+        config["configurable"]["user_id"] = user_id
+    if org_id is not None:
+        config["configurable"]["org_id"] = org_id
+    
+    return input_data, config
+
+def create_streaming_response(agent, input_data, config, model_id, enable_progress_updates):
+    """Create streaming response for agent events."""
+    async def event_stream():
+        try:
+            accumulated_content = ""
+            completion_id = f"chatcmpl-{uuid.uuid4().hex[:16]}"
+            tracker = EventTracker()
+            async for event in agent.astream_events(input_data, config=config, version="v2"):
+                event_type = event.get("event")
+                if event_type == "on_chat_model_start":
+                    await _handle_chat_model_start(event, completion_id, model_id, tracker)
+                elif event_type == "on_chat_model_stream":
+                    chunk_content = await _handle_chat_model_stream(
+                        event, completion_id, model_id, tracker, accumulated_content
+                    )
+                    if chunk_content:
+                        accumulated_content += chunk_content
+                        response_chunk = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": model_id,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {"content": chunk_content},
+                                "finish_reason": None
+                            }],
+                            "usage": None
+                        }
+                        yield f"data: {json.dumps(response_chunk, ensure_ascii=False)}\n\n"
+                elif event_type == "on_chat_model_end":
+                    await _handle_chat_model_end(event, completion_id, model_id, tracker)
+                elif event_type == "on_chain_start":
+                    await _handle_chain_start(event, completion_id, model_id, tracker, enable_progress_updates)
+                elif event_type == "on_chain_end":
+                    completion_signal = await _handle_chain_end(
+                        event, completion_id, model_id, tracker, accumulated_content
+                    )
+                    if completion_signal:
+                        yield f"data: {json.dumps(completion_signal, ensure_ascii=False)}\n\n"
+                elif event_type == "on_chain_error":
+                    await _handle_chain_error(event, completion_id, model_id, tracker)
+                elif event_type == "on_tool_start":
+                    await _handle_tool_start(event, completion_id, model_id, tracker, enable_progress_updates)
+                elif event_type == "on_tool_end":
+                    await _handle_tool_end(event, completion_id, model_id, tracker, enable_progress_updates)
+                elif event_type == "on_tool_error":
+                    await _handle_tool_error(event, completion_id, model_id, tracker)
+                elif event_type == "on_retriever_start":
+                    await _handle_retriever_start(event, completion_id, model_id, tracker)
+                elif event_type == "on_retriever_end":
+                    await _handle_retriever_end(event, completion_id, model_id, tracker)
+                elif event_type == "on_custom_event":
+                    await _handle_custom_event(event, completion_id, model_id, tracker)
+                elif event_type == "on_prompt_start":
+                    await _handle_prompt_start(event, completion_id, model_id, tracker)
+                elif event_type == "on_prompt_end":
+                    await _handle_prompt_end(event, completion_id, model_id, tracker)
+                elif event_type == "on_parser_start":
+                    await _handle_parser_start(event, completion_id, model_id, tracker)
+                elif event_type == "on_parser_end":
+                    await _handle_parser_end(event, completion_id, model_id, tracker)
+                elif event_type == "on_retry":
+                    await _handle_retry_event(event, completion_id, model_id, tracker)
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            print(f"Streaming error: {e}")
+            error_chunk = {
+                "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
+                "object": "error",
+                "created": int(time.time()),
+                "error": {"message": str(e), "type": "agent_error"}
+            }
+            yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+    
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+async def create_non_streaming_response(agent, input_data, config, model_id):
+    """Create non-streaming response."""
+    result = await agent.ainvoke(input_data, config=config)
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model_id,
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant", 
+                "content": result["messages"][-1].content if result and "messages" in result and result["messages"] else "No response generated"
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": None
+    }
+
 def openai_nonstream_completion(agent, state, model_id):
     async def nonstream():
         try:
@@ -265,132 +431,28 @@ def openai_nonstream_completion(agent, state, model_id):
 
 @router.post("/v1/chat/completions")
 async def agent_completions(request: dict):
+    """Main orchestration function for chat completions."""
     print("[agent_completions] Received request body:", json.dumps(request, ensure_ascii=False))
+    
     try:
-        model_id = request.get("model") or request.get("agent")
-        if not model_id:
-            raise HTTPException(status_code=400, detail="No model specified")
-        agent_cls = get_agent_by_id(model_id)
-        if not agent_cls:
-            raise HTTPException(status_code=400, detail=f"Unknown agent/model: {model_id}")
-        agent = await agent_cls().compile()
-        messages = request.get("messages", [])
-        if not messages:
-            raise HTTPException(status_code=400, detail="No messages provided")
-        # Accept both OpenAI and BaseAgent style state
-        thread_id = request.get("thread_id")
-        user_id = request.get("user_id")
-        org_id = request.get("org_id")
-        if "messages" in request:
-            input_data = {
-                "messages": [
-                    HumanMessage(content=m["content"]) if m["role"] == "user" else SystemMessage(content=m["content"])
-                    for m in messages
-                ],
-                "user_id": user_id,
-                "org_id": org_id
-            }
-        else:
-            # Accept direct state dict
-            input_data = dict(request)
-        # Always provide a config with configurable keys for Checkpointer compatibility
-        config = {"configurable": {}}
-        if thread_id is not None:
-            config["configurable"]["thread_id"] = thread_id
-        if user_id is not None:
-            config["configurable"]["user_id"] = user_id
-        if org_id is not None:
-            config["configurable"]["org_id"] = org_id
+        model_id = validate_request(request)
+    
+        agent_instance = setup_agent_with_tools(model_id, request)
+        # If it's a class, instantiate; if already instance, use as is
+        if isinstance(agent_instance, type):
+            agent_instance = agent_instance()
+        agent = await agent_instance.compile(name="chat_agent")
+        
+        input_data, config = build_input_data_and_config(request)
+        
         stream = request.get("stream", False)
         enable_progress_updates = request.get("enable_progress_updates", True)
+        
         if stream:
-            async def event_stream():
-                try:
-                    accumulated_content = ""
-                    completion_id = f"chatcmpl-{uuid.uuid4().hex[:16]}"
-                    tracker = EventTracker()
-                    async for event in agent.astream_events(input_data, config=config, version="v2"):
-                        event_type = event.get("event")
-                        if event_type == "on_chat_model_start":
-                            await _handle_chat_model_start(event, completion_id, model_id, tracker)
-                        elif event_type == "on_chat_model_stream":
-                            chunk_content = await _handle_chat_model_stream(
-                                event, completion_id, model_id, tracker, accumulated_content
-                            )
-                            if chunk_content:
-                                accumulated_content += chunk_content
-                                response_chunk = {
-                                    "id": completion_id,
-                                    "object": "chat.completion.chunk",
-                                    "created": int(time.time()),
-                                    "model": model_id,
-                                    "choices": [{
-                                        "index": 0,
-                                        "delta": {"content": chunk_content},
-                                        "finish_reason": None
-                                    }],
-                                    "usage": None
-                                }
-                                yield f"data: {json.dumps(response_chunk, ensure_ascii=False)}\n\n"
-                        elif event_type == "on_chat_model_end":
-                            await _handle_chat_model_end(event, completion_id, model_id, tracker)
-                        elif event_type == "on_chain_start":
-                            await _handle_chain_start(event, completion_id, model_id, tracker, enable_progress_updates)
-                        elif event_type == "on_chain_end":
-                            completion_signal = await _handle_chain_end(
-                                event, completion_id, model_id, tracker, accumulated_content
-                            )
-                            if completion_signal:
-                                yield f"data: {json.dumps(completion_signal, ensure_ascii=False)}\n\n"
-                        elif event_type == "on_chain_error":
-                            await _handle_chain_error(event, completion_id, model_id, tracker)
-                        elif event_type == "on_tool_start":
-                            await _handle_tool_start(event, completion_id, model_id, tracker, enable_progress_updates)
-                        elif event_type == "on_tool_end":
-                            await _handle_tool_end(event, completion_id, model_id, tracker, enable_progress_updates)
-                        elif event_type == "on_tool_error":
-                            await _handle_tool_error(event, completion_id, model_id, tracker)
-                        elif event_type == "on_retriever_start":
-                            await _handle_retriever_start(event, completion_id, model_id, tracker)
-                        elif event_type == "on_retriever_end":
-                            await _handle_retriever_end(event, completion_id, model_id, tracker)
-                        elif event_type == "on_custom_event":
-                            await _handle_custom_event(event, completion_id, model_id, tracker)
-                        elif event_type == "on_prompt_start":
-                            await _handle_prompt_start(event, completion_id, model_id, tracker)
-                        elif event_type == "on_prompt_end":
-                            await _handle_prompt_end(event, completion_id, model_id, tracker)
-                        elif event_type == "on_parser_start":
-                            await _handle_parser_start(event, completion_id, model_id, tracker)
-                        elif event_type == "on_parser_end":
-                            await _handle_parser_end(event, completion_id, model_id, tracker)
-                        elif event_type == "on_retry":
-                            await _handle_retry_event(event, completion_id, model_id, tracker)
-                    yield "data: [DONE]\n\n"
-                except Exception as e:
-                    print(f"Streaming error: {e}")
-                    error_chunk = {
-                        "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
-                        "object": "error",
-                        "created": int(time.time()),
-                        "error": {"message": str(e), "type": "agent_error"}
-                    }
-                    yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
-                    yield "data: [DONE]\n\n"
-            return StreamingResponse(event_stream(), media_type="text/event-stream")
-        result = await agent.ainvoke(input_data, config=config)
-        return {
-            "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": model_id,
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": result["messages"][-1].content if result and "messages" in result and result["messages"] else "No response generated"},
-                "finish_reason": "stop"
-            }],
-            "usage": None
-        }
+            return create_streaming_response(agent, input_data, config, model_id, enable_progress_updates)
+        else:
+            return await create_non_streaming_response(agent, input_data, config, model_id)
+            
     except Exception as e:
         print(f"Error in agent_completions: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")

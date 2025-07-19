@@ -1,0 +1,14 @@
+web_search_scrape_agent: |
+  A unified agent tool for both web search and web scraping. This tool allows you to:
+
+  - Search the web using configurable engines, languages, and categories, returning relevant results for your queries.
+  - Scrape content from any public website using natural language instructions, extracting structured information from web pages.
+
+  Key capabilities:
+  - Perform web searches using multiple engines and filter by language or category
+  - Extract specific information from web pages using custom prompts
+  - Handle both search and scrape requests in a single interface
+  - Return results in a structured, agent-friendly format
+
+  Use this tool when you need to either search for information on the web or extract specific content from a website, all through a single agent interface.
+

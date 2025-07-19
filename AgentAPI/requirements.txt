@@ -19,6 +19,9 @@ qwen-tokenizer
 redis[hiredis]
 redisvl
 langgraph-checkpoint
+langchain-community
 langgraph-checkpoint-redis
 transformers
+scrapegraphai
+playwright
 debugpy

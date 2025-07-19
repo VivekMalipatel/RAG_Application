@@ -1,0 +1,55 @@
+web_scrape_tool: |
+    Execute web scraping tasks to extract structured information from websites using natural language instructions. This tool integrates with ScrapeGraphAI to intelligently scrape web content using LLM-powered extraction.
+    
+    CORE CAPABILITIES:
+    - Extract specific information from any public website using natural language prompts
+    - Handles dynamic content, JavaScript-rendered pages, and complex layouts
+    - Returns structured data based on your extraction requirements
+    - Supports both single-site and multi-site scraping operations
+    - Automatically handles common web scraping challenges (redirects, cookies, etc.)
+    
+    HOW TO USE:
+    1. Provide the target URL(s) to scrape
+    2. Write a clear, specific extraction prompt describing what information you want
+    3. The tool uses AI to understand the page structure and extract the requested data
+    4. Results are returned as structured JSON with error handling
+    
+    EXTRACTION PROMPT GUIDELINES:
+    - Be specific about what data you want: "Extract all product names and prices" instead of "get product info"
+    - Mention the format if needed: "List all email addresses", "Get the main article text", "Extract table data as rows"
+    - For complex pages, be more detailed: "Find all job listings with title, company, location, and salary"
+    - Examples of good prompts:
+      * "List all services offered by this company with their descriptions"
+      * "Extract contact information including phone, email, and address"
+      * "Get all news article headlines and publication dates from the homepage"
+      * "Find product specifications and pricing information"
+      * "Extract all team member names and their roles"
+    
+    SUPPORTED OPERATIONS:
+    - Single website scraping: Extract data from one specific URL
+    - Multi-website scraping: Extract similar data from multiple URLs using the same prompt
+    - Structured data extraction: Tables, lists, forms, product catalogs
+    - Text content extraction: Articles, descriptions, reviews, comments
+    - Metadata extraction: Titles, headers, navigation elements, links
+    
+    ERROR HANDLING:
+    - Returns error messages for inaccessible websites
+    - Handles timeouts and connection issues gracefully
+    - Provides fallback extraction when primary method fails
+    - Reports specific issues (blocked by robots.txt, 404 errors, etc.)
+    
+    TECHNICAL DETAILS:
+    - Uses headless Chrome for rendering JavaScript content
+    - Respects website rate limits and robots.txt
+    - Processes content through LLM for intelligent extraction
+    - Returns clean, structured JSON output
+    - Supports concurrent requests for efficiency
+    
+    BEST PRACTICES:
+    - Test your extraction prompts on a few pages first
+    - Be respectful of website resources and terms of service
+    - Use specific prompts to get cleaner, more accurate results
+    - For large datasets, consider breaking into smaller batches
+    - Always verify extracted data for accuracy
+    
+    Use this tool when you need to programmatically extract specific information from websites that would be time-consuming to gather manually.

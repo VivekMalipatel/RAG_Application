@@ -4,17 +4,15 @@ from pathlib import Path
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage
-
-from agents.base_agents.base_state import BaseState
-from agents.base_agents.base_agent import BaseAgent
 from pydantic import BaseModel, Field
-from agents.knowledge_search_agent.knowledge_search_agent import KnowledgeSearchAgent
+from agents.base_agents.base_agent import BaseAgent
+from agents.web_search_agent.web_search_agent import WebAgent
 
-TOOL_NAME = "knowledge_search_agent"
+TOOL_NAME = "web_search_scrape_agent"
 
-class KnowledgeSearchRequest(BaseModel):
+class WebSearchScrapeRequest(BaseModel):
     prompt: str = Field(
-        description="Clear task description (with full details and context) as a prompt to the knowledge search agent."
+        description="Clear task description (with full details and context) as a prompt to the web search scrape agent."
     )
 
 def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml") -> str:
@@ -26,21 +24,21 @@ def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml"
 @tool(
     name_or_callable=TOOL_NAME,
     description=get_tool_description(TOOL_NAME),
-    args_schema=KnowledgeSearchRequest,
+    args_schema=WebSearchScrapeRequest,
     parse_docstring=False,
     infer_schema=True,
     response_format="content"
 )
-async def knowledge_search_agent(prompt : str, config: RunnableConfig) :
+async def web_search_scrape_agent(prompt : str, config: RunnableConfig) :
 
-    knowledge_search_agent = KnowledgeSearchAgent(
+    web_search_scrape_agent = WebAgent(
                                 model_kwargs={},
                                 vlm_kwargs={},
                                 node_kwargs={},
                                 debug=False
                             )
-    
-    compiled_agent: BaseAgent = await knowledge_search_agent.compile(name=TOOL_NAME)
+
+    compiled_agent: BaseAgent = await web_search_scrape_agent.compile(name=TOOL_NAME)
 
     org_id : str = config.get("configurable").get("org_id")
 
