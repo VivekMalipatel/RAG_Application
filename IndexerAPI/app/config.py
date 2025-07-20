@@ -29,10 +29,10 @@ class Settings:
 
     EMBEDDING_CONCURRENT_REQUESTS: int = int(os.getenv("EMBEDDING_CONCURRENT_REQUESTS", "64"))
     INFERENCE_CONCURRENT_REQUESTS: int = int(os.getenv("INFERENCE_CONCURRENT_REQUESTS", "64"))
-    EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "600"))
+    EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "30"))
     INFERENCE_CLIENT_TIMEOUT: float = float(os.getenv("INFERENCE_CLIENT_TIMEOUT", "30"))
     RETRIES: int = int(os.getenv("RETRIES", "0"))
-    RETRY_DELAY: int = int(os.getenv("RETRY_DELAY", "1"))
+    RETRY_DELAY: int = int(os.getenv("RETRY_DELAY", "0"))
 
 
     MINIO_ENDPOINT_URL: str = os.getenv("MINIO_ENDPOINT_URL")
