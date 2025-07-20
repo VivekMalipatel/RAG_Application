@@ -250,7 +250,7 @@ class ModelHandler:
             "Content-Type": "application/json"
         }
         
-        settings.RETRIES = 3
+        settings.RETRIES = 1 if settings.RETRIES < 1 else settings.RETRIES
         for attempt in range(settings.RETRIES):
             try:
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=settings.EMBEDDING_CLIENT_TIMEOUT)) as session:
