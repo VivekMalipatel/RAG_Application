@@ -358,15 +358,19 @@ class ModelHandler:
             Focus on extracting the most significant entities and relationships that capture the document's key information, structure, and purpose.
             """
 
-            if messages is not None:
-                messages = [{"role": "system", "content": extraction_prompt}] + messages
-            else:
-                raise ValueError("Either messages or text must be provided")
+            system_message = {"role": "system", "content": extraction_prompt}
+        
+            image_messages = [
+                {
+                    "role": "user", 
+                    "content": [messages[0]["content"][0]]
+                }
+            ]
 
             try:
                 structured_response : ParsedChatCompletion[EntityRelationSchema] = await self.structured_chat_completion(
                     model=settings.INFERENCE_MODEL,
-                    messages=messages,
+                    messages=[system_message] + image_messages,
                     response_format=EntityRelationSchema,
                     max_completion_tokens=settings.STRUCTURED_OUTPUTS_MAX_TOKENS,
                 )
@@ -391,8 +395,40 @@ class ModelHandler:
                     
                     return {"entities": entities, "relationships": relationships}
                 else:
-                    logger.error("No valid structured response received for entity extraction")
-                    return {"entities": [], "relationships": []}
+
+                    text_messages = [
+                        {
+                            "role": "user", 
+                            "content": [messages[0]["content"][1]]
+                        }
+                    ]
+
+                    structured_response : ParsedChatCompletion[EntityRelationSchema] = await self.structured_chat_completion(
+                        model=settings.REASONING_MODEL,
+                        messages=[system_message] + text_messages,
+                        response_format=EntityRelationSchema,
+                        max_completion_tokens=settings.STRUCTURED_OUTPUTS_MAX_TOKENS,
+                    )
+                
+                    if (structured_response and 
+                        hasattr(structured_response, 'choices') and 
+                        structured_response.choices and 
+                        len(structured_response.choices) > 0 and
+                        hasattr(structured_response.choices[0], 'message') and
+                        hasattr(structured_response.choices[0].message, 'parsed') and
+                        structured_response.choices[0].message.parsed):
+                        parsed_result = structured_response.choices[0].message.parsed
+                        entities = [entity.model_dump() for entity in parsed_result.entities]
+                        relationships = [rel.model_dump() for rel in parsed_result.relationships]
+                        
+                        for entity in entities:
+                            entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
+                        
+                        for rel in relationships:
+                            rel["source"] = rel["source"].lower().replace(" ", "_").replace("-", "_")
+                            rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
+                        
+                        return {"entities": entities, "relationships": relationships}
                     
             except Exception as e:
                 logger.error(f"Entity extraction failed: {e}")

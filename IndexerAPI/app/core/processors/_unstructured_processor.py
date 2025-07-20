@@ -46,16 +46,7 @@ class UnstructuredProcessor(BaseProcessor):
                 }
             ]
 
-            er_messages = [
-                {
-                    "role": "user", 
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                    ]
-                }
-            ]
-
-            entities_relationships_task = self.model_handler.extract_entities_relationships(er_messages)
+            entities_relationships_task = self.model_handler.extract_entities_relationships(messages)
 
             embed_messages = [
                 {
