@@ -262,7 +262,7 @@ def setup_agent_with_tools(model_id: str, request: dict) -> BaseAgent:
         raise HTTPException(status_code=400, detail=f"Unknown agent/model: {model_id}")
 
     tools = []
-    for tool_obj in request.get("tools", []):
+    for tool_obj in request.get("tools", []) or []:
         if isinstance(tool_obj, dict):
             if tool_obj.get("type") == "function" and "function" in tool_obj:
                 tool_name = tool_obj["function"].get("name")
@@ -273,10 +273,10 @@ def setup_agent_with_tools(model_id: str, request: dict) -> BaseAgent:
             agent = TOOL_AGENT_MAP.get(tool_obj)
             if agent:
                 tools.append(agent)
+    agent_instance = agent_cls()
     if tools:
-        agent_instance = agent_cls()
-        agent_cls = agent_instance.bind_tools(tools)
-    return agent_cls
+        agent_instance = agent_instance.bind_tools(tools)
+    return agent_instance
 
 def build_input_data_and_config(request: dict) -> tuple:
     """Build input data and config from request."""
