@@ -6,6 +6,7 @@ from openai import AsyncOpenAI
 import httpx
 import asyncio
 from pydantic import BaseModel
+from openai.resources.chat.completions.completions import ChatCompletion, ParsedChatCompletion
 import requests
 from config import settings
 
@@ -58,6 +59,52 @@ class EmbeddingRateLimiter:
         if self.processing_tasks:
             await asyncio.gather(*self.processing_tasks, return_exceptions=True)
 
+class ChatRateLimiter:
+    def __init__(self, max_concurrent_requests: int = 1):
+        self.semaphore = asyncio.Semaphore(max_concurrent_requests)
+        self.request_queue = asyncio.Queue()
+        self.processing_tasks = set()
+        self._shutdown = False
+    
+    async def process_queue(self, regular_func, structured_func):
+        while not self._shutdown:
+            try:
+                request_data = await asyncio.wait_for(self.request_queue.get(), timeout=1.0)
+                if request_data is None:
+                    break
+                
+                request_params, is_structured, future = request_data
+                chat_func = structured_func if is_structured else regular_func
+                task = asyncio.create_task(self._process_request(chat_func, request_params, future))
+                self.processing_tasks.add(task)
+                task.add_done_callback(self.processing_tasks.discard)
+                
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Error in chat queue processor: {e}")
+    
+    async def _process_request(self, chat_func, request_params, future):
+        async with self.semaphore:
+            try:
+                result = await chat_func(**request_params)
+                if not future.cancelled():
+                    future.set_result(result)
+            except Exception as e:
+                if not future.cancelled():
+                    future.set_exception(e)
+    
+    async def add_request(self, is_structured=False, **request_params):
+        future = asyncio.Future()
+        await self.request_queue.put((request_params, is_structured, future))
+        return await future
+    
+    async def shutdown(self):
+        self._shutdown = True
+        await self.request_queue.put(None)
+        if self.processing_tasks:
+            await asyncio.gather(*self.processing_tasks, return_exceptions=True)
+
 class EntitySchema(BaseModel):
     id: str
     text: str 
@@ -87,15 +134,16 @@ class ModelHandler:
         self.embedding_api_base = api_base or settings.EMBEDDING_API_BASE
         self.inference_api_key = api_key or settings.INFERENCE_API_KEY
         self.inference_api_base = api_base or settings.INFERENCE_API_BASE
-        http_client = httpx.AsyncClient(timeout=7200.0)
-        self.embedding_client = AsyncOpenAI(api_key=self.embedding_api_key, base_url=self.embedding_api_base, http_client=http_client)
+        http_client_embedding = httpx.AsyncClient(timeout=settings.EMBEDDING_CLIENT_TIMEOUT)
+        http_client = httpx.AsyncClient(timeout=settings.INFERENCE_CLIENT_TIMEOUT)
+        self.embedding_client = AsyncOpenAI(api_key=self.embedding_api_key, base_url=self.embedding_api_base, http_client=http_client_embedding)
         self.inference_client = AsyncOpenAI(api_key=self.inference_api_key, base_url=self.inference_api_base, http_client=http_client)
         
-        self.embedding_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=1)
-        self.text_description_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=64)
-        self.entity_extraction_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=64)
+        self.embedding_rate_limiter = EmbeddingRateLimiter(max_concurrent_requests=settings.EMBEDDING_CONCURRENT_REQUESTS)
+        self.chat_rate_limiter = ChatRateLimiter(max_concurrent_requests=settings.INFERENCE_CONCURRENT_REQUESTS)
         
         self.embedding_queue_processor_task = None
+        self.chat_queue_processor_task = None
         self.text_description_queue_processor_task = None
         self.entity_extraction_queue_processor_task = None
         
@@ -107,14 +155,9 @@ class ModelHandler:
                 self.embedding_rate_limiter.process_queue(self._embed_internal)
             )
         
-        if self.text_description_queue_processor_task is None or self.text_description_queue_processor_task.done():
-            self.text_description_queue_processor_task = asyncio.create_task(
-                self.text_description_rate_limiter.process_queue(self._generate_text_description_internal)
-            )
-        
-        if self.entity_extraction_queue_processor_task is None or self.entity_extraction_queue_processor_task.done():
-            self.entity_extraction_queue_processor_task = asyncio.create_task(
-                self.entity_extraction_rate_limiter.process_queue(self._extract_entities_relationships_internal)
+        if self.chat_queue_processor_task is None or self.chat_queue_processor_task.done():
+            self.chat_queue_processor_task = asyncio.create_task(
+                self.chat_rate_limiter.process_queue(self._chat_completion_internal, self._structured_chat_completion_internal)
             )
     
     async def __aenter__(self):
@@ -126,15 +169,13 @@ class ModelHandler:
     async def shutdown(self):
         if self.embedding_rate_limiter:
             await self.embedding_rate_limiter.shutdown()
-        if self.text_description_rate_limiter:
-            await self.text_description_rate_limiter.shutdown()
-        if self.entity_extraction_rate_limiter:
-            await self.entity_extraction_rate_limiter.shutdown()
+        
+        if self.chat_rate_limiter:
+            await self.chat_rate_limiter.shutdown()
             
         tasks_to_cancel = [
             self.embedding_queue_processor_task,
-            self.text_description_queue_processor_task,
-            self.entity_extraction_queue_processor_task
+            self.chat_queue_processor_task,
         ]
         
         for task in tasks_to_cancel:
@@ -145,11 +186,7 @@ class ModelHandler:
                 except asyncio.CancelledError:
                     pass
     
-    async def generate_text_description(self, image_base64: str, model: str = None) -> str:
-        self._start_queue_processors()
-        return await self.text_description_rate_limiter.add_request(image_base64)
-
-    async def _generate_text_description_internal(self, image_base64: str) -> str:
+    async def generate_text_description(self, image_base64: str) -> str:
         if not image_base64:
             logger.warning("Empty image_base64 provided for text generation")
             return ""
@@ -166,10 +203,10 @@ class ModelHandler:
         Your text will be attached to each document before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively.
         """
         
-        max_retries = 10
+        max_retries = 3
         for attempt in range(max_retries):
             try:
-                response = await self.inference_client.chat.completions.create(
+                response : ChatCompletion = await self.chat_completion(
                     model=settings.INFERENCE_MODEL,
                     messages=[  
                                 {
@@ -188,7 +225,7 @@ class ModelHandler:
                                         },
                                     ],
                                 }
-                            ],
+                            ]
                 )
                 alt_text = response.choices[0].message.content.strip()
                 return alt_text
@@ -198,7 +235,7 @@ class ModelHandler:
                     raise
                 else:
                     logger.warning(f"Attempt {attempt + 1} failed for text description: {str(e)}. Retrying...")
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2)
 
     async def embed(self, messages: List[dict]) -> List[List[float]]:
         self._start_queue_processors()
@@ -212,10 +249,10 @@ class ModelHandler:
             "Content-Type": "application/json"
         }
         
-        max_retries = 10
+        max_retries = 3
         for attempt in range(max_retries):
             try:
-                async with httpx.AsyncClient(timeout=3600.0) as client:
+                async with httpx.AsyncClient(timeout=settings.EMBEDDING_CLIENT_TIMEOUT) as client:
                     response = await client.post(
                         url,
                         headers=headers,
@@ -235,7 +272,31 @@ class ModelHandler:
                     raise
                 else:
                     logger.warning(f"Attempt {attempt + 1} failed for image embeddings: {str(e)}. Retrying...")
-                    await asyncio.sleep(10 ** attempt)
+                    await asyncio.sleep(5)
+    
+    async def _chat_completion_internal(self, **kwargs):
+        try:
+            response = await self.inference_client.chat.completions.create(**kwargs)
+            return response
+        except Exception as e:
+            logger.error(f"Error in chat completion: {str(e)}")
+            raise
+    
+    async def _structured_chat_completion_internal(self, **kwargs):
+        try:
+            response = await self.inference_client.beta.chat.completions.parse(**kwargs)
+            return response
+        except Exception as e:
+            logger.error(f"Error in structured chat completion: {str(e)}")
+            raise
+    
+    async def chat_completion(self, **kwargs):
+        self._start_queue_processors()
+        return await self.chat_rate_limiter.add_request(is_structured=False, **kwargs)
+    
+    async def structured_chat_completion(self, **kwargs):
+        self._start_queue_processors()
+        return await self.chat_rate_limiter.add_request(is_structured=True, **kwargs)
     
     async def embed_text(self, texts: List[str]) -> List[List[float]]:
         try:
@@ -262,10 +323,6 @@ class ModelHandler:
             raise
 
     async def extract_entities_relationships(self, messages: List[dict]) -> Dict[str, Any]:
-        self._start_queue_processors()
-        return await self.entity_extraction_rate_limiter.add_request(messages)
-
-    async def _extract_entities_relationships_internal(self, messages: List[dict]) -> Dict[str, Any]:
         try:
             extraction_prompt = """Extract comprehensive entities, relationships, and document metadata from the given content for general and personal document analysis.
 
@@ -277,24 +334,45 @@ class ModelHandler:
             5. Handle coreference resolution (he/she -> actual name)
             6. Extract document structure and content elements
             7. For images, consider visual entities, charts, diagrams, and relationships
-  
-            Output Schema:
 
-            class EntitySchema(BaseModel):
-                id: str
-                text: str 
-                entity_type: str
-                entity_profile: str
+            JSON SCHEMA DESCRIPTION:
+            Your response must be a JSON object containing two main arrays:
+            - "entities": An array of entity objects, each representing a distinct person, place, thing, concept, or identifier found in the content
+            - "relationships": An array of relationship objects, each describing how two entities are connected or related
+            
+            Each entity object must contain:
+            - "id": A unique identifier in lowercase with underscores (e.g., "john_smith", "acme_corporation")
+            - "text": The original text as it appears in the document
+            - "entity_type": The category of entity from the predefined types
+            - "entity_profile": A detailed description of the entity's role, context, and significance
+            
+            Each relationship object must contain:
+            - "source": The ID of the first entity in the relationship
+            - "target": The ID of the second entity in the relationship
+            - "relation_type": The type of relationship from the predefined types
+            - "relation_profile": A detailed description of how and why these entities are related
 
-            class RelationSchema(BaseModel):
-                source: str 
-                target: str 
-                relation_type: str
-                relation_profile: str 
+            output format:
 
-            class EntityRelationSchema(BaseModel):
-                entities: List[EntitySchema]
-                relationships: List[RelationSchema]
+            {
+                "entities": [
+                    {
+                        "id": "entity_id_lowercase_with_underscores",
+                        "text": "Original entity text",
+                        "entity_type": "ENTITY_TYPE",
+                        "entity_profile": "Detailed profile description"
+                    }
+                ],
+                "relationships": [
+                    {
+                        "source": "source_entity_id",
+                        "target": "target_entity_id",
+                        "relation_type": "RELATIONSHIP_TYPE",
+                        "relation_profile": "Detailed relationship description"
+                    }
+                ]
+            }
+            
 
             COMPREHENSIVE ENTITY TYPES:
             - PERSON: Individuals, authors, speakers, contacts, stakeholders, customers, family members
@@ -370,18 +448,18 @@ class ModelHandler:
             else:
                 raise ValueError("Either messages or text must be provided")
 
-            max_retries = 10
+            max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    response = await self.inference_client.chat.completions.parse(
+                    structured_response : ParsedChatCompletion[EntityRelationSchema] = await self.structured_chat_completion(
                         model=settings.INFERENCE_MODEL,
                         messages=messages,
                         response_format=EntityRelationSchema,
+                        max_completion_tokens=30000
                     )
                     
-                    
-                    if response.choices[0].message.parsed:
-                        parsed_result = response.choices[0].message.parsed
+                    if structured_response.choices[0].message.parsed:
+                        parsed_result = structured_response.choices[0].message.parsed
                         entities = [entity.model_dump() for entity in parsed_result.entities]
                         relationships = [rel.model_dump() for rel in parsed_result.relationships]
                         
@@ -400,7 +478,7 @@ class ModelHandler:
                         return {"entities": [], "relationships": []}
                     else:
                         logger.warning(f"Attempt {attempt + 1} failed for entity extraction: {str(e)}. Retrying...")
-                        await asyncio.sleep(2 ** attempt)
+                        await asyncio.sleep(5)
             
         except Exception as e:
             logger.error(f"Entity extraction failed: {e}")
@@ -450,7 +528,7 @@ class ModelHandler:
 
             user_prompt = f"Analyze this structured dataset and provide a comprehensive summary:\n\n{dataframe_text}"
 
-            response = await self.inference_client.chat.completions.create(
+            response :ChatCompletion = await self.chat_completion(
                 model=settings.INFERENCE_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -485,7 +563,7 @@ class ModelHandler:
 
             user_prompt = f"Analyze each column in this dataset and provide detailed profiles:\n\n{dataframe_text}"
 
-            response = await self.inference_client.beta.chat.completions.parse(
+            response : ParsedChatCompletion[ColumnProfilesSchema] = await self.structured_chat_completion(
                 model=settings.INFERENCE_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -523,7 +601,7 @@ async def main_test():
         model_handler = ModelHandler()
         
         print("Testing image embedding...")
-        embeddings = await model_handler.embed_image(test_payload)
+        embeddings = await model_handler.embed(test_payload)
         
         print(f"Generated {len(embeddings)} embeddings")
         if embeddings:

@@ -14,10 +14,22 @@ class Settings:
     UNOSERVER_HOST: str = os.getenv("UNOSERVER_HOST")
     UNOSERVER_PORT: int = os.getenv("UNOSERVER_PORT")
 
+    # Model Configuration
     INFERENCE_API_KEY: str = os.getenv("INFERENCE_API_KEY")
     INFERENCE_API_BASE: str = os.getenv("INFERENCE_API_BASE")
     EMBEDDING_API_KEY: str = os.getenv("EMBEDDING_API_KEY")
     EMBEDDING_API_BASE: str = os.getenv("EMBEDDING_API_BASE")
+
+    INFERENCE_MODEL: str = os.getenv("INFERENCE_MODEL")
+    REASONING_MODEL: str = os.getenv("REASONING_MODEL")
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL")
+    EMBEDDING_DIMENSIONS: int = int(os.getenv("EMBEDDING_DIMENSIONS", "2048"))
+
+    EMBEDDING_CONCURRENT_REQUESTS: int = int(os.getenv("EMBEDDING_CONCURRENT_REQUESTS", "1"))
+    INFERENCE_CONCURRENT_REQUESTS: int = int(os.getenv("INFERENCE_CONCURRENT_REQUESTS", "1"))
+
+    EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "3600"))
+    INFERENCE_CLIENT_TIMEOUT: float = float(os.getenv("INFERENCE_CLIENT_TIMEOUT", "60"))
 
     MINIO_ENDPOINT_URL: str = os.getenv("MINIO_ENDPOINT_URL")
     S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME")
@@ -30,6 +42,9 @@ class Settings:
     RABBITMQ_QUEUE_NAME: str = os.getenv("RABBITMQ_QUEUE_NAME")
     RABBITMQ_EXCHANGE_NAME: str = os.getenv("RABBITMQ_EXCHANGE_NAME")
     RABBITMQ_ROUTING_KEY: str = os.getenv("RABBITMQ_ROUTING_KEY")
+    RABBITMQ_HEARTBEAT: int = int(os.getenv("RABBIT_MQ_HEARTBEAT", "30"))
+    RABBITMQ_CONSUMER_TIMEOUT: int = int(os.getenv("RABBIT_MQ_CONSUMER_TIMEOUT", "30"))
+    RABBITMQ_X_CONSUMER_TIMEOUT: int = int(os.getenv("RABBIT_MQ_X_CONSUMER_TIMEOUT", "36000000"))
     
     # Consumer Configuration
     MAX_DEQUEUE_CONCURRENCY: int = int(os.getenv("MAX_DEQUEUE_CONCURRENCY", "5"))
@@ -39,10 +54,5 @@ class Settings:
     NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD")
     NEO4J_DATABASE: str = os.getenv("NEO4J_DATABASE")
-    
-    # Model Configuration
-    INFERENCE_MODEL: str = os.getenv("INFERENCE_MODEL")
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL")
-    EMBEDDING_DIMENSIONS: int = int(os.getenv("EMBEDDING_DIMENSIONS", "1024"))
 
 settings = Settings()

@@ -30,8 +30,8 @@ class RabbitMQHandler:
         try:
             self.connection = await aio_pika.connect_robust(
                 settings.RABBITMQ_URL,
-                heartbeat=600,
-                blocked_connection_timeout=300,
+                heartbeat=settings.RABBITMQ_HEARTBEAT,
+                blocked_connection_timeout=settings.RABBITMQ_CONSUMER_TIMEOUT,
             )
             self.channel = await self.connection.channel()
             await self.channel.set_qos(prefetch_count=settings.MAX_DEQUEUE_CONCURRENCY)
