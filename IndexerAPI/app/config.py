@@ -24,12 +24,16 @@ class Settings:
     REASONING_MODEL: str = os.getenv("REASONING_MODEL")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL")
     EMBEDDING_DIMENSIONS: int = int(os.getenv("EMBEDDING_DIMENSIONS", "2048"))
+    STRUCTURED_OUTPUTS_MAX_TOKENS: int = int(os.getenv("ENTITY_RELATION_EXTRACTION_MAX_TOKENS", "100000"))
+
 
     EMBEDDING_CONCURRENT_REQUESTS: int = int(os.getenv("EMBEDDING_CONCURRENT_REQUESTS", "1"))
-    INFERENCE_CONCURRENT_REQUESTS: int = int(os.getenv("INFERENCE_CONCURRENT_REQUESTS", "1"))
-
-    EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "3600"))
+    INFERENCE_CONCURRENT_REQUESTS: int = int(os.getenv("INFERENCE_CONCURRENT_REQUESTS", "64"))
+    EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "600"))
     INFERENCE_CLIENT_TIMEOUT: float = float(os.getenv("INFERENCE_CLIENT_TIMEOUT", "60"))
+    RETRIES: int = int(os.getenv("RETRIES", "5"))
+    RETRY_DELAY: int = int(os.getenv("RETRY_DELAY", "1"))
+
 
     MINIO_ENDPOINT_URL: str = os.getenv("MINIO_ENDPOINT_URL")
     S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME")
@@ -54,5 +58,8 @@ class Settings:
     NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD")
     NEO4J_DATABASE: str = os.getenv("NEO4J_DATABASE")
+
+    # Processing Configuration
+    PDF_IMAGE_DPI: int = int(os.getenv("PDF_IMAGE_DPI", "100"))
 
 settings = Settings()
