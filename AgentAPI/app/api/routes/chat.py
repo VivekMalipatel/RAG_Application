@@ -26,6 +26,11 @@ class EventTracker:
     start_time: float = field(default_factory=time.time)
     errors: List[str] = field(default_factory=list)
 
+TOOL_AGENT_MAP = {
+    "knowledge_search": knowledge_search_agent,
+    "web_search_scrape_agent": web_search_scrape_agent,
+}
+
 def comprehensive_openai_stream_event_handler(agent, state, model_id, enable_progress_updates=True, config: Optional[Dict[str, Any]] = None):
 
     async def event_stream():
@@ -241,7 +246,7 @@ async def _handle_retry_event(event, completion_id, model_id, tracker):
 # --- Orchestration Helper Functions ---
 
 def validate_request(request: dict) -> str:
-    model_id = request.get("model") or request.get("agent")
+    model_id = request.get("model") 
     if not model_id:
         raise HTTPException(status_code=400, detail="No model specified")
     
@@ -252,23 +257,25 @@ def validate_request(request: dict) -> str:
     return model_id
 
 def setup_agent_with_tools(model_id: str, request: dict) -> BaseAgent:
-    """Get agent class and bind tools if specified."""
     agent_cls: BaseAgent = get_agent_by_id(model_id)
-    
     if not agent_cls:
         raise HTTPException(status_code=400, detail=f"Unknown agent/model: {model_id}")
-    
-    if request.get("tools") is not None:
-        tools = []
-        for tool in request.get("tools", []):
-            if tool == "knowledge_search":
-                tools.append(knowledge_search_agent)
-            elif tool == "web_search_scrape_agent":
-                tools.append(web_search_scrape_agent)
-        # Create an instance first, then bind tools
+
+    tools = []
+    for tool_obj in request.get("tools", []):
+        if isinstance(tool_obj, dict):
+            if tool_obj.get("type") == "function" and "function" in tool_obj:
+                tool_name = tool_obj["function"].get("name")
+                agent = TOOL_AGENT_MAP.get(tool_name)
+                if agent:
+                    tools.append(agent)
+        elif isinstance(tool_obj, str):
+            agent = TOOL_AGENT_MAP.get(tool_obj)
+            if agent:
+                tools.append(agent)
+    if tools:
         agent_instance = agent_cls()
         agent_cls = agent_instance.bind_tools(tools)
-    
     return agent_cls
 
 def build_input_data_and_config(request: dict) -> tuple:
