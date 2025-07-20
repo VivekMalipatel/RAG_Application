@@ -319,44 +319,24 @@ class ModelHandler:
 
     async def extract_entities_relationships(self, messages: List[dict]) -> Dict[str, Any]:
         try:
-            extraction_prompt = """Extract comprehensive entities, relationships, (Max Top 15) and document metadata from the given content for general and personal document analysis.
+            extraction_prompt = """Extract entities and relationships (max 15 each) from the content for document analysis.
 
-            CRITICAL EXTRACTION REQUIREMENTS:
-            1. Extract ALL identifiable information with high precision for general use cases
-            2. Create entity IDs using lowercase with underscores: "John Smith" -> "john_smith"
-            3. Extract relationships with contextual information
-            4. Provide detailed entity profiles with roles, descriptions, and contextual standing
-            5. Handle coreference resolution (he/she -> actual name)
-            6. Extract document structure and content elements
-            7. For images, consider visual entities, charts, diagrams, and relationships
-            8. You have maximum of 30000 tokens for the entire response, you need be consise and limit the output to a max of 15 top entities and relationships
+            REQUIREMENTS:
+            1. Extract key information with high precision
+            2. Use lowercase_underscore IDs: "John Smith" -> "john_smith"
+            3. Provide detailed profiles and contextual relationships
+            4. Handle coreference resolution (pronouns -> actual names)
+            5. Consider visual elements in images (charts, diagrams, etc.)
+            6. Be concise - max 15 top entities and relationships
 
-            JSON SCHEMA DESCRIPTION:
-            Your response must be a JSON object containing two main arrays:
-            - "entities": An array of entity objects, each representing a distinct person, place, thing, concept, or identifier found in the content
-            - "relationships": An array of relationship objects, each describing how two entities are connected or related
-            
-            Each entity object must contain:
-            - "id": A unique identifier in lowercase with underscores (e.g., "john_smith", "acme_corporation")
-            - "text": The original text as it appears in the document
-            - "entity_type": The category of entity from the predefined types
-            - "entity_profile": A detailed description of the entity's role, context, and significance
-            
-            Each relationship object must contain:
-            - "source": The ID of the first entity in the relationship
-            - "target": The ID of the second entity in the relationship
-            - "relation_type": The type of relationship from the predefined types
-            - "relation_profile": A detailed description of how and why these entities are related
-
-            output format:
-
+            OUTPUT FORMAT:
             {
                 "entities": [
                     {
                         "id": "entity_id_lowercase_with_underscores",
                         "text": "Original entity text",
                         "entity_type": "ENTITY_TYPE",
-                        "entity_profile": "Detailed profile description"
+                        "entity_profile": "Detailed description of role, context, and significance"
                     }
                 ],
                 "relationships": [
@@ -364,79 +344,18 @@ class ModelHandler:
                         "source": "source_entity_id",
                         "target": "target_entity_id",
                         "relation_type": "RELATIONSHIP_TYPE",
-                        "relation_profile": "Detailed relationship description"
+                        "relation_profile": "Description of how and why entities are related"
                     }
                 ]
             }
-            
 
-            COMPREHENSIVE ENTITY TYPES:
-            - PERSON: Individuals, authors, speakers, contacts, stakeholders, customers, family members
-            - ORGANIZATION: Companies, institutions, groups, teams, departments, agencies
-            - LOCATION: Places, addresses, cities, countries, regions, facilities, venues
-            - DOCUMENT: Files, reports, articles, books, papers, presentations, manuals
-            - IDENTIFIER: IDs, codes, numbers, references, accounts, serial numbers
-            - CONCEPT: Ideas, topics, subjects, themes, methodologies, principles
-            - FINANCIAL: Money, costs, prices, budgets, investments, transactions
-            - DATE_TIME: Dates, times, deadlines, schedules, periods, durations
-            - REQUIREMENT: Goals, objectives, specifications, criteria, standards
-            - POSITION_TITLE: Job titles, roles, positions, responsibilities
-            - CONTACT_INFO: Phone numbers, emails, addresses, social media
-            - ASSET: Equipment, tools, resources, technology, systems
-            - PROCESS: Procedures, workflows, methods, operations, activities
-            - CLASSIFICATION: Categories, types, levels, priorities, statuses
-            - PRODUCT_SERVICE: Products, services, offerings, solutions
-            - METRIC: Measurements, statistics, performance indicators, benchmarks
+            SOME OF THE EXAMPLES OF ENTITY TYPES:
+            PERSON, ORGANIZATION, LOCATION, DOCUMENT, IDENTIFIER, CONCEPT, FINANCIAL, DATE_TIME, REQUIREMENT, POSITION_TITLE, CONTACT_INFO, ASSET, PROCESS, CLASSIFICATION, PRODUCT_SERVICE, METRIC
 
-            COMPREHENSIVE RELATIONSHIP TYPES:
-            - WORKS_FOR: Employment or service relationship
-            - MANAGES: Management or supervisory relationship
-            - REPORTS_TO: Hierarchical reporting structure
-            - COLLABORATES_WITH: Working partnership or cooperation
-            - ASSOCIATED_WITH: General association or connection
-            - LOCATED_AT: Physical or logical location
-            - VALID_FROM/UNTIL: Temporal validity and duration
-            - RESPONSIBLE_FOR: Accountability and ownership
-            - AUTHORED_BY: Creation or authorship
-            - REFERENCES: Citations, mentions, cross-references
-            - CONTAINS: Structural containment or inclusion
-            - PARTICIPATES_IN: Involvement or engagement
-            - RELATED_TO: General relationship or connection
-            - DEPENDS_ON: Dependencies and prerequisites
-            - ASSIGNED_TO: Task or responsibility assignment
-            - DESCRIBES: Descriptive or explanatory relationship
-            - BELONGS_TO: Ownership or membership
-            - COMMUNICATES_WITH: Communication or interaction
+            SOME OF THE EXAMPLES OF RELATIONSHIP TYPES:
+            WORKS_FOR, MANAGES, REPORTS_TO, COLLABORATES_WITH, ASSOCIATED_WITH, LOCATED_AT, VALID_FROM/UNTIL, RESPONSIBLE_FOR, AUTHORED_BY, REFERENCES, CONTAINS, PARTICIPATES_IN, RELATED_TO, DEPENDS_ON, ASSIGNED_TO, DESCRIBES, BELONGS_TO, COMMUNICATES_WITH
 
-            DOCUMENT STRUCTURE Considerations:
-            - Document title, subtitle, and purpose
-            - Section headings and organization
-            - Document type and category
-            - Version information and dates
-            - Author and contributor information
-            - Key topics and themes
-            - Important data and statistics
-            - Contact information and references
-
-            TABULAR DATA Considerations:
-            - Extract structured data from tables and charts
-            - Identify headers, columns, and data relationships
-            - Capture numerical data and statistics
-            - Extract schedules and timeline information
-            - Process organizational charts and diagrams
-            - Extract performance metrics and data
-
-            GENERAL DOCUMENT Considerations:
-            - Main topics and themes
-            - Key concepts and ideas
-            - Important facts and information
-            - Procedures and instructions
-            - Recommendations and conclusions
-            - Contact information and references
-            - Dates and temporal information
-            - Quantitative data and measurements
-
-            The goal is to provide comprehensive document intelligence with entities and relationships extraction for any general or personal context, capturing every significant detail relevant for understanding, analysis, and knowledge management.            
+            Focus on extracting the most significant entities and relationships that capture the document's key information, structure, and purpose.
             """
 
             if messages is not None:
