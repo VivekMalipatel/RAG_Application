@@ -395,7 +395,12 @@ class ModelHandler:
                     
                     return {"entities": entities, "relationships": relationships}
                 else:
-
+                    raise ValueError("Failed to parse image-based structured response")
+                    
+            except Exception as e:
+                logger.warning(f"Image-based entity extraction failed: {e}. Falling back to text-based extraction.")
+                
+                try:
                     text_messages = [
                         {
                             "role": "user", 
@@ -429,10 +434,13 @@ class ModelHandler:
                             rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
                         
                         return {"entities": entities, "relationships": relationships}
-                    
-            except Exception as e:
-                logger.error(f"Entity extraction failed: {e}")
-                return {"entities": [], "relationships": []}
+                    else:
+                        logger.error("Both image and text-based entity extraction failed")
+                        return {"entities": [], "relationships": []}
+                        
+                except Exception as text_e:
+                    logger.error(f"Text-based entity extraction also failed: {text_e}")
+                    return {"entities": [], "relationships": []}
             
         except Exception as e:
             logger.error(f"Entity extraction failed: {e}")

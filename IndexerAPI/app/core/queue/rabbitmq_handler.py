@@ -56,7 +56,7 @@ class RabbitMQHandler:
             )
             
             self.is_connected = True
-            logger.info("Connected to RabbitMQ successfully with 10-hour consumer timeout")
+            logger.info("Connected to RabbitMQ successfully")
             
         except Exception as e:
             logger.error(f"Failed to connect to RabbitMQ: {str(e)}")
