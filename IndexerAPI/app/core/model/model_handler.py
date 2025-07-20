@@ -222,11 +222,15 @@ class ModelHandler:
                             }
                         ]
             )
-            alt_text = response.choices[0].message.content.strip()
-            return alt_text
+            if response and response.choices and response.choices[0].message.content:
+                alt_text = response.choices[0].message.content.strip()
+                return alt_text
+            else:
+                logger.error("No valid response received for text description")
+                return ""
         except Exception as e:
-            logger.error(f"Error generating alt text after {settings.RETRIES} attempts: {str(e)}")
-            raise
+            logger.error(f"Error generating alt text: {str(e)}")
+            return ""
 
     async def embed(self, messages: List[dict]) -> List[List[float]]:
         self._start_queue_processors()
@@ -260,7 +264,7 @@ class ModelHandler:
             except Exception as e:
                 if attempt == settings.RETRIES - 1:
                     logger.error(f"Error generating image embeddings after {settings.RETRIES} attempts: {str(e)}")
-                    raise
+                    return []
                 else:
                     logger.warning(f"Attempt {attempt + 1} failed for image embeddings: {str(e)}. Retrying...")
                     await asyncio.sleep(settings.RETRY_DELAY)
@@ -271,7 +275,7 @@ class ModelHandler:
             return response
         except Exception as e:
             logger.error(f"Error in chat completion: {str(e)}")
-            raise
+            return None
     
     async def _structured_chat_completion_internal(self, **kwargs):
         try:
@@ -279,7 +283,7 @@ class ModelHandler:
             return response
         except Exception as e:
             logger.error(f"Error in structured chat completion: {str(e)}")
-            raise
+            return None
     
     async def chat_completion(self, **kwargs):
         self._start_queue_processors()
@@ -303,19 +307,11 @@ class ModelHandler:
             
         except Exception as e:
             logger.error(f"Error generating text embeddings: {str(e)}")
-            raise
-
-    def encode_image_to_base64(self, image_path: str) -> str:
-        try:
-            with open(image_path, "rb") as image_file:
-                return base64.b64encode(image_file.read()).decode('utf-8')
-        except Exception as e:
-            logger.error(f"Error encoding image to base64: {str(e)}")
-            raise
+            return []
 
     async def extract_entities_relationships(self, messages: List[dict]) -> Dict[str, Any]:
         try:
-            extraction_prompt = """Extract comprehensive entities, relationships, (Max Top 30) and document metadata from the given content for general and personal document analysis.
+            extraction_prompt = """Extract comprehensive entities, relationships, (Max Top 15) and document metadata from the given content for general and personal document analysis.
 
             CRITICAL EXTRACTION REQUIREMENTS:
             1. Extract ALL identifiable information with high precision for general use cases
@@ -325,6 +321,7 @@ class ModelHandler:
             5. Handle coreference resolution (he/she -> actual name)
             6. Extract document structure and content elements
             7. For images, consider visual entities, charts, diagrams, and relationships
+            8. You have maximum of 30000 tokens for the entire response, you need be consise and limit the output to a max of 15 top entities and relationships
 
             JSON SCHEMA DESCRIPTION:
             Your response must be a JSON object containing two main arrays:
@@ -462,7 +459,7 @@ class ModelHandler:
                     return {"entities": entities, "relationships": relationships}
                     
             except Exception as e:
-                logger.error(f"Entity extraction failed after {settings.RETRIES} attempts: {e}")
+                logger.error(f"Entity extraction failed: {e}")
                 return {"entities": [], "relationships": []}
             
         except Exception as e:
@@ -521,7 +518,11 @@ class ModelHandler:
                 ]
             )
             
-            return response.choices[0].message.content.strip()
+            if response and response.choices and response.choices[0].message.content:
+                return response.choices[0].message.content.strip()
+            else:
+                logger.error("No valid response received for structured summary")
+                return "Unable to generate summary due to API error"
             
         except Exception as e:
             logger.error(f"Error generating structured summary: {e}")
@@ -558,12 +559,12 @@ class ModelHandler:
                 max_completion_tokens=settings.STRUCTURED_OUTPUTS_MAX_TOKENS,
             )
             
-            if response.choices[0].message.parsed:
+            if response and response.choices and response.choices[0].message.parsed:
                 parsed_result = response.choices[0].message.parsed
                 columns = [column.model_dump() for column in parsed_result.columns]
                 return columns
             else:
-                logger.error("Failed to parse structured column profiles output")
+                logger.error("Failed to parse structured column profiles output or no valid response received")
                 return []
             
         except Exception as e:
