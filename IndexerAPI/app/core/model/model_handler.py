@@ -327,7 +327,7 @@ class ModelHandler:
             3. Provide detailed profiles and contextual relationships
             4. Handle coreference resolution (pronouns -> actual names)
             5. Consider visual elements in images (charts, diagrams, etc.)
-            6. Be concise - max 15 top entities and relationships
+            6. Be concise - max 15 top entities and relationships (less than 10000 characters total)
 
             OUTPUT FORMAT:
             {
@@ -366,13 +366,19 @@ class ModelHandler:
                     "content": [messages[0]["content"][0]]
                 }
             ]
+            text_messages = [
+                    {
+                        "role": "user", 
+                        "content": [messages[0]["content"][1]]
+                    }
+                ]
 
             try:
                 structured_response : ParsedChatCompletion[EntityRelationSchema] = await self.structured_chat_completion(
                     model=settings.INFERENCE_MODEL,
                     messages=[system_message] + image_messages,
                     response_format=EntityRelationSchema,
-                    max_completion_tokens=settings.STRUCTURED_OUTPUTS_MAX_TOKENS,
+                    max_completion_tokens=settings.INFERNECE_STRUCTURED_OUTPUTS_MAX_TOKENS,
                 )
                 
                 if (structured_response and 
@@ -401,18 +407,11 @@ class ModelHandler:
                 logger.warning(f"Image-based entity extraction failed: {e}. Falling back to text-based extraction.")
                 
                 try:
-                    text_messages = [
-                        {
-                            "role": "user", 
-                            "content": [messages[0]["content"][1]]
-                        }
-                    ]
-
-                    structured_response : ParsedChatCompletion[EntityRelationSchema] = await self.structured_chat_completion(
+                    structured_response : ParsedChatCompletion[EntityRelationSchema] = await self._structured_chat_completion_internal(
                         model=settings.REASONING_MODEL,
                         messages=[system_message] + text_messages,
                         response_format=EntityRelationSchema,
-                        max_completion_tokens=settings.STRUCTURED_OUTPUTS_MAX_TOKENS,
+                        max_completion_tokens=settings.REASONING_STRUCTURED_OUTPUTS_MAX_TOKENS,
                     )
                 
                     if (structured_response and 
@@ -542,7 +541,7 @@ class ModelHandler:
                     {"role": "user", "content": user_prompt}
                 ],
                 response_format=ColumnProfilesSchema,
-                max_completion_tokens=settings.STRUCTURED_OUTPUTS_MAX_TOKENS,
+                max_completion_tokens=settings.INFERNECE_STRUCTURED_OUTPUTS_MAX_TOKENS,
             )
             
             if (response and 
