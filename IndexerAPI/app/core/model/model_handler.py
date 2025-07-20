@@ -222,7 +222,13 @@ class ModelHandler:
                             }
                         ]
             )
-            if response and response.choices and response.choices[0].message.content:
+            if (response and 
+                hasattr(response, 'choices') and 
+                response.choices and 
+                len(response.choices) > 0 and
+                hasattr(response.choices[0], 'message') and
+                hasattr(response.choices[0].message, 'content') and
+                response.choices[0].message.content):
                 alt_text = response.choices[0].message.content.strip()
                 return alt_text
             else:
@@ -264,7 +270,8 @@ class ModelHandler:
             except Exception as e:
                 if attempt == settings.RETRIES - 1:
                     logger.error(f"Error generating image embeddings after {settings.RETRIES} attempts: {str(e)}")
-                    return []
+                    zero_embedding = [0.0] * settings.EMBEDDING_DIMENSIONS
+                    return [zero_embedding for _ in messages]
                 else:
                     logger.warning(f"Attempt {attempt + 1} failed for image embeddings: {str(e)}. Retrying...")
                     await asyncio.sleep(settings.RETRY_DELAY)
@@ -307,7 +314,8 @@ class ModelHandler:
             
         except Exception as e:
             logger.error(f"Error generating text embeddings: {str(e)}")
-            return []
+            zero_embedding = [0.0] * settings.EMBEDDING_DIMENSIONS
+            return [zero_embedding for _ in texts]
 
     async def extract_entities_relationships(self, messages: List[dict]) -> Dict[str, Any]:
         try:
@@ -444,7 +452,13 @@ class ModelHandler:
                     max_completion_tokens=settings.STRUCTURED_OUTPUTS_MAX_TOKENS,
                 )
                 
-                if structured_response.choices[0].message.parsed:
+                if (structured_response and 
+                    hasattr(structured_response, 'choices') and 
+                    structured_response.choices and 
+                    len(structured_response.choices) > 0 and
+                    hasattr(structured_response.choices[0], 'message') and
+                    hasattr(structured_response.choices[0].message, 'parsed') and
+                    structured_response.choices[0].message.parsed):
                     parsed_result = structured_response.choices[0].message.parsed
                     entities = [entity.model_dump() for entity in parsed_result.entities]
                     relationships = [rel.model_dump() for rel in parsed_result.relationships]
@@ -457,6 +471,9 @@ class ModelHandler:
                         rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
                     
                     return {"entities": entities, "relationships": relationships}
+                else:
+                    logger.error("No valid structured response received for entity extraction")
+                    return {"entities": [], "relationships": []}
                     
             except Exception as e:
                 logger.error(f"Entity extraction failed: {e}")
@@ -518,7 +535,13 @@ class ModelHandler:
                 ]
             )
             
-            if response and response.choices and response.choices[0].message.content:
+            if (response and 
+                hasattr(response, 'choices') and 
+                response.choices and 
+                len(response.choices) > 0 and
+                hasattr(response.choices[0], 'message') and
+                hasattr(response.choices[0].message, 'content') and
+                response.choices[0].message.content):
                 return response.choices[0].message.content.strip()
             else:
                 logger.error("No valid response received for structured summary")
@@ -559,7 +582,13 @@ class ModelHandler:
                 max_completion_tokens=settings.STRUCTURED_OUTPUTS_MAX_TOKENS,
             )
             
-            if response and response.choices and response.choices[0].message.parsed:
+            if (response and 
+                hasattr(response, 'choices') and 
+                response.choices and 
+                len(response.choices) > 0 and
+                hasattr(response.choices[0], 'message') and
+                hasattr(response.choices[0].message, 'parsed') and
+                response.choices[0].message.parsed):
                 parsed_result = response.choices[0].message.parsed
                 columns = [column.model_dump() for column in parsed_result.columns]
                 return columns

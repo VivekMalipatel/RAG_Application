@@ -31,7 +31,7 @@ class Settings:
     INFERENCE_CONCURRENT_REQUESTS: int = int(os.getenv("INFERENCE_CONCURRENT_REQUESTS", "64"))
     EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "600"))
     INFERENCE_CLIENT_TIMEOUT: float = float(os.getenv("INFERENCE_CLIENT_TIMEOUT", "30"))
-    RETRIES: int = int(os.getenv("RETRIES", "1"))
+    RETRIES: int = int(os.getenv("RETRIES", "0"))
     RETRY_DELAY: int = int(os.getenv("RETRY_DELAY", "1"))
 
 
