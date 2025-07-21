@@ -1,4 +1,4 @@
-curl -X POST "http://192.168.0.20:8082/ingest/file"   -H "Content-Type: application/json"   -d '{
+curl -X POST "http://192.168.0.10:8009/ingest/file"   -H "Content-Type: application/json"   -d '{
     "user_id": "test_user",
     "org_id": "test_org",
     "s3_url": "http://192.168.0.20:9001/indexerapi/DSC03186.jpeg",

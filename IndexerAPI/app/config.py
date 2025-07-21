@@ -31,7 +31,7 @@ class Settings:
     EMBEDDING_CONCURRENT_REQUESTS: int = int(os.getenv("EMBEDDING_CONCURRENT_REQUESTS", "64"))
     INFERENCE_CONCURRENT_REQUESTS: int = int(os.getenv("INFERENCE_CONCURRENT_REQUESTS", "64"))
     EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "3600"))
-    INFERENCE_CLIENT_TIMEOUT: float = float(os.getenv("INFERENCE_CLIENT_TIMEOUT", "3600"))
+    INFERENCE_CLIENT_TIMEOUT: float = float(os.getenv("INFERENCE_CLIENT_TIMEOUT", "180"))
     RETRIES: int = int(os.getenv("RETRIES", "0"))
     RETRY_DELAY: int = int(os.getenv("RETRY_DELAY", "2"))
 
@@ -47,9 +47,10 @@ class Settings:
     RABBITMQ_QUEUE_NAME: str = os.getenv("RABBITMQ_QUEUE_NAME")
     RABBITMQ_EXCHANGE_NAME: str = os.getenv("RABBITMQ_EXCHANGE_NAME")
     RABBITMQ_ROUTING_KEY: str = os.getenv("RABBITMQ_ROUTING_KEY")
-    RABBITMQ_HEARTBEAT: int = int(os.getenv("RABBIT_MQ_HEARTBEAT", "30"))
-    RABBITMQ_CONSUMER_TIMEOUT: int = int(os.getenv("RABBIT_MQ_CONSUMER_TIMEOUT", "30"))
-    RABBITMQ_X_CONSUMER_TIMEOUT: int = int(os.getenv("RABBIT_MQ_X_CONSUMER_TIMEOUT", "36000000"))
+    RABBITMQ_HEARTBEAT: int = int(os.getenv("RABBIT_MQ_HEARTBEAT", "600"))
+    RABBITMQ_CONSUMER_TIMEOUT: int = int(os.getenv("RABBIT_MQ_CONSUMER_TIMEOUT", "300"))
+    RABBITMQ_X_CONSUMER_TIMEOUT: int = int(os.getenv("RABBIT_MQ_X_CONSUMER_TIMEOUT", "86400000"))
+    RABBITMQ_MESSAGE_GET_TIMEOUT: int = int(os.getenv("RABBIT_MQ_MESSAGE_GET_TIMEOUT", "30"))
     
     # Consumer Configuration
     MAX_DEQUEUE_CONCURRENCY: int = int(os.getenv("MAX_DEQUEUE_CONCURRENCY", "5"))
