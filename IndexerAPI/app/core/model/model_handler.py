@@ -329,7 +329,7 @@ class ModelHandler:
             5. Consider visual elements in images (charts, diagrams, etc.)
             6. Be concise - max 15 top entities and relationships (less than 10000 characters total)
 
-            OUTPUT FORMAT:
+            OUTPUT FORMAT - Return ONLY valid JSON in this exact format:
             {
                 "entities": [
                     {
@@ -356,6 +356,7 @@ class ModelHandler:
             WORKS_FOR, MANAGES, REPORTS_TO, COLLABORATES_WITH, ASSOCIATED_WITH, LOCATED_AT, VALID_FROM/UNTIL, RESPONSIBLE_FOR, AUTHORED_BY, REFERENCES, CONTAINS, PARTICIPATES_IN, RELATED_TO, DEPENDS_ON, ASSIGNED_TO, DESCRIBES, BELONGS_TO, COMMUNICATES_WITH
 
             Focus on extracting the most significant entities and relationships that capture the document's key information, structure, and purpose.
+            IMPORTANT: Return ONLY the JSON object, no additional text or explanation.
             """
 
             system_message = {"role": "system", "content": extraction_prompt}
@@ -374,56 +375,32 @@ class ModelHandler:
                 ]
 
             try:
-                structured_response : ParsedChatCompletion[EntityRelationSchema] = await self.structured_chat_completion(
+                response : ChatCompletion = await self.chat_completion(
                     model=settings.INFERENCE_MODEL,
                     messages=[system_message] + image_messages,
-                    response_format=EntityRelationSchema,
                     max_completion_tokens=settings.INFERNECE_STRUCTURED_OUTPUTS_MAX_TOKENS,
                 )
                 
-                if (structured_response and 
-                    hasattr(structured_response, 'choices') and 
-                    structured_response.choices and 
-                    len(structured_response.choices) > 0 and
-                    hasattr(structured_response.choices[0], 'message') and
-                    hasattr(structured_response.choices[0].message, 'parsed') and
-                    structured_response.choices[0].message.parsed):
-                    parsed_result = structured_response.choices[0].message.parsed
-                    entities = [entity.model_dump() for entity in parsed_result.entities]
-                    relationships = [rel.model_dump() for rel in parsed_result.relationships]
+                if (response and 
+                    hasattr(response, 'choices') and 
+                    response.choices and 
+                    len(response.choices) > 0 and
+                    hasattr(response.choices[0], 'message') and
+                    hasattr(response.choices[0].message, 'content') and
+                    response.choices[0].message.content):
                     
-                    for entity in entities:
-                        entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
+                    content = response.choices[0].message.content.strip()
                     
-                    for rel in relationships:
-                        rel["source"] = rel["source"].lower().replace(" ", "_").replace("-", "_")
-                        rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
+                    if content.startswith('```json'):
+                        content = content[7:]
+                    if content.endswith('```'):
+                        content = content[:-3]
+                    content = content.strip()
                     
-                    return {"entities": entities, "relationships": relationships}
-                else:
-                    raise ValueError("Failed to parse image-based structured response")
-                    
-            except Exception as e:
-                logger.warning(f"Image-based entity extraction failed: {e}. Falling back to text-based extraction.")
-                
-                try:
-                    structured_response : ParsedChatCompletion[EntityRelationSchema] = await self._structured_chat_completion_internal(
-                        model=settings.REASONING_MODEL,
-                        messages=[system_message] + text_messages,
-                        response_format=EntityRelationSchema,
-                        max_completion_tokens=settings.REASONING_STRUCTURED_OUTPUTS_MAX_TOKENS,
-                    )
-                
-                    if (structured_response and 
-                        hasattr(structured_response, 'choices') and 
-                        structured_response.choices and 
-                        len(structured_response.choices) > 0 and
-                        hasattr(structured_response.choices[0], 'message') and
-                        hasattr(structured_response.choices[0].message, 'parsed') and
-                        structured_response.choices[0].message.parsed):
-                        parsed_result = structured_response.choices[0].message.parsed
-                        entities = [entity.model_dump() for entity in parsed_result.entities]
-                        relationships = [rel.model_dump() for rel in parsed_result.relationships]
+                    try:
+                        parsed_result = json.loads(content)
+                        entities = parsed_result.get("entities", [])
+                        relationships = parsed_result.get("relationships", [])
                         
                         for entity in entities:
                             entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
@@ -433,6 +410,54 @@ class ModelHandler:
                             rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
                         
                         return {"entities": entities, "relationships": relationships}
+                    except json.JSONDecodeError as json_e:
+                        logger.warning(f"Failed to parse JSON from image response: {json_e}. Content: {content[:500]}")
+                        raise ValueError("Failed to parse image-based JSON response")
+                else:
+                    raise ValueError("Failed to get valid response from image-based extraction")
+                    
+            except Exception as e:
+                logger.warning(f"Image-based entity extraction failed: {e}. Falling back to text-based extraction.")
+                
+                try:
+                    response : ChatCompletion = await self.chat_completion(
+                        model=settings.REASONING_MODEL,
+                        messages=[system_message] + text_messages,
+                        max_completion_tokens=settings.REASONING_STRUCTURED_OUTPUTS_MAX_TOKENS,
+                    )
+                
+                    if (response and 
+                        hasattr(response, 'choices') and 
+                        response.choices and 
+                        len(response.choices) > 0 and
+                        hasattr(response.choices[0], 'message') and
+                        hasattr(response.choices[0].message, 'content') and
+                        response.choices[0].message.content):
+                        
+                        content = response.choices[0].message.content.strip()
+                        
+                        if content.startswith('```json'):
+                            content = content[7:]
+                        if content.endswith('```'):
+                            content = content[:-3]
+                        content = content.strip()
+                        
+                        try:
+                            parsed_result = json.loads(content)
+                            entities = parsed_result.get("entities", [])
+                            relationships = parsed_result.get("relationships", [])
+                            
+                            for entity in entities:
+                                entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
+                            
+                            for rel in relationships:
+                                rel["source"] = rel["source"].lower().replace(" ", "_").replace("-", "_")
+                                rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
+                            
+                            return {"entities": entities, "relationships": relationships}
+                        except json.JSONDecodeError as json_e:
+                            logger.error(f"Failed to parse JSON from text response: {json_e}. Content: {content[:500]}")
+                            return {"entities": [], "relationships": []}
                     else:
                         logger.error("Both image and text-based entity extraction failed")
                         return {"entities": [], "relationships": []}

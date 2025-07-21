@@ -272,23 +272,24 @@ class Neo4jHandler:
                                                    row_properties=row_properties)
                                 
                                 row_values_list = [(col, val) for col, val in row_values.items() if val]
-                                for i in range(len(row_values_list) - 1):
-                                    current_col, current_val = row_values_list[i]
-                                    next_col, next_val = row_values_list[i + 1]
-                                    
-                                    relation_query = """
-                                    MATCH (r1:RowValue {row_index: $row_index, column_name: $current_col, value: $current_val, user_id: $user_id, org_id: $org_id})
-                                    MATCH (r2:RowValue {row_index: $row_index, column_name: $next_col, value: $next_val, user_id: $user_id, org_id: $org_id})
-                                    CREATE (r1)-[:RELATES_TO]->(r2)
-                                    """
-                                    await tx.run(relation_query,
-                                               row_index=row_index,
-                                               current_col=current_col,
-                                               current_val=current_val,
-                                               next_col=next_col,
-                                               next_val=next_val,
-                                               user_id=document_data["user_id"],
-                                               org_id=document_data["org_id"])
+                                for i in range(len(row_values_list)):
+                                    for j in range(i + 1, len(row_values_list)):
+                                        current_col, current_val = row_values_list[i]
+                                        other_col, other_val = row_values_list[j]
+                                        
+                                        relation_query = """
+                                        MATCH (r1:RowValue {row_index: $row_index, column_name: $current_col, value: $current_val, user_id: $user_id, org_id: $org_id})
+                                        MATCH (r2:RowValue {row_index: $row_index, column_name: $other_col, value: $other_val, user_id: $user_id, org_id: $org_id})
+                                        CREATE (r1)-[:RELATES_TO]->(r2)
+                                        """
+                                        await tx.run(relation_query,
+                                                   row_index=row_index,
+                                                   current_col=current_col,
+                                                   current_val=current_val,
+                                                   other_col=other_col,
+                                                   other_val=other_val,
+                                                   user_id=document_data["user_id"],
+                                                   org_id=document_data["org_id"])
                         else:
                             for chunk_data in sheet_data.get("data", []):
                                 page_properties = {

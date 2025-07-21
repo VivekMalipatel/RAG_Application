@@ -10,7 +10,7 @@ curl -X POST "http://192.168.0.10:8009/ingest/file"   -H "Content-Type: applicat
     }
   }'
 
-curl -X POST "http://192.168.0.20:8082/ingest/file"  -H "Content-Type: application/json"   -d '{
+curl -X POST "http://192.168.0.10:8082/ingest/file"  -H "Content-Type: application/json"   -d '{
     "user_id": "test_user",
     "org_id": "test_org", 
     "s3_url": "http://192.168.0.20:9001/indexerapi/cube.PDF",
@@ -23,7 +23,7 @@ curl -X POST "http://192.168.0.20:8082/ingest/file"  -H "Content-Type: applicati
   }'
 
 
-curl -X POST "http://192.168.0.10:8009/ingest/file"  -H "Content-Type: application/json"   -d '{
+curl -X POST "http://192.168.0.10:8082/ingest/file"  -H "Content-Type: application/json"   -d '{
     "user_id": "test_user",
     "org_id": "test_org", 
     "s3_url": "http://192.168.0.20:9001/indexerapi/artificial-intelligence-a-modern-approach-4nbsped-0134610997-9780134610993_compress.pdf",
@@ -35,7 +35,7 @@ curl -X POST "http://192.168.0.10:8009/ingest/file"  -H "Content-Type: applicati
     }
   }'
 
-curl -X POST "http://192.168.0.10:8009/ingest/file" -H "Content-Type: application/json"   -d '{
+curl -X POST "http://192.168.0.10:8082/ingest/file" -H "Content-Type: application/json"   -d '{
     "user_id": "test_user",
     "org_id": "test_org", 
     "s3_url": "http://192.168.0.20:9001/indexerapi/Pokemon.csv",
