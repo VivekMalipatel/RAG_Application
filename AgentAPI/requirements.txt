@@ -24,4 +24,5 @@ langgraph-checkpoint-redis
 transformers
 scrapegraphai
 playwright
+marinabox
 debugpy

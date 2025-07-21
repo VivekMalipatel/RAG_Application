@@ -1,0 +1,67 @@
+browser_use_tool: |
+
+    Automate browser interactions using browser-use library to perform real web automation tasks on a local browser instance. This tool opens and controls a real browser to interact with web pages, extract content, and perform complex automation tasks.
+
+    CORE CAPABILITIES:
+    - Launch and control a real browser instance (Chrome/Firefox/Safari)
+    - Navigate to any web page and perform human-like interactions
+    - Extract text, images, links, and other content from web pages
+    - Click buttons, fill forms, scroll, hover, and perform complex user actions
+    - Handle dynamic content, JavaScript-heavy sites, and single-page applications
+    - Take screenshots and capture page state during automation
+    - Handle cookies, sessions, and authentication flows
+
+    BROWSER AUTOMATION FEATURES:
+    - Real browser rendering with full JavaScript support
+    - Automatic waiting for elements to load and become interactive
+    - Smart element detection and interaction
+    - Form filling with realistic typing patterns
+    - File uploads and downloads
+    - Multi-tab and window management
+    - Mobile and desktop viewport simulation
+
+    USAGE INSTRUCTIONS:
+    - Provide the URL or describe the task you want to automate
+    - The tool will launch a browser, navigate to the page, and perform the requested actions
+    - Results include extracted content, screenshots, and action confirmations
+    - Browser sessions can be maintained for multi-step workflows
+
+    EXAMPLE TASKS:
+    1. Extract product information from e-commerce sites
+    2. Fill out forms and submit data
+    3. Login to websites and access protected content
+    4. Search for information and collect results
+    5. Monitor website changes and content updates
+    6. Automate repetitive web tasks and workflows
+
+    PARAMETERS:
+    - task (str): Description of the automation task to perform (required)
+    - url (str, optional): Starting URL if different from task description
+    - screenshot (bool, optional): Whether to take screenshots during automation
+    - headless (bool, optional): Run browser in headless mode (default: False for visibility)
+
+    RETURNS:
+    - Detailed results of the automation including:
+      - Extracted content and data
+      - Screenshots if requested
+      - Action confirmations and status
+      - Any errors or issues encountered
+
+    SECURITY & LIMITATIONS:
+    - Only interacts with publicly accessible websites
+    - Respects robots.txt and rate limiting
+    - Does not perform illegal or unethical automation
+    - Browser sessions are isolated and temporary
+
+    BEST PRACTICES:
+    - Describe tasks clearly and specifically
+    - Use realistic timing between actions
+    - Handle errors gracefully with fallback strategies
+    - Respect website terms of service and rate limits
+
+    Args:
+        request: BrowserUseRequest object containing task description and parameters
+        config: Optional configuration for browser settings and behavior
+
+    Returns:
+        Comprehensive results of the browser automation task including extracted data, screenshots, and execution status
