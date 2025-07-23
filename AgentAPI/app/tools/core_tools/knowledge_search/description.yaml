@@ -1,5 +1,4 @@
 knowledge_search_tool: |
-
     Execute multiple Cypher queries against the knowledge graph database to retrieve relevant information. Supports batch operations for efficient querying with mandatory security filtering.
     
     This tool allows batch execution of Cypher queries against the knowledge graph database through the Indexer API. 
@@ -174,13 +173,3 @@ knowledge_search_tool: |
            [rel in relationships(path) | rel.relation_type] as relationship_types
     LIMIT 5
     ```
-    
-    Args:
-        requests: List of search requests (max 10), each containing:
-                 - query (str): Cypher query with $user_id and $org_id parameters (use dollar sign syntax)
-                 - parameters (dict): Optional query parameters (user_id/org_id auto-injected)
-                 - text_to_embed (str, optional): Text to convert to embedding vector for $embedding parameter
-    
-    Returns:
-        List of stringified JSON results from each query execution, maintaining input order.
-        Results include formatted content with metadata and error handling.

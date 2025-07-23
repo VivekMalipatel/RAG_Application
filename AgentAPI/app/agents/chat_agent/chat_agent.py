@@ -1,6 +1,7 @@
 from pathlib import Path
 import yaml
 from typing import Optional, Dict, Any
+from langchain_core.runnables import RunnableConfig
 
 from agents.base_agents.base_agent import BaseAgent
 
@@ -9,6 +10,7 @@ class ChatAgent(BaseAgent):
     def __init__(self,
                  prompt: Optional[str] = None,
                  *,
+                 config: RunnableConfig,
                  model_kwargs: Optional[Dict[str, Any]] = None,
                  vlm_kwargs: Optional[Dict[str, Any]] = None,
                  node_kwargs: Optional[Dict[str, Any]] = None,
@@ -20,6 +22,7 @@ class ChatAgent(BaseAgent):
         
         super().__init__(
             prompt=prompt,
+            config=config,
             model_kwargs=model_kwargs,
             vlm_kwargs=vlm_kwargs,
             node_kwargs=node_kwargs,

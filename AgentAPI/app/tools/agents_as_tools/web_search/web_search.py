@@ -6,7 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from agents.base_agents.base_agent import BaseAgent
-from agents.web_search_agent.web_search_agent import WebAgent
+from agents.util_agents.web_search_agent.web_search_agent import WebAgent
 
 TOOL_NAME = "web_search_scrape_agent"
 

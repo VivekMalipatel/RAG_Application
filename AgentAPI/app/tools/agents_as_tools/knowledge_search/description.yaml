@@ -13,3 +13,4 @@ knowledge_search_tool: |
 
   Use this tool when you need to search for specific information, documents, entities, or relationships within the user's knowledge base that has been processed and stored in the knowledge graph system.
 
+  Only answer based on the knowledge graph data and do not provide any information outside of the ingested knowledge base. If the query cannot be answered with the available data, respond with "I don't know" or "No relevant information found".

@@ -14,14 +14,15 @@ from langgraph.store.base import BaseStore, IndexConfig
 from langgraph.types import All, StreamMode
 from langgraph.config import get_store
 
-from langchain_core.tools import BaseTool, tool
+from langgraph.cache.base import BaseCache
+from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.schema import StreamEvent
 from langchain_core.runnables.utils import Output
 from langchain_core.runnables.base import Input
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
 from langchain_openai import OpenAIEmbeddings
-import tiktoken
+from langgraph.config import get_stream_writer
 
 from openai import BaseModel
 
@@ -64,12 +65,16 @@ class BaseAgent:
     def __init__(self,
                  prompt: Optional[str] = "You are a helpful assistant.",
                  *,
+                 config: RunnableConfig,
                  model_kwargs: Optional[dict[str, Any]] = None,
                  vlm_kwargs: Optional[dict[str, Any]] = None,
                  node_kwargs: Optional[dict[str, Any]] = None,
                  recursion_limit: Optional[int] = 25,
                  debug: bool = False):
         
+        if not config:
+            raise ValueError("Runnable Config with user_id, thread_id, org_id and/or checkpoint_id must be provided.")
+
         self._config = AgentConfig(
             model_kwargs=model_kwargs or {},
             vlm_kwargs=vlm_kwargs or {},
@@ -90,9 +95,8 @@ class BaseAgent:
         self._name = None
         self._is_structured_output = False
         self._resursion_limit = recursion_limit
-        self._tokenizer = tiktoken.encoding_for_model("gpt-4")
-        self._token_cache = {}
-        
+        self.config = config
+
         self.prompt = prompt
 
     def _count_tokens_cached(self, text: str) -> int:
@@ -100,63 +104,6 @@ class BaseAgent:
         if text_hash not in self._token_cache:
             self._token_cache[text_hash] = len(self._tokenizer.encode(text))
         return self._token_cache[text_hash]
-
-    def token_safety(self, messages: list[BaseMessage]) -> list[BaseMessage]:
-        total_tokens = 0
-        text_refs = []
-        
-        for msg_idx, message in enumerate(messages):
-            if isinstance(message.content, str):
-                tokens = self._count_tokens_cached(message.content)
-                total_tokens += tokens
-                text_refs.append((msg_idx, None, tokens, message.content))
-            elif isinstance(message.content, list):
-                for item_idx, item in enumerate(message.content):
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        text = item.get("text", "")
-                        if text:
-                            tokens = self._count_tokens_cached(text)
-                            total_tokens += tokens
-                            text_refs.append((msg_idx, item_idx, tokens, text))
-        
-        if total_tokens <= envconfig.MAX_STATE_TOKENS:
-            return messages
-        
-        if not text_refs:
-            return messages
-        
-        text_refs.sort(key=lambda x: x[2], reverse=True)
-        tokens_to_reduce = total_tokens - envconfig.MAX_STATE_TOKENS
-        
-        for msg_idx, item_idx, text_tokens, original_text in text_refs:
-            if tokens_to_reduce <= 0:
-                break
-                
-            if text_tokens > tokens_to_reduce:
-                target_tokens = text_tokens - tokens_to_reduce
-                encoded = self._tokenizer.encode(original_text)
-                if len(encoded) > target_tokens:
-                    truncated_text = self._tokenizer.decode(encoded[:target_tokens]) + "... [TEXT TRUNCATED DUE TO LONGER LENGTH IF THIS MESSAGE IS A TOOL TRY TO REDO TOOL CALL TO GET LIMITED RESULTS]"
-                else:
-                    truncated_text = original_text
-                
-                if item_idx is None:
-                    messages[msg_idx].content = truncated_text
-                else:
-                    messages[msg_idx].content[item_idx]["text"] = truncated_text
-                
-                tokens_to_reduce = 0
-            else:
-                replacement_text = "[TEXT TRUNCATED DUE TO LONGER LENGTH IF THIS MESSAGE IS A TOOL TRY TO REDO TOOL CALL TO GET LIMITED RESULTS]"
-                
-                if item_idx is None:
-                    messages[msg_idx].content = replacement_text
-                else:
-                    messages[msg_idx].content[item_idx]["text"] = replacement_text
-                
-                tokens_to_reduce -= text_tokens
-        
-        return messages
 
     def _validate_tools(self, tools: Sequence[Union[typing.Dict[str, Any], type, Callable, BaseTool]]):
         for tool in tools:
@@ -220,7 +167,6 @@ class BaseAgent:
         if num_tokens >= envconfig.MAX_STATE_TOKENS:
             if second_last_ai_index != -1:
                 state["messages"] = messages[second_last_ai_index:]
-            state["messages"] = self.token_safety(state["messages"])
             return state
         
         return
@@ -229,6 +175,8 @@ class BaseAgent:
         user_id = config["configurable"]["user_id"]
         org_id = config["configurable"]["org_id"]
         last_message: BaseMessage = state["messages"][-1]
+        writer = get_stream_writer()
+        writer(f"Retrieving memory.....\n\n")
         store = get_store()
         
         def extract_text_from_content(content):
@@ -261,6 +209,7 @@ class BaseAgent:
         user_memory, org_memory = await asyncio.gather(get_user_memory(), get_org_memory())
 
         if not user_memory and not org_memory:
+            writer(f"Memory retrieved......\n\n")
             return []
         
         memory_messages = []
@@ -277,13 +226,13 @@ class BaseAgent:
             for org_msg in org_memory:
                 memory_messages.append(SystemMessage(content=org_msg.value.get("data", "")))
 
+        writer(f"Memory retrieved......\n\n")
         return memory_messages
 
     async def llm_node(self, state: BaseState, config: RunnableConfig):
         memory_messages = await self.retrieve_memory(state, config)
 
         messages = [SystemMessage(content=self.prompt)] + memory_messages + state["messages"]
-        messages = self.token_safety(messages)
         
         response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
         if self._is_structured_output:
@@ -297,23 +246,23 @@ class BaseAgent:
 
     def _compile_graph(self, has_tools: bool, **compile_kwargs) -> CompiledStateGraph:
         graph_builder = StateGraph(BaseState)
-        
-        graph_builder.add_node("llm", self.llm_node)
+        llm_node_name = f"llm${self.config.get('configurable').get('user_id')}"
+        graph_builder.add_node(llm_node_name, self.llm_node)
         graph_builder.add_node("remember_node", self.remember)
         
         if has_tools:
             graph_builder.add_node("tools", ToolNode(self._tools))
-            graph_builder.add_edge(START, "llm")
+            graph_builder.add_edge(START, llm_node_name)
             graph_builder.add_conditional_edges(
-                "llm",
+                llm_node_name,
                 tools_condition,
                 {"tools": "tools", "__end__": "remember_node"}
             )
-            graph_builder.add_edge("tools", "llm")
+            graph_builder.add_edge("tools", llm_node_name)
             graph_builder.add_edge("remember_node", END)
         else:
-            graph_builder.add_edge(START, "llm")
-            graph_builder.add_edge("llm", "remember_node")
+            graph_builder.add_edge(START, llm_node_name)
+            graph_builder.add_edge(llm_node_name, "remember_node")
             graph_builder.add_edge("remember_node", END)
 
         return graph_builder.compile(**compile_kwargs)
@@ -321,6 +270,7 @@ class BaseAgent:
     async def compile(self,
                       checkpointer: Optional[BaseMemorySaver] = None,
                       *,
+                      cache: BaseCache | None = None,
                       store: Optional[BaseStore] = None,
                       interrupt_before: list[str] | Literal['*'] | None = None,
                       interrupt_after: list[str] | Literal['*'] | None = None,
@@ -359,6 +309,7 @@ class BaseAgent:
 
         compile_kwargs = {
             "checkpointer": checkpointer,
+            "cache": cache,
             "store": store,
             "interrupt_before": interrupt_before,
             "interrupt_after": interrupt_after,
@@ -375,32 +326,31 @@ class BaseAgent:
                       config: RunnableConfig | None = None,
                       *,
                       stream_mode: StreamMode = "values",
+                      print_mode: StreamMode | Sequence[StreamMode] = (),
                       output_keys: str | Sequence[str] | None = None,
                       interrupt_before: All | Sequence[str] | None = None,
                       interrupt_after: All | Sequence[str] | None = None,
-                      checkpoint_during: bool | None = None,
-                      debug: bool | None = None,
                       **kwargs: Any) -> dict[str, Any] | Any:
         
         config["recursion_limit"] = self._resursion_limit
         return await self._compiled_graph.ainvoke(
             input, 
             config=config, 
-            stream_mode=stream_mode, 
+            stream_mode=stream_mode,
             output_keys=output_keys, 
+            print_mode=print_mode,
             interrupt_before=interrupt_before, 
             interrupt_after=interrupt_after, 
-            checkpoint_during=checkpoint_during, 
-            debug=debug, 
             **kwargs
         )
 
-    @requires_compile
+    @requires_compile_generator
     async def astream(self,
                       input: dict[str, Any] | Any,
                       config: RunnableConfig | None = None,
                       *,
-                      stream_mode: StreamMode | list[StreamMode] | None = None,
+                      stream_mode: StreamMode | Sequence[StreamMode] | None = None,
+                      print_mode: StreamMode | Sequence[StreamMode] = (),
                       output_keys: str | Sequence[str] | None = None,
                       interrupt_before: All | Sequence[str] | None = None,
                       interrupt_after: All | Sequence[str] | None = None,
@@ -409,19 +359,36 @@ class BaseAgent:
                       subgraphs: bool = False,
                       **kwargs: Any) -> AsyncIterator[dict[str, Any] | Any]:
         
-        async for chunk in self._compiled_graph.astream(
-            input, 
-            config=config, 
-            stream_mode=stream_mode, 
-            output_keys=output_keys, 
-            interrupt_before=interrupt_before, 
-            interrupt_after=interrupt_after, 
-            checkpoint_during=checkpoint_during, 
-            debug=debug, 
-            subgraphs=subgraphs, 
-            **kwargs
-        ):
-            yield chunk
+        if isinstance(stream_mode, str):
+            async for chunk in self._compiled_graph.astream(
+                input, 
+                config=config, 
+                stream_mode=stream_mode, 
+                print_mode=print_mode,
+                output_keys=output_keys, 
+                interrupt_before=interrupt_before, 
+                interrupt_after=interrupt_after, 
+                checkpoint_during=checkpoint_during, 
+                debug=debug, 
+                subgraphs=subgraphs, 
+                **kwargs
+            ):
+                yield chunk
+        elif isinstance(stream_mode, list):
+            async for stream_mode, chunk in self._compiled_graph.astream(
+                input, 
+                config=config, 
+                stream_mode=stream_mode, 
+                print_mode=print_mode,
+                output_keys=output_keys, 
+                interrupt_before=interrupt_before, 
+                interrupt_after=interrupt_after, 
+                checkpoint_during=checkpoint_during, 
+                debug=debug, 
+                subgraphs=subgraphs, 
+                **kwargs
+            ):
+                yield stream_mode, chunk
 
     @requires_compile_generator
     async def astream_events(self,

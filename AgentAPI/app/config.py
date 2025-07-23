@@ -12,6 +12,10 @@ class Config:
     OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     MODEL_PROVIDER: str = os.getenv("MODEL_PROVIDER")
+    LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", 240))
+    LLM_MAX_RETRIES: int = int(os.getenv("REASONING_LLM_MAX_RETRIES", 3))
+    REASONING_LLM_MAX_TOKENS: int = int(os.getenv("REASONING_LLM_MAX_TOKENS", 32768))
+    VLM_LLM_MAX_TOKENS: int = int(os.getenv("VLM_LLM_MAX_TOKENS", 120000))
 
     INDEXER_API_BASE_URL: str = os.getenv("INDEXER_API_BASE_URL")
 
@@ -27,6 +31,6 @@ class Config:
     )
 
     # State Management
-    MAX_STATE_TOKENS: int = int(os.getenv("MAX_STATE_TOKENS", 40000))
+    MAX_STATE_TOKENS: int = int(os.getenv("MAX_STATE_TOKENS", 20000))
 
 config = Config()

@@ -33,6 +33,5 @@ AVAILABLE_TOOLS = [
             }
         }
     }
-    # Add more tools here as needed
 ]
 

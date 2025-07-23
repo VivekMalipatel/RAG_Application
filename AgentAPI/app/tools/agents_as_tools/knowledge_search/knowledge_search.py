@@ -4,11 +4,12 @@ from pathlib import Path
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage
+from langgraph.config import get_stream_writer
 
 from agents.base_agents.base_state import BaseState
 from agents.base_agents.base_agent import BaseAgent
 from pydantic import BaseModel, Field
-from agents.knowledge_search_agent.knowledge_search_agent import KnowledgeSearchAgent
+from agents.util_agents.knowledge_search_agent.knowledge_search_agent import KnowledgeSearchAgent
 
 TOOL_NAME = "knowledge_search_agent"
 
@@ -33,17 +34,7 @@ def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml"
 )
 async def knowledge_search_agent(prompt : str, config: RunnableConfig) :
 
-    knowledge_search_agent = KnowledgeSearchAgent(
-                                model_kwargs={},
-                                vlm_kwargs={},
-                                node_kwargs={},
-                                debug=False
-                            )
-    
-    compiled_agent: BaseAgent = await knowledge_search_agent.compile(name=TOOL_NAME)
-
     org_id : str = config.get("configurable").get("org_id")
-
 
     if len(org_id.split("$")) > 1:
         org_id = f"{config.get('configurable').get('org_id')}${hashlib.sha256(TOOL_NAME.encode()).hexdigest()}"
@@ -55,6 +46,18 @@ async def knowledge_search_agent(prompt : str, config: RunnableConfig) :
             "org_id": org_id
         }
     }
+
+    writer = get_stream_writer()
+    writer(f"Knowledge Search Agent invoked with '{prompt}' as instruction")
+    knowledge_search_agent = KnowledgeSearchAgent(
+                                config=config,
+                                model_kwargs={},
+                                vlm_kwargs={},
+                                node_kwargs={},
+                                debug=False
+                            )
+    
+    compiled_agent: BaseAgent = await knowledge_search_agent.compile(name=TOOL_NAME)
 
     input={
             "messages": [

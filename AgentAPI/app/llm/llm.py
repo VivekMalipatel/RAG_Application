@@ -32,6 +32,9 @@ class LLM:
             "model_provider": reasoningllm_kwargs.get("model_provider", config.MODEL_PROVIDER),
             "base_url": reasoningllm_kwargs.get("base_url", config.OPENAI_BASE_URL),
             "api_key": reasoningllm_kwargs.get("api_key", config.OPENAI_API_KEY),
+            "timeout": reasoningllm_kwargs.get("timeout", config.LLM_TIMEOUT),
+            "max_tokens": reasoningllm_kwargs.get("max_tokens", config.REASONING_LLM_MAX_TOKENS),
+            "max_retries": reasoningllm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
             **reasoning_llm_filtered_kwargs
         }
         
@@ -42,6 +45,9 @@ class LLM:
             "model_provider": vlm_kwargs.get("model_provider", config.MODEL_PROVIDER),
             "base_url": vlm_kwargs.get("base_url", config.OPENAI_BASE_URL),
             "api_key": vlm_kwargs.get("api_key", config.OPENAI_API_KEY),
+            "timeout": reasoningllm_kwargs.get("timeout", config.LLM_TIMEOUT),
+            "max_tokens": reasoningllm_kwargs.get("max_tokens", config.VLM_LLM_MAX_TOKENS),
+            "max_retries": reasoningllm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
             **vlm_filtered_kwargs
         }
 

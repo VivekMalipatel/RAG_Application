@@ -1,0 +1,1133 @@
+🚀 Starting Agent API Tests
+
+🔄 Testing models endpoint...
+📤 Available models:
+  - chat_agent: ChatAgent
+
+🔄 Testing streaming chat completion...
+📤 Basic streaming response:
+
+🧠 Streaming Reasoning Content:
+
+
+Artificial Intelligence (AI) is a transformative field of computer science focused on creating systems that can perform tasks typically requiring human intelligence, such as learning, reasoning, problem-solving, perception, and language understanding. Here's a concise overview:
+
+---
+
+### **1. What is AI?**
+AI refers to the simulation of human intelligence in machines. It encompasses a range of technologies and techniques designed to enable machines to adapt, improve, and make decisions based on data. AI systems are often categorized into **narrow AI** (specialized for specific tasks) and **general AI** (theoretical, capable of human-like reasoning across diverse domains). Currently, we are in the era of **narrow AI**, which dominates applications like voice assistants, recommendation systems, and image recognition.
+
+---
+
+### **2. Key Areas of AI**
+- **Machine Learning (ML):** A subset of AI that allows systems to learn patterns from data without explicit programming. ML models (e.g., decision trees, neural networks) improve their performance over time as they are exposed to more data.
+- **Deep Learning:** A type of ML using artificial neural networks (inspired by the human brain) to analyze complex data (e.g., images, speech, text). It excels in tasks like image classification, natural language processing, and autonomous driving.
+- **Natural Language Processing (NLP):** Enables machines to understand, interpret, and generate human language. Examples include chatbots (e.g., Siri, Alexa), translation tools, and sentiment analysis.
+- **Computer Vision:** Allows machines to interpret and understand visual information, such as facial recognition, object detection, and medical imaging analysis.
+- **Robotics:** Integrates AI with physical systems to create autonomous robots capable of performing tasks in dynamic environments (e.g., manufacturing, exploration).
+
+---
+
+### **3. Applications of AI**
+- **Healthcare:** Diagnosing diseases, drug discovery, and personalized treatment plans.
+- **Finance:** Fraud detection, algorithmic trading, and chatbots for customer service.
+- **Transportation:** Self-driving cars (e.g., Tesla, Waymo) and traffic optimization.
+- **Retail:** Recommendation engines (e.g., Amazon, Netflix) and inventory management.
+- **Entertainment:** Content creation (e.g., AI-generated music, art) and virtual influencers.
+- **Education:** Adaptive learning platforms and automated grading tools.
+
+---
+
+### **4. Challenges and Ethical Considerations**
+- **Bias and Fairness:** AI systems can inherit biases from training data, leading to unfair outcomes (e.g., discriminatory hiring tools).
+- **Privacy:** Data collection for AI training raises concerns about user privacy and surveillance.
+- **Job Displacement:** Automation may replace certain jobs, though it can also create new opportunities.
+- **Security:** AI systems are vulnerable to adversarial attacks (e.g., manipulating inputs to deceive models).
+- **Autonomy and Control:** Ensuring accountability for decisions made by autonomous systems (e.g., self-driving cars, military drones).
+
+---
+
+### **5. Historical Context**
+AI was first conceptualized in the 1950s, with early pioneers like Alan Turing and Marvin Minsky. The field experienced periods of hype and disillusionment ("AI winters") due to technical limitations. Recent advancements in computing power, big data, and algorithms (e.g., deep learning) have revitalized AI, leading to breakthroughs in areas like image recognition, speech synthesis, and game-playing (e.g., AlphaGo).
+
+---
+
+### **6. Current Trends**
+- **Generative AI:** Tools like GPT-4 and DALL·E can create text, art, and code, revolutionizing content creation.
+- **AI in Sustainability:** Applications in climate modeling, energy optimization, and environmental monitoring.
+- **AI Ethics and Regulation:** Growing focus on frameworks to ensure transparency, accountability, and ethical use (e.g., EU’s AI Act).
+- **AI in Everyday Life:** Integration into smartphones, smart homes, and wearable devices for personalized experiences.
+
+---
+
+### **7. Future Outlook**
+AI is expected to continue evolving, with potential advancements in **general AI** (though this remains speculative). Emerging areas include:
+- **AI-driven scientific discovery** (e.g., drug development, materials science).
+- **Quantum computing and AI** (combining quantum power with machine learning).
+- **AI in space exploration** (e.g., autonomous rovers, satellite data analysis).
+
+However, the future also hinges on addressing ethical, societal, and technical challenges to ensure AI benefits humanity equitably.
+
+---
+
+### **Conclusion**
+AI is a rapidly growing field with profound implications for technology, economy, and society. While it offers incredible potential to solve complex problems and enhance productivity, its development requires careful management to mitigate risks and align with human values. As AI becomes more integrated into daily life, understanding its capabilities and limitations is crucial for responsible innovation.
+🧠 Final Reasoning Content:
+
+
+
+Art
+ificial
+ Intelligence
+ (
+AI
+)
+ is
+ a
+ transformative
+ field
+ of
+ computer
+ science
+ focused
+ on
+ creating
+ systems
+ that
+ can
+ perform
+ tasks
+ typically
+ requiring
+ human
+ intelligence
+,
+ such
+ as
+ learning
+,
+ reasoning
+,
+ problem
+-solving
+,
+ perception
+,
+ and
+ language
+ understanding
+.
+ Here
+'s
+ a
+ concise
+ overview
+:
+
+
+---
+
+
+###
+ **
+1
+.
+ What
+ is
+ AI
+?
+**
+
+AI
+ refers
+ to
+ the
+ simulation
+ of
+ human
+ intelligence
+ in
+ machines
+.
+ It
+ encompasses
+ a
+ range
+ of
+ technologies
+ and
+ techniques
+ designed
+ to
+ enable
+ machines
+ to
+ adapt
+,
+ improve
+,
+ and
+ make
+ decisions
+ based
+ on
+ data
+.
+ AI
+ systems
+ are
+ often
+ categorized
+ into
+ **
+n
+arrow
+ AI
+**
+ (
+special
+ized
+ for
+ specific
+ tasks
+)
+ and
+ **
+general
+ AI
+**
+ (
+the
+oretical
+,
+ capable
+ of
+ human
+-like
+ reasoning
+ across
+ diverse
+ domains
+).
+ Currently
+,
+ we
+ are
+ in
+ the
+ era
+ of
+ **
+n
+arrow
+ AI
+**,
+ which
+ dominates
+ applications
+ like
+ voice
+ assistants
+,
+ recommendation
+ systems
+,
+ and
+ image
+ recognition
+.
+
+
+---
+
+
+###
+ **
+2
+.
+ Key
+ Areas
+ of
+ AI
+**
+
+-
+ **
+Machine
+ Learning
+ (
+ML
+):
+**
+ A
+ subset
+ of
+ AI
+ that
+ allows
+ systems
+ to
+ learn
+ patterns
+ from
+ data
+ without
+ explicit
+ programming
+.
+ ML
+ models
+ (
+e
+.g
+.,
+ decision
+ trees
+,
+ neural
+ networks
+)
+ improve
+ their
+ performance
+ over
+ time
+ as
+ they
+ are
+ exposed
+ to
+ more
+ data
+.
+
+-
+ **
+Deep
+ Learning
+:**
+ A
+ type
+ of
+ ML
+ using
+ artificial
+ neural
+ networks
+ (
+ins
+pired
+ by
+ the
+ human
+ brain
+)
+ to
+ analyze
+ complex
+ data
+ (
+e
+.g
+.,
+ images
+,
+ speech
+,
+ text
+).
+ It
+ exc
+els
+ in
+ tasks
+ like
+ image
+ classification
+,
+ natural
+ language
+ processing
+,
+ and
+ autonomous
+ driving
+.
+
+-
+ **
+Natural
+ Language
+ Processing
+ (
+N
+LP
+):
+**
+ Enables
+ machines
+ to
+ understand
+,
+ interpret
+,
+ and
+ generate
+ human
+ language
+.
+ Examples
+ include
+ chat
+bots
+ (
+e
+.g
+.,
+ Siri
+,
+ Alexa
+),
+ translation
+ tools
+,
+ and
+ sentiment
+ analysis
+.
+
+-
+ **
+Computer
+ Vision
+:**
+ Allows
+ machines
+ to
+ interpret
+ and
+ understand
+ visual
+ information
+,
+ such
+ as
+ facial
+ recognition
+,
+ object
+ detection
+,
+ and
+ medical
+ imaging
+ analysis
+.
+
+-
+ **
+Robot
+ics
+:**
+ Integr
+ates
+ AI
+ with
+ physical
+ systems
+ to
+ create
+ autonomous
+ robots
+ capable
+ of
+ performing
+ tasks
+ in
+ dynamic
+ environments
+ (
+e
+.g
+.,
+ manufacturing
+,
+ exploration
+).
+
+
+---
+
+
+###
+ **
+3
+.
+ Applications
+ of
+ AI
+**
+
+-
+ **
+Health
+care
+:**
+ Di
+agn
+osing
+ diseases
+,
+ drug
+ discovery
+,
+ and
+ personalized
+ treatment
+ plans
+.
+
+-
+ **
+Finance
+:**
+ Fraud
+ detection
+,
+ algorithm
+ic
+ trading
+,
+ and
+ chat
+bots
+ for
+ customer
+ service
+.
+
+-
+ **
+Transport
+ation
+:**
+ Self
+-driving
+ cars
+ (
+e
+.g
+.,
+ Tesla
+,
+ Way
+mo
+)
+ and
+ traffic
+ optimization
+.
+
+-
+ **
+Retail
+:**
+ Recommendation
+ engines
+ (
+e
+.g
+.,
+ Amazon
+,
+ Netflix
+)
+ and
+ inventory
+ management
+.
+
+-
+ **
+Ent
+ertainment
+:**
+ Content
+ creation
+ (
+e
+.g
+.,
+ AI
+-generated
+ music
+,
+ art
+)
+ and
+ virtual
+ influencers
+.
+
+-
+ **
+Education
+:**
+ Adaptive
+ learning
+ platforms
+ and
+ automated
+ grading
+ tools
+.
+
+
+---
+
+
+###
+ **
+4
+.
+ Challenges
+ and
+ Eth
+ical
+ Consider
+ations
+**
+
+-
+ **
+Bias
+ and
+ Fair
+ness
+:**
+ AI
+ systems
+ can
+ inherit
+ biases
+ from
+ training
+ data
+,
+ leading
+ to
+ unfair
+ outcomes
+ (
+e
+.g
+.,
+ discriminatory
+ hiring
+ tools
+).
+
+-
+ **
+Privacy
+:**
+ Data
+ collection
+ for
+ AI
+ training
+ raises
+ concerns
+ about
+ user
+ privacy
+ and
+ surveillance
+.
+
+-
+ **
+Job
+ Dis
+placement
+:**
+ Automation
+ may
+ replace
+ certain
+ jobs
+,
+ though
+ it
+ can
+ also
+ create
+ new
+ opportunities
+.
+
+-
+ **
+Security
+:**
+ AI
+ systems
+ are
+ vulnerable
+ to
+ advers
+arial
+ attacks
+ (
+e
+.g
+.,
+ manipulating
+ inputs
+ to
+ deceive
+ models
+).
+
+-
+ **
+Aut
+onomy
+ and
+ Control
+:**
+ Ens
+uring
+ accountability
+ for
+ decisions
+ made
+ by
+ autonomous
+ systems
+ (
+e
+.g
+.,
+ self
+-driving
+ cars
+,
+ military
+ drones
+).
+
+
+---
+
+
+###
+ **
+5
+.
+ Historical
+ Context
+**
+
+AI
+ was
+ first
+ conceptual
+ized
+ in
+ the
+ 
+1
+9
+5
+0
+s
+,
+ with
+ early
+ pioneers
+ like
+ Alan
+ Turing
+ and
+ Marvin
+ M
+insky
+.
+ The
+ field
+ experienced
+ periods
+ of
+ hype
+ and
+ disillusion
+ment
+ ("
+AI
+ winters
+")
+ due
+ to
+ technical
+ limitations
+.
+ Recent
+ advancements
+ in
+ computing
+ power
+,
+ big
+ data
+,
+ and
+ algorithms
+ (
+e
+.g
+.,
+ deep
+ learning
+)
+ have
+ revital
+ized
+ AI
+,
+ leading
+ to
+ breakthrough
+s
+ in
+ areas
+ like
+ image
+ recognition
+,
+ speech
+ synthesis
+,
+ and
+ game
+-playing
+ (
+e
+.g
+.,
+ Alpha
+Go
+).
+
+
+---
+
+
+###
+ **
+6
+.
+ Current
+ Trends
+**
+
+-
+ **
+Gener
+ative
+ AI
+:**
+ Tools
+ like
+ G
+PT
+-
+4
+ and
+ D
+ALL
+·
+E
+ can
+ create
+ text
+,
+ art
+,
+ and
+ code
+,
+ revolution
+izing
+ content
+ creation
+.
+
+-
+ **
+AI
+ in
+ Sustainability
+:**
+ Applications
+ in
+ climate
+ modeling
+,
+ energy
+ optimization
+,
+ and
+ environmental
+ monitoring
+.
+
+-
+ **
+AI
+ Ethics
+ and
+ Regulation
+:**
+ Growing
+ focus
+ on
+ frameworks
+ to
+ ensure
+ transparency
+,
+ accountability
+,
+ and
+ ethical
+ use
+ (
+e
+.g
+.,
+ EU
+’s
+ AI
+ Act
+).
+
+-
+ **
+AI
+ in
+ Everyday
+ Life
+:**
+ Integration
+ into
+ smartphones
+,
+ smart
+ homes
+,
+ and
+ wearable
+ devices
+ for
+ personalized
+ experiences
+.
+
+
+---
+
+
+###
+ **
+7
+.
+ Future
+ Outlook
+**
+
+AI
+ is
+ expected
+ to
+ continue
+ evolving
+,
+ with
+ potential
+ advancements
+ in
+ **
+general
+ AI
+**
+ (
+though
+ this
+ remains
+ speculative
+).
+ Emerging
+ areas
+ include
+:
+
+-
+ **
+AI
+-driven
+ scientific
+ discovery
+**
+ (
+e
+.g
+.,
+ drug
+ development
+,
+ materials
+ science
+).
+
+-
+ **
+Quant
+um
+ computing
+ and
+ AI
+**
+ (
+comb
+ining
+ quantum
+ power
+ with
+ machine
+ learning
+).
+
+-
+ **
+AI
+ in
+ space
+ exploration
+**
+ (
+e
+.g
+.,
+ autonomous
+ ro
+vers
+,
+ satellite
+ data
+ analysis
+).
+
+
+However
+,
+ the
+ future
+ also
+ hinges
+ on
+ addressing
+ ethical
+,
+ societal
+,
+ and
+ technical
+ challenges
+ to
+ ensure
+ AI
+ benefits
+ humanity
+ equ
+itably
+.
+
+
+---
+
+
+###
+ **
+Conclusion
+**
+
+AI
+ is
+ a
+ rapidly
+ growing
+ field
+ with
+ profound
+ implications
+ for
+ technology
+,
+ economy
+,
+ and
+ society
+.
+ While
+ it
+ offers
+ incredible
+ potential
+ to
+ solve
+ complex
+ problems
+ and
+ enhance
+ productivity
+,
+ its
+ development
+ requires
+ careful
+ management
+ to
+ mitigate
+ risks
+ and
+ align
+ with
+ human
+ values
+.
+ As
+ AI
+ becomes
+ more
+ integrated
+ into
+ daily
+ life
+,
+ understanding
+ its
+ capabilities
+ and
+ limitations
+ is
+ crucial
+ for
+ responsible
+ innovation
+.
+
+💬 Final Response Content:
+No response generated
+
+✅ All tests completed!
