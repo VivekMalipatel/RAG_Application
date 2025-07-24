@@ -1,5 +1,4 @@
-# Use Python 3.11 image as base (non-slim for GPG keys)
-FROM python:3.11
+FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -8,30 +7,24 @@ ENV PYTHONPATH=/app/app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies
-RUN apt-get update && \
-    apt-get install -y gcc g++ && \
-    rm -rf /var/lib/apt/lists/*
-
-# Copy requirements file
+# Install system dependencies and Python packages in one layer
 COPY requirements.txt .
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc g++ && \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    apt-get purge -y gcc g++ && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf ~/.cache/pip
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Copy only the app folder (contains main.py and all your code)
+COPY app/ ./app/
 
-# Copy application code
-COPY . .
-COPY ./app /app
-
-
-# Create a non-root user for security
+# Create non-root user
 RUN useradd --create-home --shell /bin/bash app && \
     chown -R app:app /app
 USER app
 
-# Expose port (if running as a web service)
 EXPOSE 8000
-EXPOSE 5678
-# Default command to run the semantic store demo
-CMD ["python3", "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
