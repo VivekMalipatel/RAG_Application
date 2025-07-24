@@ -2,9 +2,7 @@ from pathlib import Path
 import yaml
 from typing import Optional, Dict, Any
 from langchain_core.runnables import RunnableConfig
-
 from agents.base_agents.base_agent import BaseAgent
-
 from tools.core_tools.web_search.web_search_tool import web_search_tool
 from tools.core_tools.web_scrape.web_scrape_tool import web_scrape_tool
 
@@ -47,13 +45,6 @@ if __name__ == "__main__":
     from langchain_core.messages import HumanMessage
 
     async def test_web_agent():
-        agent = WebAgent(
-            model_kwargs={},
-            vlm_kwargs={},
-            node_kwargs={},
-            debug=True
-        )
-        compiled_agent = await agent.compile(name="WebAgent")
         config = {
             "configurable": {
                 "thread_id": "32",
@@ -61,6 +52,15 @@ if __name__ == "__main__":
                 "org_id": "32"
             }
         }
+        agent = WebAgent(
+            config=config,
+            model_kwargs={},
+            vlm_kwargs={},
+            node_kwargs={},
+            debug=True
+        )
+        compiled_agent = await agent.compile(name="WebAgent")
+        
         print("=== Testing Web Search & Scrape Agent ===")
 
         # Test web search

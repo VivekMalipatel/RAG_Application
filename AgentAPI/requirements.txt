@@ -26,4 +26,9 @@ scrapegraphai
 playwright
 marinabox
 debugpy
+fastapi_mcp
+langchain_mcp_adapters
 selenium
+tiktoken
+uuid
+dataclasses

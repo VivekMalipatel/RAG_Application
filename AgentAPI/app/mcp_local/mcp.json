@@ -1,0 +1,49 @@
+{
+  "mcp_config": {
+    "version": "1.0",
+    "environment": "production",
+    "global_settings": {
+      "default_timeout": 30,
+      "max_concurrent_connections": 50,
+      "connection_retry_attempts": 3,
+      "health_check_interval": 60
+    },
+    "servers": {
+      "whatsapp": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "transport": "streamable_http",
+      "priority": 1,
+      "namespace": "whatsapp",
+      "enabled": false,
+      "health_check_interval": 30,
+      "max_retries": 3,
+      "timeout": 30,
+      "tools": []
+    },
+      "browsermcp": {
+        "url": "stdio",
+        "transport": "stdio",
+        "priority": 1,
+        "namespace": "demo",
+        "enabled": false,
+        "command": "npx",
+        "args": ["@browsermcp/mcp@latest"],
+        "health_check_interval": 30,
+        "max_retries": 3,
+        "timeout": 30,
+        "tools": []
+      },
+      "docker-gateway": {
+        "transport": "streamable_http",
+        "url": "http://10.9.0.5:8082/mcp",
+        "enabled": true,
+        "timeout": 60,
+        "max_retries": 5,
+        "priority": 1,
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    }
+  }
+}

@@ -15,6 +15,7 @@ from langchain_core.runnables import RunnableConfig
 from agents import get_agent_by_id, AGENT_CLASS_MAP
 from tools.agents_as_tools.knowledge_search.knowledge_search import knowledge_search_agent  
 from tools.agents_as_tools.web_search.web_search import web_search_scrape_agent
+from tools.agents_as_tools.mcp.mcp_search import mcp_agent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class ReasoningCollector:
 TOOL_AGENT_MAP = {
     "knowledge_search": knowledge_search_agent,
     "web_search_scrape_agent": web_search_scrape_agent,
+    "mcp_agent": mcp_agent,
 }
 
 class ChatCompletionService:
@@ -132,8 +134,7 @@ class ChatCompletionService:
         async def event_stream():
             try:
                 collector = ReasoningCollector()
-                final_content = ""
-                
+                                
                 async for stream_mode, chunk in agent.astream(input_data, config=config, stream_mode=["messages", "custom"]):
                     
                     if stream_mode == "messages":

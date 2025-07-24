@@ -1,0 +1,18 @@
+mcp_agent: |
+  MCP (Model Context Protocol) Agent for executing tools and automating tasks across multiple MCP servers.
+  
+  This agent can:
+  - Connect to and interact with MCP servers (stdio and HTTP transports)
+  - Execute browser automation tasks (screenshots, web scraping, navigation)
+  - Perform file operations and system interactions
+  - Access development tools and debugging capabilities
+  - Coordinate multi-tool workflows with security context injection
+  
+  Use this agent when you need to:
+  - Take screenshots of websites or applications
+  - Scrape web content or extract data from pages
+  - Automate browser interactions and testing
+  - Access specialized development or debugging tools
+  - Perform tasks that require MCP server capabilities
+  
+  The agent automatically handles server connections, tool discovery, security contexts, and error handling for robust multi-server operations.

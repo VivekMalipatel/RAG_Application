@@ -1,5 +1,3 @@
-
-
 import yaml
 import json
 from pathlib import Path
@@ -8,6 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from langchain_community.utilities import SearxSearchWrapper
+from config import config as app_config
 
 TOOL_NAME = "web_search_tool"
 
@@ -32,105 +31,115 @@ class WebSearch(BaseModel):
         description="List of categories to use (e.g., ['general', 'news'])."
     )
 
-class WebSearchRequest(BaseModel):
-    requests: List[WebSearch] = Field(
-        description="List of web search requests to execute concurrently (max 10 requests)."
-    )
-
 def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml") -> str:
     yaml_path = Path(__file__).parent / yaml_filename
     with open(yaml_path, 'r') as f:
         descriptions = yaml.safe_load(f)
     return descriptions.get(tool_name, "")
 
-def format_web_results(results) -> List[Dict[str, Any]]:
-    formatted_results = []
-    
-    # Handle string results from SearxSearchWrapper
-    if isinstance(results, str):
-        # Detect HTML response
-        if results.strip().lower().startswith("<html") or "<body" in results.lower():
-            content_items = [{
-                "type": "text",
-                "text": "Web search API returned HTML instead of results. The SearX instance may be misconfigured or the query is unsupported."
-            }]
+def format_content_field(content_str: str) -> List[Dict[str, Any]]:
+    try:
+        content_data = json.loads(content_str)
+        if isinstance(content_data, list):
+            formatted_content = []
+            for item in content_data:
+                if isinstance(item, dict):
+                    if item.get("type") == "image_url" and "image_url" in item:
+                        formatted_content.append({
+                            "type": "image_url",
+                            "image_url": item["image_url"]
+                        })
+                    elif item.get("type") == "text" and "text" in item:
+                        formatted_content.append({
+                            "type": "text", 
+                            "text": item["text"]
+                        })
+            return formatted_content
         else:
-            content_items = [{"type": "text", "text": results}]
-        formatted_results.append({"content": content_items})
-        return formatted_results
-    
-    # Handle list of dictionaries
-    if isinstance(results, list):
-        for result in results:
-            if isinstance(result, dict):
-                content_items = []
-                # Title
-                if result.get("title"):
-                    content_items.append({"type": "text", "text": f"**{result['title']}**"})
-                # Snippet/Description
-                if result.get("snippet"):
-                    content_items.append({"type": "text", "text": result["snippet"]})
-                elif result.get("description"):
-                    content_items.append({"type": "text", "text": result["description"]})
-                # URL
-                if result.get("url"):
-                    content_items.append({"type": "text", "text": f"URL: {result['url']}"})
-                elif result.get("link"):
-                    content_items.append({"type": "text", "text": f"URL: {result['link']}"})
-                # Source
-                if result.get("source"):
-                    content_items.append({"type": "text", "text": f"Source: {result['source']}"})
-                # Fallback
-                if not content_items:
-                    content_items.append({"type": "text", "text": json.dumps(result, indent=2)})
-                formatted_results.append({"content": content_items})
-            else:
-                # Handle non-dict items in list
-                content_items = [{"type": "text", "text": str(result)}]
-                formatted_results.append({"content": content_items})
-        return formatted_results
-    
-    # Fallback for other types
-    content_items = [{"type": "text", "text": str(results)}]
-    formatted_results.append({"content": content_items})
-    return formatted_results
+            return [{"type": "text", "text": str(content_data)}]
+    except (json.JSONDecodeError, TypeError):
+        return [{"type": "text", "text": str(content_str)}]
 
+def format_web_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    formatted_results = []
+    for record in results:
+        final_content = []
+        metadata_parts = []
+        for key, value in record.items():
+            if key == "content" and isinstance(value, str):
+                content_items = format_content_field(value)
+                final_content.extend(content_items)
+            elif isinstance(value, dict) and "content" in value and isinstance(value["content"], str):
+                content_items = format_content_field(value["content"])
+                final_content.extend(content_items)
+            elif key != "content":
+                if isinstance(value, dict):
+                    nested_parts = []
+                    for nested_key, nested_value in value.items():
+                        if nested_key != "content":
+                            nested_parts.append(f"{nested_key}: {nested_value}")
+                    if nested_parts:
+                        metadata_parts.append(f"{key}: {{{', '.join(nested_parts)}}}")
+                elif value is not None:
+                    metadata_parts.append(f"{key}: {value}")
+        if metadata_parts:
+            final_content.append({"type": "text", "text": f"[METADATA] {' | '.join(metadata_parts)}"})
+        if not final_content:
+            final_content.append({"type": "text", "text": json.dumps(record, indent=2)})
+        formatted_results.append({"content": final_content})
+    return formatted_results
 
 @tool(
     name_or_callable=TOOL_NAME,
     description=get_tool_description(TOOL_NAME),
-    args_schema=WebSearchRequest,
+    args_schema=WebSearch,
     parse_docstring=False,
     infer_schema=True,
     response_format="content"
 )
-async def web_search_tool(requests: List[WebSearch], config: RunnableConfig) -> List[str]:
-    """
-    Batch web search tool that executes multiple queries concurrently and returns formatted results using SearxSearchWrapper.
-    """
-    results = []
-    for req in requests:
-        try:
-            # Configure SearxSearchWrapper for each request
-            searx = SearxSearchWrapper(
-                searx_host="https://websearch.gauravshivaprasad.com",
-                engines=req.engines,
-                categories=req.categories,
-                params={
-                    "language": req.language or "en",
-                    "num_results": min(req.num_results or 10, 50)
-                }
-            )
-            
-            # Run the search
-            search_results = searx.run(req.query)
-            
-            # Format results
-            formatted_result = format_web_results(search_results)
-            results.append(json.dumps(formatted_result, indent=2))
-            
-        except Exception as e:
-            error_result = [{"content": [{"type": "text", "text": f"Search error: {str(e)}"}]}]
-            results.append(json.dumps(error_result, indent=2))
-    
-    return results
+async def web_search_tool(query: str, num_results: Optional[int] = 10, language: Optional[str] = "en", engines: Optional[List[str]] = None, categories: Optional[List[str]] = None, config: RunnableConfig = None) -> str:
+    try:
+        searx = SearxSearchWrapper(
+            searx_host=f"{app_config.SEARX_URL}",
+            engines=engines,
+            categories=categories,
+            params={
+                "language": language or "en",
+                "num_results": min(num_results or 10, 50)
+            }
+        )
+        search_results = searx.run(query)
+        # If Searx returns a string, wrap it in a list of dicts for formatting
+        if isinstance(search_results, str):
+            search_results = [{"content": search_results}]
+        formatted_result = format_web_results(search_results)
+        return json.dumps(formatted_result, indent=2)
+    except Exception as e:
+        error_result = [{"content": [{"type": "text", "text": f"Search error: {str(e)}"}]}]
+        return json.dumps(error_result, indent=2)
+
+# Example usage for local testing
+if __name__ == "__main__":
+    query = "LangChain Python documentation"
+    num_results = 5
+    language = "en"
+    engines = ["google"]
+    categories = ["general"]
+    print("Web Search Test Result:")
+    try:
+        searx = SearxSearchWrapper(
+            searx_host=f"{app_config.SEARX_URL}",
+            engines=engines,
+            categories=categories,
+            params={
+                "language": language,
+                "num_results": num_results
+            }
+        )
+        search_results = searx.run(query)
+        if isinstance(search_results, str):
+            search_results = [{"content": search_results}]
+        formatted_result = format_web_results(search_results)
+        print(json.dumps(formatted_result, indent=2))
+    except Exception as e:
+        print(json.dumps([{"content": [{"type": "text", "text": f"Search error: {str(e)}"}]}], indent=2))

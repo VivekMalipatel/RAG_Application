@@ -1,0 +1,225 @@
+multi_server_mcp_wrapper: |
+    Execute tools across multiple Model Context Protocol (MCP) servers with batch processing and security context injection.
+    
+    This tool provides a unified interface to interact with multiple MCP servers simultaneously, supporting both stdio and streamable_http transports.
+    It handles server connections, tool discovery, execution with retry logic, and response formatting automatically.
+    
+    SECURITY FEATURES:
+    - Automatic injection of user_id and org_id from session context
+    - All tool executions are scoped to the authenticated user and organization
+    - Server configurations are validated and filtered for security
+    - Only enabled servers with supported transports are used
+    
+    SUPPORTED TRANSPORTS:
+    - streamable_http: HTTP-based MCP servers (e.g., Docker MCP Gateway)
+    
+    AVAILABLE MCP SERVERS:
+    
+    1. Docker MCP Gateway (docker-gateway):
+       - Transport: streamable_http
+       - URL: http://10.9.0.5:8082/mcp
+       - Provides: Browser automation, web scraping, file operations
+       - Tools: screenshot, scrape, navigate, click, type, wait, etc.
+    
+    2. Browser MCP (browsermcp) [Disabled by default]:
+       - Transport: stdio
+       - Command: npx @browsermcp/mcp@latest
+       - Provides: Browser automation via Playwright
+       - Tools: Similar to Docker Gateway but runs locally
+    
+    3. WhatsApp MCP (whatsapp) [Disabled by default]:
+       - Transport: streamable_http
+       - URL: http://127.0.0.1:8000/mcp
+       - Provides: WhatsApp messaging capabilities
+    
+    BATCH PROCESSING:
+    - Execute up to 10 tool requests in a single call
+    - Concurrent execution for improved performance
+    - Individual error handling per request
+    - Comprehensive response aggregation
+    
+    REQUEST STRUCTURE:
+    Each request in the batch must specify:
+    - tool_name: Name of the MCP tool to execute
+    - arguments: Dictionary of arguments for the tool
+    - server_name: (Optional) Specific server to use, defaults to first available
+    
+    COMMON TOOL CATEGORIES:
+    
+    Browser Automation Tools:
+    - screenshot: Capture webpage screenshots
+    - scrape: Extract content from web pages
+    - navigate: Navigate to URLs
+    - click: Click on page elements
+    - type: Type text into form fields
+    - wait: Wait for page conditions
+    
+    File Operation Tools:
+    - read_file: Read file contents
+    - write_file: Write data to files
+    - list_directory: List directory contents
+    - file_exists: Check file existence
+    
+    System Tools:
+    - run_command: Execute system commands
+    - get_environment: Get environment variables
+    - system_info: Get system information
+    
+    USAGE EXAMPLES:
+    
+    1. Take Screenshot of Website:
+    ```json
+    {
+      "requests": [
+        {
+          "tool_name": "screenshot",
+          "arguments": {
+            "url": "https://example.com",
+            "width": 1920,
+            "height": 1080,
+            "format": "png"
+          },
+          "server_name": "docker-gateway"
+        }
+      ]
+    }
+    ```
+    
+    2. Scrape Website Content:
+    ```json
+    {
+      "requests": [
+        {
+          "tool_name": "scrape",
+          "arguments": {
+            "url": "https://news.ycombinator.com",
+            "selector": ".storylink",
+            "extract": "text"
+          },
+          "server_name": "docker-gateway"
+        }
+      ]
+    }
+    ```
+    
+    3. Batch Browser Operations:
+    ```json
+    {
+      "requests": [
+        {
+          "tool_name": "navigate",
+          "arguments": {
+            "url": "https://example.com/login"
+          }
+        },
+        {
+          "tool_name": "type",
+          "arguments": {
+            "selector": "#username",
+            "text": "user@example.com"
+          }
+        },
+        {
+          "tool_name": "type",
+          "arguments": {
+            "selector": "#password",
+            "text": "password123"
+          }
+        },
+        {
+          "tool_name": "click",
+          "arguments": {
+            "selector": "#login-button"
+          }
+        },
+        {
+          "tool_name": "screenshot",
+          "arguments": {
+            "filename": "after_login.png"
+          }
+        }
+      ]
+    }
+    ```
+    
+    4. File Operations:
+    ```json
+    {
+      "requests": [
+        {
+          "tool_name": "read_file",
+          "arguments": {
+            "path": "/tmp/data.txt"
+          }
+        },
+        {
+          "tool_name": "write_file",
+          "arguments": {
+            "path": "/tmp/output.txt",
+            "content": "Processed data"
+          }
+        }
+      ]
+    }
+    ```
+    
+    5. System Information Gathering:
+    ```json
+    {
+      "requests": [
+        {
+          "tool_name": "system_info",
+          "arguments": {}
+        },
+        {
+          "tool_name": "list_directory",
+          "arguments": {
+            "path": "/var/log"
+          }
+        }
+      ]
+    }
+    ```
+    
+    ERROR HANDLING:
+    - Automatic retry with configurable attempts (default: 3)
+    - Server-specific timeout handling (default: 30s)
+    - Graceful degradation on server unavailability
+    - Detailed error messages with context
+    
+    RESPONSE FORMAT:
+    Each tool execution returns structured content with:
+    - Main response data (text, images, files, etc.)
+    - Metadata including tool name and server used
+    - Error information if execution failed
+    - Performance metrics (execution time, retry count)
+    
+    HELPER CLASSES:
+    
+    MCPRequestBuilder provides convenience methods:
+    - create_browser_request(action, **kwargs)
+    - create_screenshot_request(url)
+    - create_scrape_request(url)
+    
+    CONFIGURATION:
+    Server configurations are loaded from mcp.json with:
+    - Transport protocol (stdio/streamable_http)
+    - Connection details (command/URL)
+    - Timeout and retry settings
+    - Enable/disable flags
+    - Priority ordering
+    
+    BEST PRACTICES:
+    1. Use specific server names when you know which server has the tool
+    2. Batch related operations for efficiency
+    3. Handle errors gracefully in your application logic
+    4. Use appropriate timeouts for long-running operations
+    5. Monitor server health and availability
+    6. Leverage retry mechanisms for transient failures
+    
+    LIMITATIONS:
+    - Maximum 10 requests per batch
+    - Only stdio and streamable_http transports supported
+    - Server availability depends on configuration and network
+    - Tool availability varies by server implementation
+    - Some tools may require specific server environments

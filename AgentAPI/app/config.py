@@ -14,7 +14,7 @@ class Config:
     MODEL_PROVIDER: str = os.getenv("MODEL_PROVIDER")
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", 240))
     LLM_MAX_RETRIES: int = int(os.getenv("REASONING_LLM_MAX_RETRIES", 3))
-    REASONING_LLM_MAX_TOKENS: int = int(os.getenv("REASONING_LLM_MAX_TOKENS", 32768))
+    REASONING_LLM_MAX_TOKENS: int = int(os.getenv("REASONING_LLM_MAX_TOKENS", 50000))
     VLM_LLM_MAX_TOKENS: int = int(os.getenv("VLM_LLM_MAX_TOKENS", 120000))
 
     INDEXER_API_BASE_URL: str = os.getenv("INDEXER_API_BASE_URL")
@@ -30,6 +30,8 @@ class Config:
         "MEDIA_DESCRIPTION_PROMPT"
     )
 
+    # Searx Configuration
+    SEARX_URL: str = "https://websearch.gauravshivaprasad.com"
     # State Management
     MAX_STATE_TOKENS: int = int(os.getenv("MAX_STATE_TOKENS", 20000))
 
