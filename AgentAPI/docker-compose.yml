@@ -18,5 +18,5 @@ services:
       - ./logs:/app/logs
       - .:/app
     restart: unless-stopped
-    # Updated command to use debugpy
-    command: ["sh", "-c", "python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    # Run app automatically without debugpy
+    command: ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]

@@ -34,5 +34,4 @@ USER app
 EXPOSE 8000
 EXPOSE 5678
 # Default command to run the semantic store demo
-
-CMD ["python3", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "-m", "uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
