@@ -3,14 +3,13 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Union, Literal
+from typing import Optional, Dict, Any, List,  Literal
 
 from pydantic import BaseModel, Field
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.tools import load_mcp_tools
-
+from config import config as app_config
 
 from tools.core_tools.mcp.mcp_utils import (
     load_prompt_or_description, load_mcp_config, get_enabled_servers,
@@ -54,12 +53,9 @@ class MCPServerConfig(BaseModel):
     max_retries: Optional[int] = Field(default=3, description="Maximum retry attempts")
 
 def load_server_configs_from_json(json_path: Optional[str] = None) -> List[MCPServerConfig]:
-    """
-    Load enabled MCP server configs from the new config format.
-    Only servers with enabled=true and supported transports are returned.
-    """
+    from config import config as app_config
     if json_path is None:
-        json_path = "/Users/gauravs/Documents/RAG_Application/AgentAPI/app/mcp_local/mcp.json"
+        json_path = app_config.MCP_JSON_PATH
     
     try:
         with open(json_path, "r") as f:
@@ -284,10 +280,6 @@ async def multi_server_mcp_wrapper(
     config: RunnableConfig, 
     server_configs: Optional[List[MCPServerConfig]] = None
 ) -> List[str]:
-    """
-    Execute MCP tool requests across multiple servers using MultiServerMCPClient
-    Supports only stdio and streamable_http transports
-    """
     user_id = config.get("configurable", {}).get("user_id")
     org_id = config.get("configurable", {}).get("org_id")
     
@@ -395,7 +387,6 @@ async def multi_server_mcp_wrapper(
         logger.error(f"Error in multi_server_mcp_wrapper: {str(e)}")
         return [f"Wrapper error: {str(e)}"]
 
-# Utility class for building requests
 class MCPRequestBuilder:
     """Helper class for building MCP requests"""
     
@@ -427,10 +418,6 @@ class MCPRequestBuilder:
         )
 
 async def get_available_tools_from_servers() -> List[Dict[str, Any]]:
-    """
-    Get list of available tools from enabled MCP servers.
-    This function is called by the agent to get tools information.
-    """
     tools_list = []
     
     try:
@@ -462,7 +449,6 @@ async def get_available_tools_from_servers() -> List[Dict[str, Any]]:
         
     return tools_list
 
-# Example usage functions for testing
 async def test_enabled_servers():
     """Test function to check which servers are enabled"""
     configs = get_default_server_configs()
@@ -471,22 +457,18 @@ async def test_enabled_servers():
         print(f"- {config.name}: {config.transport} @ {getattr(config, 'url', getattr(config, 'command', 'N/A'))}")
 
 async def test_docker_gateway_connection(use_agent_config=False):
-    """Test connection to Docker MCP Gateway using either direct config or agent config"""
     try:
         if use_agent_config:
-            # Use the same logic as the agent
-            print("Testing with agent configuration logic...")
+            print("Testing with agent configuration...")
             configs = get_default_server_configs()
             enabled_configs = [cfg for cfg in configs if cfg.enabled and cfg.transport in ["stdio", "streamable_http"]]
             connections = build_server_connections(enabled_configs)
-            print(f"Agent connections: {connections}")
         else:
-            # Use direct configuration
             print("Testing with direct configuration...")
             connections = {
                 "docker-gateway": {
                     "transport": "streamable_http",
-                    "url": "http://10.9.0.5:8082/mcp",
+                    "url": app_config.MCP_SERVER_URL,
                     "timeout": 30
                 }
             }
@@ -494,8 +476,6 @@ async def test_docker_gateway_connection(use_agent_config=False):
         
         client = MultiServerMCPClient(connections)
         tools = await client.get_tools()
-        
-        print(f"Successfully connected to Docker MCP Gateway!")
         print(f"Found {len(tools)} tools:")
         for tool in tools:
             print(f"- {getattr(tool, 'name', str(tool))}")
@@ -509,9 +489,6 @@ if __name__ == "__main__":
     # Test the configuration loading
     print("Testing server configurations...")
     asyncio.run(test_enabled_servers())
-    
-    print("\nTesting Docker Gateway connection (direct config)...")
-    asyncio.run(test_docker_gateway_connection(use_agent_config=False))
     
     print("\nTesting Docker Gateway connection (agent config)...")
     asyncio.run(test_docker_gateway_connection(use_agent_config=True))

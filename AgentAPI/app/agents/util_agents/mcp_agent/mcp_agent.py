@@ -9,12 +9,13 @@ from langchain_core.runnables import RunnableConfig
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from agents.base_agents.base_agent import BaseAgent
-from mcp_local.mcp_tool import multi_server_mcp_wrapper, MCPToolRequest
+from tools.core_tools.mcp.mcp_tool import multi_server_mcp_wrapper, MCPToolRequest, get_default_server_configs,get_available_tools_from_servers, build_server_connections
 from tools.core_tools.mcp.mcp_utils import (
     load_prompt_or_description, load_mcp_config, get_enabled_servers,
     inject_security_context, get_tool_names, fetch_tools
 )
 logger = logging.getLogger(__name__)
+from tools.core_tools.mcp.mcp_tool import test_enabled_servers, test_docker_gateway_connection
 
 class MCPAgent(BaseAgent):
     def __init__(
@@ -47,12 +48,8 @@ class MCPAgent(BaseAgent):
         self.enabled_servers = get_enabled_servers(self.mcp_config)
         self._available_tool_objects = None
 
-    # Prompt loading now handled in __init__ using load_prompt_or_description
 
-
-    # === Tool Setup ===
     async def setup_tools(self):
-        """Setup and bind MCP tools after agent initialization."""
         try:
             self.bind_tools([multi_server_mcp_wrapper])
             await self.compile()
@@ -62,11 +59,9 @@ class MCPAgent(BaseAgent):
 
 
     async def fetch_and_cache_tool_objects(self, force_refresh: bool = False):
-        """Fetch and cache available tool objects from enabled MCP servers. Always refresh if force_refresh is True."""
         if self._available_tool_objects is not None and not force_refresh:
             return self._available_tool_objects
         from langchain_mcp_adapters.client import MultiServerMCPClient
-        from mcp_local.mcp_tool import get_default_server_configs, build_server_connections
         configs = get_default_server_configs()
         enabled_configs = [cfg for cfg in configs if cfg.enabled and cfg.transport in ["stdio", "streamable_http"]]
         connections = build_server_connections(enabled_configs)
@@ -76,24 +71,18 @@ class MCPAgent(BaseAgent):
 
 
     def get_cached_tool_names(self):
-        """Return list of cached tool names."""
         if self._available_tool_objects is None:
             return []
         return get_tool_names(self._available_tool_objects)
 
 
     async def get_available_tools_info(self) -> Dict[str, Any]:
-        """
-        Get information about available MCP tools from enabled servers.
-        Uses the proven working function from mcp_tool.py.
-        """
         tools_info = {
             "enabled_servers": self.enabled_servers,
             "server_count": len(self.enabled_servers),
             "tools": []
         }
         try:
-            from mcp_local.mcp_tool import get_available_tools_from_servers
             tools_list = await get_available_tools_from_servers()
             tools_info["tools"] = tools_list
             logger.info(f"✅ Successfully fetched {len(tools_list)} tools via mcp_tool function")
@@ -124,7 +113,6 @@ class MCPAgent(BaseAgent):
         print("1. Configuration:")
         print(f"   Config path: {self.mcp_config_path}")
         print(f"   Enabled servers: {self.enabled_servers}")
-        from mcp_local.mcp_tool import get_default_server_configs, build_server_connections
         configs = get_default_server_configs()
         print(f"   Loaded configs: {len(configs)}")
         for cfg in configs:
@@ -225,54 +213,11 @@ class MCPAgentBuilder:
 
 
 async def test_mcp_agent():
-    """Test the MCP agent with industry standard patterns."""
     print("🧪 Testing MCP Agent Implementation")
-
-    # Test configuration
-    config = RunnableConfig(
-        configurable={
-            "user_id": "test_user_123",
-            "org_id": "test_org_456"
-        }
-    )
-
-    # Create agent using async builder pattern
-    agent = await (MCPAgentBuilder()
-            .with_debug(True)
-            .with_mcp_config("/Users/gauravs/Documents/RAG_Application/AgentAPI/app/mcp_local/mcp.json")
-            .with_config(config)
-            .build_async())
-
-    agent.display_startup_info()
-    
-    await agent.debug_connection()
-
-    tools_info = await agent.get_available_tools_info()
-    print(f"\n🔧 Available tools: {len(tools_info['tools'])}")
-    for tool in tools_info['tools']:
-        print(f"  • {tool['name']} ({tool['server']}): {tool['description']}")
-
-    print("\n💬 Enter chat messages. Type 'quit' to exit.")
-    while True:
-        user_input = input("You: ").strip()
-        if user_input.lower() in ["quit", "exit"]:
-            print("Goodbye!")
-            break
-        if user_input.startswith("tool "):
-            try:
-                parts = user_input.split(" ", 2)
-                if len(parts) < 3:
-                    print("Usage: tool <tool_name> <args as JSON>")
-                    continue
-                tool_name = parts[1]
-                args_json = parts[2]
-                arguments = json.loads(args_json)
-                result = await agent.execute_mcp_request(tool_name, arguments, config)
-                print(f"🔧 Tool result: {result}")
-            except Exception as e:
-                print(f"❌ Error: {e}")
-        else:
-            print("🤖 Assistant: I'm here to help! To use a tool, type: tool <tool_name> <args as JSON>.")
+    print("\n--- MCP Tool: Enabled Servers Test ---")
+    await test_enabled_servers()
+    print("\n--- MCP Tool: Docker Gateway Connection Test (agent config) ---")
+    await test_docker_gateway_connection(use_agent_config=True)
 
 
 def create_mcp_agent(config_path: Optional[str] = None, **kwargs) -> MCPAgent:

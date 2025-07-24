@@ -1,5 +1,8 @@
 import os
 
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 class Config:
 
     # Models Configuration
@@ -34,5 +37,13 @@ class Config:
     SEARX_URL: str = "https://websearch.gauravshivaprasad.com"
     # State Management
     MAX_STATE_TOKENS: int = int(os.getenv("MAX_STATE_TOKENS", 20000))
+    
+    # MCP Server Configuration
+    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://10.9.0.5:8082/mcp")
+    MCP_JSON_PATH = os.getenv(
+        "MCP_JSON_PATH",
+        os.path.join(BASE_DIR, "tools/core_tools/mcp/mcp.json")
+    )
+
 
 config = Config()
