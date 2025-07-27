@@ -8,7 +8,6 @@ services:
     container_name: agentapp
     ports:
       - "8000:8000"
-      - "5678:5678"  
     env_file:
       - .env
     environment:
@@ -18,5 +17,4 @@ services:
       - ./logs:/app/logs
       - .:/app
     restart: unless-stopped
-    # Run app automatically without debugpy
     command: ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]

@@ -1,0 +1,24 @@
+# orchestration/docker-compose.master.yml
+version: '3.8'
+
+services:
+  # Gateway/Load Balancer
+  mcp-gateway:
+    build: ./gateway
+    ports:
+      - "8080:80"
+    depends_on:
+      - file-operations
+      - web-search
+    environment:
+      - UPSTREAM_SERVERS=file-operations:8081,web-search:8082
+
+  # Foundation server
+  file-operations:
+    build: ./servers/file-operations
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - SERVER_NAME=file-operations

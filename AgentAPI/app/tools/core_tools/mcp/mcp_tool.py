@@ -61,7 +61,6 @@ def load_server_configs_from_json(json_path: Optional[str] = None) -> List[MCPSe
         with open(json_path, "r") as f:
             config_data = json.load(f)
         
-        # Navigate to the servers section
         servers_config = config_data.get("mcp_config", {}).get("servers", {})
         
         configs = []
@@ -185,36 +184,15 @@ def build_server_connections(server_configs: List[MCPServerConfig]) -> Dict[str,
             connection["url"] = config.url
             if config.headers:
                 connection["headers"] = config.headers
-        
-        # Add timeout if specified
-        if config.timeout:
-            connection["timeout"] = config.timeout
-                
+            # Only include 'timeout' for streamable_http
+            if config.timeout:
+                connection["timeout"] = config.timeout
+
         connections[config.name] = connection
         logger.debug(f"Built connection for {config.name}: {connection}")
     
     return connections
 
-def get_default_server_configs() -> List[MCPServerConfig]:
-    """
-    Get default server configurations from config file (preferred) or app config fallback.
-    """
-    configs = load_server_configs_from_json()
-    
-    # If no configs found in file, add Docker Gateway as default
-    if not configs:
-        logger.info("No configs found in file, adding Docker MCP Gateway as default")
-        default_config = MCPServerConfig(
-            name="docker-gateway",
-            transport="streamable_http",
-            url="http://10.9.0.5:8082/mcp",
-            enabled=True,
-            timeout=30,
-            max_retries=3
-        )
-        configs = [default_config]
-    
-    return configs
 
 def format_mcp_response(response_data: Any, tool_name: str = "", server_name: str = "") -> Dict[str, Any]:
     """Format MCP response data for consistent output"""
@@ -287,7 +265,7 @@ async def multi_server_mcp_wrapper(
         return ["Error: user_id and org_id are required in config for security"]
     
     # Use provided configs or defaults
-    configs = server_configs or get_default_server_configs()
+    configs = server_configs or load_server_configs_from_json()
     if not configs:
         return ["Error: No MCP server configurations provided or all servers are disabled"]
     
@@ -307,7 +285,6 @@ async def multi_server_mcp_wrapper(
     logger.info(f"Built connections: {list(connections.keys())}")
     
     try:
-        # Create MultiServerMCPClient with connections
         client = MultiServerMCPClient(connections)
         
         async def execute_tool_request(request: MCPToolRequest) -> str:
@@ -421,7 +398,7 @@ async def get_available_tools_from_servers() -> List[Dict[str, Any]]:
     tools_list = []
     
     try:
-        configs = get_default_server_configs()
+        configs = load_server_configs_from_json()
         enabled_configs = [cfg for cfg in configs if cfg.enabled and cfg.transport in ["stdio", "streamable_http"]]
         
         if not enabled_configs:
@@ -451,44 +428,29 @@ async def get_available_tools_from_servers() -> List[Dict[str, Any]]:
 
 async def test_enabled_servers():
     """Test function to check which servers are enabled"""
-    configs = get_default_server_configs()
-    print(f"Found {len(configs)} enabled servers:")
-    for config in configs:
+    configs = load_server_configs_from_json()
+    enabled_configs = [cfg for cfg in configs if cfg.enabled and cfg.transport in ["stdio", "streamable_http"]]
+    print(f"Found {len(enabled_configs)} enabled servers:")
+    for config in enabled_configs:
         print(f"- {config.name}: {config.transport} @ {getattr(config, 'url', getattr(config, 'command', 'N/A'))}")
-
-async def test_docker_gateway_connection(use_agent_config=False):
-    try:
-        if use_agent_config:
-            print("Testing with agent configuration...")
-            configs = get_default_server_configs()
-            enabled_configs = [cfg for cfg in configs if cfg.enabled and cfg.transport in ["stdio", "streamable_http"]]
-            connections = build_server_connections(enabled_configs)
-        else:
-            print("Testing with direct configuration...")
-            connections = {
-                "docker-gateway": {
-                    "transport": "streamable_http",
-                    "url": app_config.MCP_SERVER_URL,
-                    "timeout": 30
-                }
-            }
-            print(f"Direct connections: {connections}")
-        
+    if enabled_configs:
+        connections = build_server_connections(enabled_configs)
         client = MultiServerMCPClient(connections)
-        tools = await client.get_tools()
-        print(f"Found {len(tools)} tools:")
-        for tool in tools:
-            print(f"- {getattr(tool, 'name', str(tool))}")
-            
-    except Exception as e:
-        print(f"Error connecting to Docker MCP Gateway: {e}")
-        import traceback
-        traceback.print_exc()
+        for config in enabled_configs:
+            try:
+                print(f"\nTools for server '{config.name}':")
+                async with client.session(config.name) as session:
+                    tools = await fetch_tools(client, [config], {config.name: connections[config.name]})
+                    if tools:
+                        for tool in tools:
+                            print(f"  - {getattr(tool, 'name', str(tool))}")
+                    else:
+                        print("  (No tools found)")
+            except Exception as e:
+                print(f"  Error fetching tools for {config.name}: {e}")
 
 if __name__ == "__main__":
-    # Test the configuration loading
     print("Testing server configurations...")
     asyncio.run(test_enabled_servers())
     
-    print("\nTesting Docker Gateway connection (agent config)...")
-    asyncio.run(test_docker_gateway_connection(use_agent_config=True))
+

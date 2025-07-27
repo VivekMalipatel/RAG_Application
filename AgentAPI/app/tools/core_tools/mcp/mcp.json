@@ -9,17 +9,35 @@
       "health_check_interval": 60
     },
     "servers": {
+      "selenium": {
+        "command": "npx",
+        "args": ["-y", "@angiejones/mcp-selenium"],
+        "enabled": true,
+        "transport": "stdio"
+      },
+      
+      "playwright": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["@playwright/mcp@latest"],
+        "enabled": true,
+        "transport": "stdio"
+      },
+
       "whatsapp": {
-      "url": "http://127.0.0.1:8000/mcp",
-      "transport": "streamable_http",
-      "priority": 1,
-      "namespace": "whatsapp",
-      "enabled": false,
-      "health_check_interval": 30,
-      "max_retries": 3,
-      "timeout": 30,
-      "tools": []
-    },
+        "url": "http://127.0.0.1:8000/mcp",
+        "transport": "streamable_http",
+        "priority": 1,
+        "namespace": "whatsapp",
+        "enabled": false,
+        "health_check_interval": 30,
+        "max_retries": 3,
+        "timeout": 30,
+        "tools": []
+      },
+      
+  
+
       "browsermcp": {
         "url": "stdio",
         "transport": "stdio",
@@ -36,7 +54,7 @@
       "docker-gateway": {
         "transport": "streamable_http",
         "url": "http://10.9.0.5:8082/mcp",
-        "enabled": true,
+        "enabled": false,
         "timeout": 60,
         "max_retries": 5,
         "priority": 1,

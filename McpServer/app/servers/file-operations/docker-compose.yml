@@ -1,0 +1,15 @@
+# servers/file-operations/docker-compose.yml
+version: '3.8'
+
+services:
+  file-operations:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ../../core:/app/core  # Mount the core directory
+    environment:
+      - SERVER_NAME=file-operations
+      - PORT=8080
+    restart: unless-stopped
