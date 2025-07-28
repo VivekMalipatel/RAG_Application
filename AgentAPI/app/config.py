@@ -30,7 +30,7 @@ class Config:
 
     # Prompt Configuration
     MEDIA_DESCRIPTION_PROMPT: str = os.getenv(
-        "MEDIA_DESCRIPTION_PROMPT"
+        "MEDIA_DESCRIPTION_PROMPT", "Provide an extremely detailed description of this media content. Include every visible/audible element, text, object, person, color, layout, sounds, speech, and any other relevant details without missing anything."
     )
 
     # Searx Configuration
