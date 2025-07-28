@@ -9,13 +9,13 @@ from langchain_core.runnables import RunnableConfig
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from agents.base_agents.base_agent import BaseAgent
-from tools.core_tools.mcp.mcp_tool import multi_server_mcp_wrapper, MCPToolRequest, get_default_server_configs,get_available_tools_from_servers, build_server_connections
+from tools.core_tools.mcp.mcp_tool import multi_server_mcp_wrapper, MCPToolRequest, get_available_tools_from_servers, build_server_connections, load_server_configs_from_json
 from tools.core_tools.mcp.mcp_utils import (
     load_prompt_or_description, load_mcp_config, get_enabled_servers,
     inject_security_context, get_tool_names, fetch_tools
 )
 logger = logging.getLogger(__name__)
-from tools.core_tools.mcp.mcp_tool import test_enabled_servers, test_docker_gateway_connection
+from tools.core_tools.mcp.mcp_tool import test_enabled_servers
 
 class MCPAgent(BaseAgent):
     def __init__(
@@ -58,17 +58,7 @@ class MCPAgent(BaseAgent):
             logger.error(f"⚠️ MCPAgent: Error binding MCP wrapper tool: {e}")
 
 
-    async def fetch_and_cache_tool_objects(self, force_refresh: bool = False):
-        if self._available_tool_objects is not None and not force_refresh:
-            return self._available_tool_objects
-        from langchain_mcp_adapters.client import MultiServerMCPClient
-        configs = get_default_server_configs()
-        enabled_configs = [cfg for cfg in configs if cfg.enabled and cfg.transport in ["stdio", "streamable_http"]]
-        connections = build_server_connections(enabled_configs)
-        client = MultiServerMCPClient(connections)
-        self._available_tool_objects = await fetch_tools(client, enabled_configs, connections)
-        return self._available_tool_objects
-
+ 
 
     def get_cached_tool_names(self):
         if self._available_tool_objects is None:
@@ -113,7 +103,7 @@ class MCPAgent(BaseAgent):
         print("1. Configuration:")
         print(f"   Config path: {self.mcp_config_path}")
         print(f"   Enabled servers: {self.enabled_servers}")
-        configs = get_default_server_configs()
+        configs = load_server_configs_from_json()
         print(f"   Loaded configs: {len(configs)}")
         for cfg in configs:
             print(f"     - {cfg.name}: {cfg.transport} @ {cfg.url}")
@@ -139,7 +129,6 @@ class MCPAgent(BaseAgent):
         """
         Execute a single MCP tool request using cached tool objects if available. Always refresh cache before invocation.
         """
-        await self.fetch_and_cache_tool_objects(force_refresh=True)
         target_tool = None
         for tool_obj in self._available_tool_objects:
             if hasattr(tool_obj, 'name') and tool_obj.name == tool_name:
@@ -217,8 +206,6 @@ async def test_mcp_agent():
     print("\n--- MCP Tool: Enabled Servers Test ---")
     await test_enabled_servers()
     print("\n--- MCP Tool: Docker Gateway Connection Test (agent config) ---")
-    await test_docker_gateway_connection(use_agent_config=True)
-
 
 def create_mcp_agent(config_path: Optional[str] = None, **kwargs) -> MCPAgent:
     return MCPAgent(mcp_config_path=config_path, **kwargs)

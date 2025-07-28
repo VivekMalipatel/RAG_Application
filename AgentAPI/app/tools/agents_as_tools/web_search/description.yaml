@@ -1,14 +1,89 @@
 web_search_scrape_agent: |
-  A unified agent tool for both web search and web scraping. This tool allows you to:
+  An intelligent web research agent that combines search discovery with detailed content extraction. This agent can autonomously decide whether to search for sources, scrape specific URLs, or do both to fulfill your request.
 
-  - Search the web using configurable engines, languages, and categories, returning relevant results for your queries.
-  - Scrape content from any public website using natural language instructions, extracting structured information from web pages.
+  CORE CAPABILITIES:
+  - **Autonomous Research**: Automatically determines the best approach (search, scrape, or both)
+  - **Multi-Step Workflows**: Can search for sources, then scrape the most relevant ones
+  - **Comprehensive Data Gathering**: Returns complete, well-sourced information
+  - **Context-Aware Processing**: Understands your intent and adapts its strategy
 
-  Key capabilities:
-  - Perform web searches using multiple engines and filter by language or category
-  - Extract specific information from web pages using custom prompts
-  - Handle both search and scrape requests in a single interface
-  - Return results in a structured, agent-friendly format
+  WHEN TO USE THIS AGENT:
+  - **Product Research**: "Find current pricing for Nike Air Jordan shoes across multiple retailers"
+  - **Market Analysis**: "Research and compare pricing strategies of top 3 cloud providers"
+  - **Content Compilation**: "Gather detailed information about Python async/await best practices"
+  - **Fact Verification**: "Find and verify recent statistics about climate change impacts"
+  - **Competitive Analysis**: "Research features and pricing of project management tools"
+  - **News & Trends**: "Get current information about AI regulation developments in EU"
 
-  Use this tool when you need to either search for information on the web or extract specific content from a website, all through a single agent interface.
+  HOW IT WORKS:
+  The agent intelligently combines search and scraping:
+  1. **Discovery Phase**: Searches for relevant sources using optimized queries
+  2. **Selection Phase**: Identifies the most authoritative and relevant URLs
+  3. **Extraction Phase**: Scrapes detailed content from selected sources
+  4. **Synthesis Phase**: Combines information into comprehensive response
 
+  PROMPT BEST PRACTICES:
+
+  **Be Specific About Your Goal:**
+  ✅ Good: "Find current pricing and availability for iPhone 15 Pro across major retailers"
+  ❌ Bad: "Look up iPhone prices"
+
+  **Include Context and Requirements:**
+  ✅ Good: "Research competitor pricing for our SaaS product - focus on enterprise plans under $50/user/month"
+  ❌ Bad: "Find SaaS pricing"
+
+  **Specify Depth of Information Needed:**
+  ✅ Good: "Get detailed technical specifications and user reviews for top 5 laptops for developers"
+  ❌ Bad: "Find good laptops"
+
+  EXAMPLE EFFECTIVE PROMPTS:
+
+  **E-commerce Research:**
+  "Find current pricing for Nike Air Jordan 4 shoes across Nike official store, Foot Locker, and other major retailers. Include any discounts or sales."
+
+  **Technical Research:**
+  "Research the latest best practices for React server-side rendering in 2025. Find official documentation, expert articles, and community discussions."
+
+  **Market Intelligence:**
+  "Analyze pricing and features of top 3 CRM tools for small businesses. Include pricing tiers, key features, and user feedback."
+
+  **Content Aggregation:**
+  "Gather comprehensive information about remote work trends in 2025, including statistics, expert opinions, and corporate policy changes."
+
+  ADVANTAGES OVER INDIVIDUAL TOOLS:
+  - **Automated Workflow**: No need to manually chain search→scrape operations
+  - **Intelligent Source Selection**: Agent chooses the best URLs to scrape
+  - **Comprehensive Results**: Combines breadth (search) with depth (scraping)
+  - **Context Preservation**: Maintains context throughout the research process
+  - **Error Recovery**: Can adapt strategy if initial approach fails
+
+  OUTPUT FORMAT:
+  - **Comprehensive Information**: Detailed data from multiple authoritative sources
+  - **Source Attribution**: Clear citations for all extracted information
+  - **Structured Results**: Organized, easy-to-process format
+  - **Quality Filtering**: Agent filters out irrelevant or low-quality content
+
+  PERFORMANCE EXPECTATIONS:
+  - **Research Time**: 30-60 seconds for comprehensive multi-source research
+  - **Source Diversity**: Typically processes 3-8 sources for thorough coverage
+  - **Data Quality**: AI-filtered and structured for accuracy and relevance
+  - **Citation Tracking**: Full provenance of all information provided
+
+  USE CASES BY DOMAIN:
+
+  **Business Intelligence:**
+  - Competitor analysis and market research
+  - Pricing strategy and product comparison
+  - Industry trend analysis and forecasting
+
+  **Technical Research:**
+  - Technology evaluation and comparison
+  - Best practices and implementation guides
+  - Documentation and tutorial compilation
+
+  **Academic/Professional:**
+  - Literature review and source compilation
+  - Statistical data gathering and verification
+  - Expert opinion and analysis collection
+
+  Perfect for complex research tasks that require both discovering sources and extracting detailed information. Provides Perplexity-style comprehensive, well-sourced responses.

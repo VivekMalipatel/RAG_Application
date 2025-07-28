@@ -1,55 +1,95 @@
 web_scrape_tool: |
-    Execute web scraping tasks to extract structured information from websites using natural language instructions. This tool integrates with ScrapeGraphAI to intelligently scrape web content using LLM-powered extraction.
-    
-    CORE CAPABILITIES:
-    - Extract specific information from any public website using natural language prompts
-    - Handles dynamic content, JavaScript-rendered pages, and complex layouts
-    - Returns structured data based on your extraction requirements
-    - Supports both single-site and multi-site scraping operations
-    - Automatically handles common web scraping challenges (redirects, cookies, etc.)
-    
-    HOW TO USE:
-    1. Provide the target URL(s) to scrape
-    2. Write a clear, specific extraction prompt describing what information you want
-    3. The tool uses AI to understand the page structure and extract the requested data
-    4. Results are returned as structured JSON with error handling
-    
-    EXTRACTION PROMPT GUIDELINES:
-    - Be specific about what data you want: "Extract all product names and prices" instead of "get product info"
-    - Mention the format if needed: "List all email addresses", "Get the main article text", "Extract table data as rows"
-    - For complex pages, be more detailed: "Find all job listings with title, company, location, and salary"
-    - Examples of good prompts:
-      * "List all services offered by this company with their descriptions"
-      * "Extract contact information including phone, email, and address"
-      * "Get all news article headlines and publication dates from the homepage"
-      * "Find product specifications and pricing information"
-      * "Extract all team member names and their roles"
-    
-    SUPPORTED OPERATIONS:
-    - Single website scraping: Extract data from one specific URL
-    - Multi-website scraping: Extract similar data from multiple URLs using the same prompt
-    - Structured data extraction: Tables, lists, forms, product catalogs
-    - Text content extraction: Articles, descriptions, reviews, comments
-    - Metadata extraction: Titles, headers, navigation elements, links
-    
-    ERROR HANDLING:
-    - Returns error messages for inaccessible websites
-    - Handles timeouts and connection issues gracefully
-    - Provides fallback extraction when primary method fails
-    - Reports specific issues (blocked by robots.txt, 404 errors, etc.)
-    
-    TECHNICAL DETAILS:
-    - Uses headless Chrome for rendering JavaScript content
-    - Respects website rate limits and robots.txt
-    - Processes content through LLM for intelligent extraction
-    - Returns clean, structured JSON output
-    - Supports concurrent requests for efficiency
-    
-    BEST PRACTICES:
-    - Test your extraction prompts on a few pages first
-    - Be respectful of website resources and terms of service
-    - Use specific prompts to get cleaner, more accurate results
-    - For large datasets, consider breaking into smaller batches
-    - Always verify extracted data for accuracy
-    
-    Use this tool when you need to programmatically extract specific information from websites that would be time-consuming to gather manually.
+  Extract detailed, structured information from specific websites using AI-powered scraping. Perfect for getting in-depth data after discovering relevant URLs with web search.
+
+  WHEN TO USE:
+  - Extract specific product details, prices, specifications from e-commerce sites
+  - Get detailed content from articles, blogs, or documentation pages
+  - Scrape structured data like tables, lists, or contact information
+  - Extract information that requires understanding page context and layout
+  - Follow up on URLs found through web search to get comprehensive details
+
+  CORE CAPABILITIES:
+  - Single URL scraping: Deep extraction from one specific webpage
+  - Multi-URL scraping: Extract same type of data from multiple similar pages
+  - Handles JavaScript-heavy sites and dynamic content
+  - AI-powered understanding of page structure and content
+  - Returns clean, structured data based on your instructions
+
+  EXTRACTION PROMPT BEST PRACTICES:
+
+  **Be Specific About What You Want:**
+  ✅ Good: "Extract product name, price, available sizes, and customer rating"
+  ❌ Bad: "Get product information"
+
+  **Specify Output Format:**
+  ✅ Good: "List each shoe with: Name, Price (include currency), Available Sizes"
+  ❌ Bad: "Find shoes and prices"
+
+  **Include Context for Complex Pages:**
+  ✅ Good: "From the product catalog section, extract each item's title, price, and discount percentage if available"
+  ❌ Bad: "Get all products"
+
+  EFFECTIVE EXTRACTION PROMPTS BY USE CASE:
+
+  **Product Information:**
+  "Extract product name, current price, original price if on sale, available sizes/colors, and stock status"
+
+  **Contact Details:**
+  "Find all contact information including phone numbers, email addresses, physical address, and business hours"
+
+  **Article Content:**
+  "Extract the main article title, author, publication date, and full article text content"
+
+  **Service Listings:**
+  "List all services offered with their names, descriptions, and pricing if mentioned"
+
+  **Job Postings:**
+  "Extract job title, company name, location, salary range, and key requirements for each listing"
+
+  **Event Information:**
+  "Get event name, date, time, location, ticket prices, and brief description"
+
+  MULTI-SITE SCRAPING:
+  - Use when you need the same type of data from multiple similar pages
+  - Perfect for comparing prices across different retailers
+  - Ideal for gathering data from multiple product pages or locations
+  - Example: Extract pricing from Nike US, UK, and AU sites using same prompt
+
+  PARAMETERS:
+  - url: Single website to scrape (for focused extraction)
+  - urls: List of websites to scrape (for comparison or bulk extraction)
+  - extraction_prompt: Clear, specific instructions for what to extract
+
+  OUTPUT FORMAT:
+  - Returns structured JSON with extracted data
+  - Includes error messages for failed extractions
+  - Provides clean, formatted results ready for analysis
+  - Maintains data relationships and context
+
+  ERROR HANDLING:
+  - Graceful handling of blocked or unavailable sites
+  - Timeout management for slow-loading pages
+  - Clear error messages when extraction fails
+  - Fallback strategies for partially accessible content
+
+  INTEGRATION WITH WEB SEARCH:
+  1. Use web_search_tool to find relevant URLs
+  2. Use web_scrape_tool to extract detailed information from those URLs
+  3. Perfect for building comprehensive, well-sourced responses
+
+  PERFORMANCE TIPS:
+  - Single URL scraping: 5-15 seconds per page
+  - Multi-URL scraping: Processes multiple URLs concurrently
+  - JavaScript-heavy sites may take longer but are fully supported
+  - Best results on publicly accessible pages
+
+  LIMITATIONS:
+  - Cannot access password-protected or login-required content
+  - Some sites may block automated access
+  - Very complex or poorly structured sites may return incomplete data
+  - Respects robots.txt and rate limiting
+
+  Perfect companion to web_search_tool: First search for sources, then scrape for detailed extraction.
+
+
+

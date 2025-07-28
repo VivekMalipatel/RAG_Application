@@ -3,6 +3,7 @@
 import os
 import json
 import re
+import asyncio
 from pathlib import Path
 from typing import Optional, Any, List, Dict
 from pydantic import BaseModel, Field
@@ -83,7 +84,7 @@ def get_graph_config() -> dict:
         }
     }
 
-def scrape_website(url: str, extraction_prompt: str) -> Any:
+async def scrape_website(url: str, extraction_prompt: str) -> Any:
     try:
         graph_config = get_graph_config()
         scraper = SmartScraperGraph(
@@ -91,7 +92,7 @@ def scrape_website(url: str, extraction_prompt: str) -> Any:
             source=url,
             config=graph_config
         )
-        result = scraper.run()
+        result = await scraper.run() if asyncio.iscoroutine(scraper.run()) else scraper.run()
         if isinstance(result, str):
             cleaned = clean_json_output(result)
             try:
@@ -134,10 +135,10 @@ async def web_scrape_tool(url: Optional[str] = None, urls: Optional[List[str]] =
     writer = get_stream_writer()
     if urls:
         writer(f"#### Web Scrape #### URLs: {urls}\nPrompt: {extraction_prompt}")
-        result = scrape_multiple_websites(extraction_prompt, urls)
+        result = await scrape_multiple_websites(extraction_prompt, urls)
     elif url:
         writer(f"#### Web Scrape #### URL: {url}\nPrompt: {extraction_prompt}")
-        result = scrape_website(url, extraction_prompt)
+        result = await scrape_website(url, extraction_prompt)
     else:
         return json.dumps({"error": "No URL(s) provided"}, ensure_ascii=False)
     formatted = format_scrape_result(result)
@@ -145,16 +146,11 @@ async def web_scrape_tool(url: Optional[str] = None, urls: Optional[List[str]] =
 
 # Example usage
 if __name__ == "__main__":
-    url = "https://www.bytecrafts.in/"
-    extraction_prompt = "List all services provided by Bytecrafts."
-    print("Scraped result:")
-    result = scrape_website(url, extraction_prompt)
-    print(json.dumps(format_scrape_result(result), indent=2, ensure_ascii=False))
 
-    multi_prompt = "Who is Marco Perini?"
+    multi_prompt = "Extract the names and prices of shoes displayed on this page. Include currency and any sale prices. Format as: Product Name: $Price"
     urls = [
-        "https://perinim.github.io/",
-        "https://perinim.github.io/cv/"
+        "https://www.nike.com/us/w/mens-running-shoes-37v7jzy7ok",
+        "https://www.nike.com/au/w/mens-running-shoes-37v7jzy7ok"
     ]
     print("\nMulti-site scraped result:")
     result_multi = scrape_multiple_websites(multi_prompt, urls)

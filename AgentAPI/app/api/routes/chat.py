@@ -8,7 +8,7 @@ import time
 import uuid
 import hashlib
 import logging
-
+import asyncio
 from agents.base_agents.base_agent import BaseAgent
 from agents.base_agents.base_state import BaseState
 from langchain_core.runnables import RunnableConfig
@@ -134,16 +134,12 @@ class ChatCompletionService:
         async def event_stream():
             try:
                 collector = ReasoningCollector()
-                                
                 async for stream_mode, chunk in agent.astream(input_data, config=config, stream_mode=["messages", "custom"]):
-                    
                     if stream_mode == "messages":
                         message_chunk, metadata = chunk
                         if hasattr(message_chunk, "content") and message_chunk.content:
                             node_name = metadata.get("langgraph_node", "unknown")
-                            
                             if len(str(node_name).split('$')) == 2:
-                                
                                 for char in message_chunk.content:
                                     if char == "":
                                         continue
@@ -179,15 +175,12 @@ class ChatCompletionService:
                                         "usage": None
                                     }
                                     yield f"data: {json.dumps(response_chunk, ensure_ascii=False)}\n\n"
-                                
                                 collector.add_reasoning(reasoning_text)
-                    
                     elif stream_mode == "custom":
                         if isinstance(chunk, dict):
                             reasoning_text = str("executing tool")
                         else:
                             reasoning_text = str(chunk)
-                        
                         for char in reasoning_text:
                             response_chunk = {
                                 "id": self.completion_id,
@@ -205,9 +198,11 @@ class ChatCompletionService:
                             yield f"data: {json.dumps(response_chunk, ensure_ascii=False)}\n\n"
                         
                         collector.add_reasoning(reasoning_text)
-                
                 yield "data: [DONE]\n\n"
-                
+            except asyncio.CancelledError:
+                # Connection interrupted by frontend, send [DONE] and exit
+                yield "data: [DONE]\n\n"
+                return
             except Exception as e:
                 logger.error(f"Streaming error: {e}")
                 error_chunk = {

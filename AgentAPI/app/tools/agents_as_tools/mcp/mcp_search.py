@@ -6,7 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field
-from app.agents.util_agents.mcp_agent.mcp_agent import MCPAgent
+from agents.util_agents.mcp_agent.mcp_agent import MCPAgent
 
 TOOL_NAME = "mcp_agent"
 

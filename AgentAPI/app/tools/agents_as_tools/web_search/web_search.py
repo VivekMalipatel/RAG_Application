@@ -8,7 +8,7 @@ from langgraph.config import get_stream_writer
 
 from pydantic import BaseModel, Field
 from agents.base_agents.base_agent import BaseAgent
-from app.agents.util_agents.web_agent.web_agent import WebAgent
+from agents.util_agents.web_agent.web_agent import WebAgent
 
 TOOL_NAME = "web_search_scrape_agent"
 
@@ -35,7 +35,8 @@ def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml"
 )
 async def web_search_scrape_agent(prompt : str, config: RunnableConfig) :
     writer = get_stream_writer()
-    writer(f"Web Search & Scrape Agent invoked with '{prompt}' as instruction")
+    writer(f"🔍 Starting comprehensive web research: '{prompt}'")
+    writer(f"📋 Phase 1: Discovering relevant sources...")
 
     org_id : str = config.get("configurable").get("org_id")
     if len(org_id.split("$")) > 1:
@@ -68,7 +69,7 @@ async def web_search_scrape_agent(prompt : str, config: RunnableConfig) :
         "user_id": config["configurable"]["user_id"],
         "org_id": config["configurable"]["org_id"]
     }
-
+    writer(f"🎯 Phase 2: Extracting detailed information...")
     result = await compiled_agent.ainvoke(input, config=config)
-    writer(f"WebAgent invocation complete. Returning result.")
+    writer(f"✅ Research complete - returning comprehensive results")
     return {"messages": result["messages"], "user_id": config["configurable"]["user_id"], "org_id": config["configurable"]["org_id"]}

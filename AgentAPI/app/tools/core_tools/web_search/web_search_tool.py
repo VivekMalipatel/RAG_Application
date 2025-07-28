@@ -97,7 +97,7 @@ def format_web_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     infer_schema=True,
     response_format="content"
 )
-async def web_search_tool(query: str, num_results: Optional[int] = 10, language: Optional[str] = "en", engines: Optional[List[str]] = None, categories: Optional[List[str]] = None, config: RunnableConfig = None) -> str:
+async def web_search_tool(query: str, num_results: Optional[int] = 10, language: Optional[str] = "en", engines: Optional[List[str]] = None, categories: Optional[List[str]] = None, config: RunnableConfig = None) -> str:    
     try:
         searx = SearxSearchWrapper(
             searx_host=f"{app_config.SEARX_URL}",
@@ -108,10 +108,7 @@ async def web_search_tool(query: str, num_results: Optional[int] = 10, language:
                 "num_results": min(num_results or 10, 50)
             }
         )
-        search_results = searx.run(query)
-        # If Searx returns a string, wrap it in a list of dicts for formatting
-        if isinstance(search_results, str):
-            search_results = [{"content": search_results}]
+        search_results = searx.results(query, num_results=min(num_results or 10, 50))
         formatted_result = format_web_results(search_results)
         return json.dumps(formatted_result, indent=2)
     except Exception as e:
@@ -120,26 +117,26 @@ async def web_search_tool(query: str, num_results: Optional[int] = 10, language:
 
 # Example usage for local testing
 if __name__ == "__main__":
-    query = "LangChain Python documentation"
-    num_results = 5
-    language = "en"
-    engines = ["google"]
-    categories = ["general"]
-    print("Web Search Test Result:")
-    try:
-        searx = SearxSearchWrapper(
-            searx_host=f"{app_config.SEARX_URL}",
-            engines=engines,
-            categories=categories,
-            params={
-                "language": language,
-                "num_results": num_results
-            }
-        )
-        search_results = searx.run(query)
-        if isinstance(search_results, str):
-            search_results = [{"content": search_results}]
-        formatted_result = format_web_results(search_results)
-        print(json.dumps(formatted_result, indent=2))
-    except Exception as e:
-        print(json.dumps([{"content": [{"type": "text", "text": f"Search error: {str(e)}"}]}], indent=2))
+    import asyncio
+    
+    async def test_search():
+        query = "Nike air jordan shoe price"
+        num_results = 5
+        language = "en"
+        engines = ["google"]
+        categories = ["general"]
+        
+        print("Web Search Test Result:")
+        
+        # Use .invoke() with a dictionary of parameters
+        result = await web_search_tool.ainvoke({
+            "query": query,
+            "num_results": num_results,
+            "language": language,
+            "engines": engines,
+            "categories": categories
+        })
+        print(result)
+    
+    # Run the async test
+    asyncio.run(test_search())
