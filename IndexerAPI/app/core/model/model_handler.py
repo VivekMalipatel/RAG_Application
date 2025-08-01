@@ -360,26 +360,40 @@ class ModelHandler:
             """
 
             system_message = {"role": "system", "content": extraction_prompt}
-        
-            image_messages = [
-                {
-                    "role": "user", 
-                    "content": [messages[0]["content"][0]]
-                }
-            ]
-            text_messages = [
+
+            has_image = len(messages[0]["content"]) > 1
+            
+            if has_image:
+                image_messages = [
+                    {
+                        "role": "user", 
+                        "content": [messages[0]["content"][0]]
+                    }
+                ]
+                text_messages = [
                     {
                         "role": "user", 
                         "content": [messages[0]["content"][1]]
                     }
                 ]
+            else:
+                image_messages = []
+                text_messages = [
+                    {
+                        "role": "user", 
+                        "content": [messages[0]["content"][0]]
+                    }
+                ]
 
             try:
-                response : ChatCompletion = await self.chat_completion(
-                    model=settings.INFERENCE_MODEL,
-                    messages=[system_message] + image_messages,
-                    max_completion_tokens=settings.INFERNECE_STRUCTURED_OUTPUTS_MAX_TOKENS,
-                )
+                if has_image:
+                    response : ChatCompletion = await self.chat_completion(
+                        model=settings.INFERENCE_MODEL,
+                        messages=[system_message] + image_messages,
+                        max_completion_tokens=settings.INFERNECE_STRUCTURED_OUTPUTS_MAX_TOKENS,
+                    )
+                else:
+                    raise ValueError("No image content available, falling back to text-based extraction")
                 
                 if (response and 
                     hasattr(response, 'choices') and 
