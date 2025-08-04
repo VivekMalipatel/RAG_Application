@@ -83,7 +83,6 @@ class BaseAgent:
         )
         
         self._compiled_graph: Optional[CompiledStateGraph] = None
-        self._lock = asyncio.Lock()
         self._llm = LLM(self._config.model_kwargs, self._config.vlm_kwargs)
         self._tools: Sequence[Union[typing.Dict[str, Any], type, Callable, BaseTool]] = []
         self._logger = logging.getLogger(__name__)
@@ -98,12 +97,6 @@ class BaseAgent:
         self.config = config
 
         self.prompt = prompt
-
-    def _count_tokens_cached(self, text: str) -> int:
-        text_hash = hash(text)
-        if text_hash not in self._token_cache:
-            self._token_cache[text_hash] = len(self._tokenizer.encode(text))
-        return self._token_cache[text_hash]
 
     def _validate_tools(self, tools: Sequence[Union[typing.Dict[str, Any], type, Callable, BaseTool]]):
         for tool in tools:
@@ -154,15 +147,19 @@ class BaseAgent:
             messages_to_save = messages
         
         checkpoint_id = config.get("checkpoint_id")
+        tasks = []
         for i, message in enumerate(messages_to_save):
-            asyncio.create_task(get_store().aput(
+            task = asyncio.create_task(get_store().aput(
                 namespace, 
                 f"{checkpoint_id}_{i}" if checkpoint_id else f"{org_id}_{user_id}_{str(uuid.uuid4())}_{i}", 
                 {"data": message.content}
             ))
+            tasks.append(task)
+        
+        if tasks:
+            await asyncio.gather(*tasks)
 
         num_tokens = state["messages"][-1].usage_metadata.get("total_tokens", 0) if state["messages"][-1].usage_metadata else 0
-        self._logger.info(f"State tokens after saving: {num_tokens}")
 
         if num_tokens >= envconfig.MAX_STATE_TOKENS:
             if second_last_ai_index != -1:
@@ -179,31 +176,46 @@ class BaseAgent:
         writer(f"Retrieving memory.....\n\n")
         store = get_store()
         
-        def extract_text_from_content(content):
+        async def extract_text_from_content(content):
             if isinstance(content, list):
-                text_parts = []
-                for item in content:
+                async def extract_item_text(item):
                     if isinstance(item, dict) and item.get("type") == "text":
-                        text_parts.append(item.get("text"))
-                return " ".join(text_parts)
-            return str(content)
+                        return item.get("text")
+                    return ""
+                
+                if len(content) > 5:
+                    tasks = [extract_item_text(item) for item in content]
+                    text_parts = await asyncio.gather(*tasks)
+                    result = " ".join(filter(None, text_parts))
+                else:
+                    text_parts = []
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_parts.append(item.get("text"))
+                    result = " ".join(text_parts)
+            else:
+                result = str(content)
+            
+            return result
 
         async def get_user_memory():
             namespace = ("memories", user_id)
             try:
-                search_query = extract_text_from_content(last_message.content)
-                return await store.asearch(namespace, query=search_query)
+                search_query = await extract_text_from_content(last_message.content)
+                result = await store.asearch(namespace, query=search_query)
+                return result
             except Exception as e:
-                self._logger.error(f"Error retrieving user memory: {e}")
+                self._logger.error(f"User memory search failed: {e}")
                 return []
         
         async def get_org_memory():
             namespace = ("memories", org_id)
             try:
-                search_query = extract_text_from_content(last_message.content)
-                return await store.asearch(namespace, query=search_query)
+                search_query = await extract_text_from_content(last_message.content)
+                result = await store.asearch(namespace, query=search_query)
+                return result
             except Exception as e:
-                self._logger.error(f"Error retrieving organization memory: {e}")
+                self._logger.error(f"Org memory search failed: {e}")
                 return []
         
         user_memory, org_memory = await asyncio.gather(get_user_memory(), get_org_memory())
@@ -214,17 +226,23 @@ class BaseAgent:
         
         memory_messages = []
 
-        if not user_memory:
-            memory_messages.append(SystemMessage(content="No user memory found."))
-        else:
-            for user_msg in user_memory:
-                memory_messages.append(SystemMessage(content=user_msg.value.get("data", "")))
+        async def process_user_memory():
+            if not user_memory:
+                return [SystemMessage(content="No user memory found.")]
+            return [SystemMessage(content=user_msg.value.get("data", "")) for user_msg in user_memory]
 
-        if not org_memory:
-            memory_messages.append(SystemMessage(content="No organization memory found."))
-        else:
-            for org_msg in org_memory:
-                memory_messages.append(SystemMessage(content=org_msg.value.get("data", "")))
+        async def process_org_memory():
+            if not org_memory:
+                return [SystemMessage(content="No organization memory found.")]
+            return [SystemMessage(content=org_msg.value.get("data", "")) for org_msg in org_memory]
+
+        user_messages, org_messages = await asyncio.gather(
+            process_user_memory(),
+            process_org_memory()
+        )
+        
+        memory_messages.extend(user_messages)
+        memory_messages.extend(org_messages)
 
         writer(f"Memory retrieved......\n\n")
         return memory_messages
@@ -235,6 +253,7 @@ class BaseAgent:
         messages = [SystemMessage(content=self.prompt)] + memory_messages + state["messages"]
         
         response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
+        
         if self._is_structured_output:
             response = AIMessage(content=json.dumps(response))
         return {
@@ -264,8 +283,10 @@ class BaseAgent:
             graph_builder.add_edge(START, llm_node_name)
             graph_builder.add_edge(llm_node_name, "remember_node")
             graph_builder.add_edge("remember_node", END)
-
-        return graph_builder.compile(**compile_kwargs)
+        
+        compiled_graph = graph_builder.compile(**compile_kwargs)
+        
+        return compiled_graph
 
     async def compile(self,
                       checkpointer: Optional[BaseMemorySaver] = None,
@@ -313,11 +334,12 @@ class BaseAgent:
             "store": store,
             "interrupt_before": interrupt_before,
             "interrupt_after": interrupt_after,
-            "debug": debug if debug is not None else self._config.debug,
+            "debug": debug if debug is not None else self._config.info,
             "name": name
         }
 
         self._compiled_graph = self._compile_graph(bool(self._tools), **compile_kwargs)
+        
         return self
 
     @requires_compile
@@ -333,7 +355,8 @@ class BaseAgent:
                       **kwargs: Any) -> dict[str, Any] | Any:
         
         config["recursion_limit"] = self._resursion_limit
-        return await self._compiled_graph.ainvoke(
+        
+        result = await self._compiled_graph.ainvoke(
             input, 
             config=config, 
             stream_mode=stream_mode,
@@ -343,6 +366,8 @@ class BaseAgent:
             interrupt_after=interrupt_after, 
             **kwargs
         )
+        
+        return result
 
     @requires_compile_generator
     async def astream(self,
@@ -438,23 +463,24 @@ if __name__ == "__main__":
     async def test_base_agent():
         output_lines = []
 
+        config = {
+            "configurable": {
+                "thread_id": "test_thread1", 
+                "user_id": "test_user1", 
+                "org_id": "test_org1"
+            }
+        }
+
         base_agent = BaseAgent(
             model_kwargs={},
             vlm_kwargs={},
             node_kwargs={},
-            debug=False
+            debug=False,
+            config=config
         )
 
         compiled_agent: BaseAgent = await base_agent.compile(name="test_agent")
-        
-        config = {
-            "configurable": {
-                "thread_id": "test_thread", 
-                "user_id": "test_user", 
-                "org_id": "test_org"
-            }
-        }
-        
+
         async def capture_checkpoints(round_name):
             output_lines.append(f"\n=== CHECKPOINTS AFTER {round_name} ===")
             try:
