@@ -55,40 +55,178 @@ def format_content_field(content_str: str) -> List[Dict[str, Any]]:
     except (json.JSONDecodeError, TypeError):
         return [{"type": "text", "text": str(content_str)}]
 
-def format_neo4j_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def format_neo4j_results(results: List[Dict[str, Any]], query_type: str = "default") -> List[Dict[str, Any]]:
+    """
+    Format Neo4j results for user-friendly presentation
+    
+    Args:
+        results: Raw Neo4j query results
+        query_type: Type of query to customize formatting ("documents", "entities", "content", etc.)
+    """
     formatted_results = []
+    
+    HIDDEN_FIELDS = {
+        'internal_object_id', 'task_id', 'user_id', 'org_id', 's3_url',
+        'embedding', 'id' 
+    }
+    
+    SKIP_PLACEHOLDER_METADATA = {
+        'metadata_1', 'metadata_2', 'metadata_3', 'metadata_4', 'metadata_5'
+    }
     
     for record in results:
         final_content = []
-        metadata_parts = []
         
-        for key, value in record.items():
-            if key == "content" and isinstance(value, str):
-                content_items = format_content_field(value)
-                final_content.extend(content_items)
-            elif isinstance(value, dict) and "content" in value and isinstance(value["content"], str):
-                content_items = format_content_field(value["content"])
-                final_content.extend(content_items)
-            elif key != "content":
-                if isinstance(value, dict):
-                    nested_parts = []
-                    for nested_key, nested_value in value.items():
-                        if nested_key != "content":
-                            nested_parts.append(f"{nested_key}: {nested_value}")
-                    if nested_parts:
-                        metadata_parts.append(f"{key}: {{{', '.join(nested_parts)}}}")
-                elif value is not None:
-                    metadata_parts.append(f"{key}: {value}")
+        if query_type == "documents":
+            formatted_record = format_document_record(record)
+        elif query_type == "entities":
+            formatted_record = format_entity_record(record)
+        elif query_type == "content":
+            formatted_record = format_content_record(record)
+        else:
+            formatted_record = format_generic_record(record, HIDDEN_FIELDS, SKIP_PLACEHOLDER_METADATA)
         
-        if metadata_parts:
-            final_content.append({"type": "text", "text": f"[METADATA] {' | '.join(metadata_parts)}"})
+        if formatted_record:
+            final_content.append({"type": "text", "text": formatted_record})
         
         if not final_content:
-            final_content.append({"type": "text", "text": json.dumps(record, indent=2)})
+            final_content.append({"type": "text", "text": "No readable content found in this record"})
         
         formatted_results.append({"content": final_content})
     
     return formatted_results
+
+def format_document_record(record: Dict[str, Any]) -> str:
+    """Format document records for clean user presentation"""
+    filename = clean_filename(record.get('filename', 'Unknown Document'))
+    file_type = record.get('file_type', 'Unknown')
+    category = record.get('category', 'Uncategorized')
+    source = record.get('source', 'Unknown Source')
+    
+    doc_info = f"**{filename}**"
+    if file_type != 'Unknown':
+        doc_info += f" ({file_type})"
+    
+    details = []
+    if category != 'Uncategorized':
+        details.append(f"Category: {category}")
+    if source != 'Unknown Source':
+        details.append(f"Source: {source.replace('-', ' ').title()}")
+    
+    if details:
+        doc_info += f"\n   • {' | '.join(details)}"
+    
+    return doc_info
+
+def format_entity_record(record: Dict[str, Any]) -> str:
+    """Format entity records for clean user presentation"""
+    entity_text = record.get('text', 'Unknown Entity')
+    entity_type = record.get('entity_type', 'Unknown Type')
+    entity_profile = record.get('entity_profile', '')
+    
+    entity_info = f"🔍 **{entity_text}** ({entity_type})"
+    
+    if entity_profile and len(entity_profile) > 10: 
+        profile_preview = entity_profile[:100] + "..." if len(entity_profile) > 100 else entity_profile
+        entity_info += f"\n   📝 {profile_preview}"
+    
+    return entity_info
+
+def format_content_record(record: Dict[str, Any]) -> str:
+    """Format content records (pages, etc.) for clean user presentation"""
+    content_parts = []
+    
+    if 'content' in record and isinstance(record['content'], str):
+        try:
+            content_data = json.loads(record['content'])
+            if isinstance(content_data, list):
+                for item in content_data:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text = item.get("text", "")
+                        if text and len(text.strip()) > 10:
+                            # Truncate long content for preview
+                            preview = text[:200] + "..." if len(text) > 200 else text
+                            content_parts.append(preview)
+        except (json.JSONDecodeError, TypeError):
+            content_text = str(record['content'])[:200]
+            if content_text.strip():
+                content_parts.append(content_text)
+    
+    page_info = ""
+    if 'page_number' in record:
+        page_info = f"📄 Page {record['page_number']}: "
+    elif 'filename' in record:
+        filename = clean_filename(record['filename'])
+        page_info = f"📄 From {filename}: "
+    
+    if content_parts:
+        return page_info + "\n".join(content_parts)
+    else:
+        return page_info + "Content available but not displayable in preview"
+
+def format_generic_record(record: Dict[str, Any], hidden_fields: set, skip_metadata: set) -> str:
+    """Format any other type of record"""
+    visible_parts = []
+    
+    for key, value in record.items():
+        if key.lower() in hidden_fields:
+            continue
+            
+        if key in skip_metadata and (value == "[value]" or not value):
+            continue
+        
+        if key == "content" and isinstance(value, str):
+            try:
+                content_data = json.loads(value)
+                if isinstance(content_data, list):
+                    text_content = []
+                    for item in content_data:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_content.append(item.get("text", ""))
+                    if text_content:
+                        content_preview = " ".join(text_content)[:150] + "..."
+                        visible_parts.append(f"Content: {content_preview}")
+            except (json.JSONDecodeError, TypeError):
+                if len(str(value)) > 10:  # Only show meaningful content
+                    visible_parts.append(f"Content: {str(value)[:150]}...")
+        
+        elif value is not None and str(value).strip():
+            if isinstance(value, dict):
+                nested_parts = []
+                for nested_key, nested_value in value.items():
+                    if nested_key != "content" and nested_value:
+                        nested_parts.append(f"{nested_key}: {nested_value}")
+                if nested_parts:
+                    visible_parts.append(f"{key}: {{{', '.join(nested_parts)}}}")
+            else:
+                clean_value = clean_field_value(str(value))
+                if clean_value:
+                    visible_parts.append(f"{key}: {clean_value}")
+    
+    return " | ".join(visible_parts) if visible_parts else "No displayable information"
+
+def clean_filename(filename: str) -> str:
+    """Clean up filenames by removing UUIDs and technical prefixes"""
+    if not filename:
+        return "Unknown Document"
+    
+    import re
+    cleaned = re.sub(r'^[a-f0-9\-]{36}_', '', filename)
+    cleaned = re.sub(r'^\d+_[a-f0-9\-]+_[^_]+_', '', cleaned)
+    
+    return cleaned or filename  # Return original if cleaning removes everything
+
+def clean_field_value(value: str) -> str:
+    """Clean up field values for display"""
+    if value in ["[value]", "", "null", "None"]:
+        return ""
+    
+    if "open-webui" in value.lower():
+        return "Open WebUI"
+    
+    return value
+
+
 
 @tool(
     name_or_callable=TOOL_NAME,

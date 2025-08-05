@@ -1,16 +1,36 @@
-knowledge_search_tool: |
-  A specialized agent for searching and querying user's knowledge base through a knowledge graph database. This tool provides intelligent search capabilities across documents, entities, relationships, and structured data that has been ingested into the knowledge graph system.
+knowledge_search_agent: |
+  A specialized agent for intelligently searching and querying the user's knowledge base through a knowledge graph database. This tool provides comprehensive search capabilities across all ingested organizational content.
 
-  Key capabilities:
-  - Search across unstructured documents (PDFs, images, text files)
-  - Query structured data (CSV, Excel files) 
-  - Find entities and their relationships
-  - Perform vector similarity searches using embeddings
-  - Retrieve document metadata and content
-  - Analyze connections between different data points
+  **Core Capabilities:**
+  - Search unstructured documents (PDFs, images, text files) using content and metadata
+  - Query structured data (CSV, Excel files) including columns and row values
+  - Find entities (people, organizations, concepts) and their relationships
+  - Perform semantic similarity searches using AI embeddings
+  - Retrieve specific document content and metadata
+  - Analyze connections and relationships between different data points
+  - Support both exact matching and fuzzy/semantic search strategies
 
-  The agent can handle complex queries about the user's knowledge base and returns relevant information with proper filtering based on user and organization context. It supports both text-based searches and semantic similarity searches to find the most relevant information from the ingested documents and data sources.
+  **When to Use This Tool:**
+  - User asks about internal documents, files, or organizational data
+  - Requests for "our documents", "company information", or specific filenames
+  - Questions about content within ingested documents
+  - Analysis of relationships between entities in the knowledge base
+  - Discovery queries like "what documents do we have" or "list available files"
 
-  Use this tool when you need to search for specific information, documents, entities, or relationships within the user's knowledge base that has been processed and stored in the knowledge graph system.
+  **How to Use:**
+  Provide clear, detailed task descriptions explaining exactly what information is needed. Include relevant context about the user's goal and any specific requirements.
 
-  Only answer based on the knowledge graph data and do not provide any information outside of the ingested knowledge base. If the query cannot be answered with the available data, respond with "I don't know" or "No relevant information found".
+  **Effective Task Examples:**
+  - "Find and list all documents in the knowledge base with their metadata and categories"
+  - "Search for content related to machine learning across all ingested documents"
+  - "Retrieve the full content from any documents with 'Q4 Report' in the filename"
+  - "Find entities of type 'Person' and show their relationships to other entities"
+
+  **Important Constraints:**
+  - Only searches within ingested knowledge base data
+  - Cannot access external websites or current information
+  - Results are automatically filtered by user/organization permissions
+  - If information isn't in the knowledge base, will respond with "No relevant information found"
+
+  **Output Format:**
+  Returns structured search results with relevant content, metadata, and context. Results are organized and filtered based on user permissions and relevance to the query.

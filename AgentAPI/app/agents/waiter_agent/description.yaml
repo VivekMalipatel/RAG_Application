@@ -1,0 +1,76 @@
+browse_menu_api: |
+  Browse and search the restaurant's current menu items with advanced filtering options. 
+  Use this tool to help customers discover menu items by category (appetizers, mains, desserts, beverages), 
+  dietary preferences (vegetarian, vegan, gluten-free), or price range (low, medium, high). 
+  Always use this tool when customers ask about menu items, food options, or need recommendations.
+  Returns detailed item information including prices, descriptions, and dietary classifications.
+
+check_item_availability_api: |
+  Verify real-time availability of specific menu items before confirming orders. 
+  Use this tool to check stock levels, kitchen capacity, and estimated preparation times.
+  Essential for confirming orders and managing customer expectations about wait times.
+  Can also assess feasibility of special preparation requests and provide alternative suggestions
+  when items are unavailable. Always check availability before submitting orders to kitchen.
+
+submit_order_to_kitchen_api: |
+  Submit confirmed customer orders to the kitchen management system with complete details.
+  Use this tool after verifying item availability and confirming order details with customers.
+  Captures order items, quantities, table number, customer information, special cooking instructions,
+  and dietary restrictions. Provides order ID for tracking and estimated completion times.
+  Essential for processing all customer food orders and maintaining kitchen workflow.
+
+check_order_status_api: |
+  Track real-time progress of kitchen orders from preparation to completion.
+  Use this tool when customers inquire about their order status, estimated completion times,
+  or when you need to provide proactive updates about delays or readiness.
+  Returns current preparation stage, progress percentage, and updated timing estimates.
+  Critical for keeping customers informed and managing dining room service flow.
+
+modify_order_api: |
+  Handle customer requests to change existing orders if kitchen conditions permit.
+  Use this tool for adding items, removing items, changing quantities, or accommodating
+  special requests after order submission. Provides feasibility assessment and timing impacts.
+  Essential for customer satisfaction when preferences change or mistakes need correction.
+  Always inform customers about additional preparation time required for modifications.
+
+generate_bill_api: |
+  Create detailed, itemized bills for customer orders with tax and service calculations.
+  Use this tool when customers request their check or are ready to pay.
+  Handles discount codes, bill splitting for multiple payments, and provides comprehensive
+  cost breakdowns. Essential for transparent billing and smooth payment processing.
+  Always verify order completion before generating final bills.
+
+process_payment_api: |
+  Process customer payments through the restaurant's point-of-sale system.
+  Use this tool to handle cash, card, digital wallet, and mobile payment transactions.
+  Captures payment amounts, tip processing, and generates transaction confirmations.
+  Essential for completing the dining experience and maintaining accurate financial records.
+  Provides receipt numbers and payment confirmations for customer records.
+
+check_table_status_api: |
+  Monitor real-time status of restaurant tables and seating availability.
+  Use this tool for seating management, table turnover planning, and availability inquiries.
+  Provides occupancy status, party sizes, seating times, and cleaning requirements.
+  Critical for efficient table management and optimizing seating arrangements.
+  Helps coordinate with hosting staff and manage customer wait times.
+
+check_reservation_availability_api: |
+  Query available reservation slots for future dining bookings.
+  Use this tool when customers want to make reservations or check availability
+  for specific dates, times, and party sizes. Provides real-time availability
+  across different time slots and table configurations. Essential for managing
+  future bookings and helping customers plan their dining experience.
+
+log_customer_feedback_api: |
+  Record and categorize customer feedback, complaints, compliments, and special alerts.
+  Use this tool to document service issues, food quality concerns, positive experiences,
+  or allergy alerts that require management attention. Supports different urgency levels
+  and feedback types for appropriate response prioritization. Critical for service
+  improvement and maintaining customer satisfaction records.
+
+handle_special_request_api: |
+  Process and coordinate special customer requests for enhanced dining experiences.
+  Use this tool for dietary accommodations, seating preferences, celebration arrangements,
+  or unique service needs. Provides feasibility assessment and coordination with
+  kitchen and service staff. Essential for personalized customer service and
+  handling special occasions or accessibility requirements.

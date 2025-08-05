@@ -89,18 +89,25 @@ class DeepResearchAgent(BaseAgent):
     def __init__(self,
                  prompt: Optional[str] = "You are a specialized research agent.",
                  *,
+                 config: dict,
                  model_kwargs: Optional[dict[str, Any]] = None,
                  vlm_kwargs: Optional[dict[str, Any]] = None,
                  node_kwargs: Optional[dict[str, Any]] = None,
                  debug: bool = False,
                  max_subqueries: int = 10,
+                 recursion_limit: Optional[int] = 25,
                  max_research_rounds: int = 200):
-        
+        self._model_kwargs = model_kwargs if model_kwargs is not None else {}
+        self._vlm_kwargs = vlm_kwargs if vlm_kwargs is not None else {}
+        self._node_kwargs = node_kwargs if node_kwargs is not None else {}
+        self._debug = debug
         super().__init__(
             prompt=prompt,
+            config=config,
             model_kwargs=model_kwargs,
             vlm_kwargs=vlm_kwargs,
             node_kwargs=node_kwargs,
+            recursion_limit=recursion_limit,
             debug=debug
         )
 
@@ -130,52 +137,59 @@ class DeepResearchAgent(BaseAgent):
         self._init_research_agents()
 
     def _init_research_agents(self):
+        config = self.config 
         self.gather_background_knowledge_agent = BaseAgent(
             prompt=get_research_prompt('gather_background_knowledge'),
-            model_kwargs=self._config.model_kwargs,
-            vlm_kwargs=self._config.vlm_kwargs,
-            node_kwargs=self._config.node_kwargs,
-            debug=self._config.debug
+            config=config,
+            model_kwargs=self._model_kwargs,
+            vlm_kwargs=self._vlm_kwargs,
+            node_kwargs=self._node_kwargs,
+            debug=self._debug
         ).bind_tools([human_clarification_tool])
 
         self.query_intent_analysis_agent = BaseAgent(
             prompt=get_research_prompt('query_intent_analysis'),
-            model_kwargs=self._config.model_kwargs,
-            vlm_kwargs=self._config.vlm_kwargs,
-            node_kwargs=self._config.node_kwargs,
-            debug=self._config.debug
+            config=config,
+            model_kwargs=self._model_kwargs,
+            vlm_kwargs=self._vlm_kwargs,
+            node_kwargs=self._node_kwargs,
+            debug=self._debug
         ).bind_tools([human_clarification_tool])
 
         self.gap_analysis_agent = BaseAgent(
             prompt=get_research_prompt('gap_analysis'),
-            model_kwargs=self._config.model_kwargs,
-            vlm_kwargs=self._config.vlm_kwargs,
-            node_kwargs=self._config.node_kwargs,
-            debug=self._config.debug
+            config=config,
+            model_kwargs=self._model_kwargs,
+            vlm_kwargs=self._vlm_kwargs,
+            node_kwargs=self._node_kwargs,
+            debug=self._debug
         ).with_structured_output(GapExistence)
 
         self.generate_report_agent = BaseAgent(
             prompt=get_research_prompt('generate_report'),
-            model_kwargs=self._config.model_kwargs,
-            vlm_kwargs=self._config.vlm_kwargs,
-            node_kwargs=self._config.node_kwargs,
-            debug=self._config.debug
+            config=config,
+            model_kwargs=self._model_kwargs,
+            vlm_kwargs=self._vlm_kwargs,
+            node_kwargs=self._node_kwargs,
+            debug=self._debug
         )
 
         self.gaps_to_subquery_agent = BaseAgent(
             prompt=get_research_prompt('gaps_to_subquery'),
-            model_kwargs=self._config.model_kwargs,
-            vlm_kwargs=self._config.vlm_kwargs,
-            node_kwargs=self._config.node_kwargs,
-            debug=self._config.debug
+            config=config,
+            model_kwargs=self._model_kwargs,
+            vlm_kwargs=self._vlm_kwargs,
+            node_kwargs=self._node_kwargs,
+            debug=self._debug
         ).with_structured_output(SubqueryList)
 
         self.subquery_processor_agent = BaseAgent(
             prompt=get_research_prompt('subquery_processor'),
-            model_kwargs=self._config.model_kwargs,
-            vlm_kwargs=self._config.vlm_kwargs,
-            node_kwargs=self._config.node_kwargs,
-            debug=self._config.debug
+            config=config,
+            model_kwargs=self._model_kwargs,
+            vlm_kwargs=self._vlm_kwargs,
+            node_kwargs=self._node_kwargs,
+            debug=self._debug
         )
         
         self._node_agents = {
@@ -438,10 +452,17 @@ if __name__ == "__main__":
         
         try:
             agent = DeepResearchAgent(
-                model_kwargs={},
-                vlm_kwargs={},
-                node_kwargs={},
-                debug=True,
+                config={
+                    "configurable": {
+                        "thread_id": "main_research_thread", 
+                        "user_id": "researcher_001", 
+                        "org_id": "research_org",
+                    },
+                    "model_kwargs": {},
+                    "vlm_kwargs": {},
+                    "node_kwargs": {},
+                    "debug": True
+                },
                 max_subqueries=5,
                 max_research_rounds=200
             )

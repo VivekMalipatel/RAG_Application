@@ -5,6 +5,7 @@ from langchain_core.runnables import RunnableConfig
 from agents.base_agents.base_agent import BaseAgent
 from tools.core_tools.web_search.web_search_tool import web_search_tool
 from tools.core_tools.web_scrape.web_scrape_tool import web_scrape_tool
+from agents.utils import _load_prompt
 
 class WebAgent(BaseAgent):
     def __init__(self,
@@ -16,10 +17,11 @@ class WebAgent(BaseAgent):
                  node_kwargs: Optional[Dict[str, Any]] = None,
                  recursion_limit: Optional[int] = 25,
                  debug: bool = False):
-        if prompt is None:
-            prompt = self._load_prompt()
+        
+        self.prompt = prompt + _load_prompt("WebSearchAgent", base_dir=Path(__file__).parent)
+
         super().__init__(
-            prompt=prompt,
+            prompt=self.prompt,
             config=config,
             model_kwargs=model_kwargs,
             vlm_kwargs=vlm_kwargs,
@@ -30,15 +32,6 @@ class WebAgent(BaseAgent):
         
         self.bind_tools([web_search_tool, web_scrape_tool])
 
-    def _load_prompt(self) -> str:
-        prompt_path = Path(__file__).parent / "prompt.yaml"
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            content = f.read().strip()
-            prompt_data = yaml.safe_load(content)
-            if isinstance(prompt_data, dict) and 'WebSearchAgent' in prompt_data:
-                return prompt_data['WebSearchAgent']
-            elif isinstance(prompt_data, str):
-                return prompt_data
 
 if __name__ == "__main__":
     import asyncio

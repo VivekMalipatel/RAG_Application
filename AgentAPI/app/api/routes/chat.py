@@ -10,7 +10,6 @@ import hashlib
 import logging
 import asyncio
 from agents.base_agents.base_agent import BaseAgent
-from agents.base_agents.base_state import BaseState
 from langchain_core.runnables import RunnableConfig
 from agents import get_agent_by_id, AGENT_CLASS_MAP
 from tools.agents_as_tools.knowledge_search.knowledge_search import knowledge_search_agent  

@@ -5,7 +5,7 @@ from langchain_core.runnables import RunnableConfig
 
 from agents.base_agents.base_agent import BaseAgent
 from tools.core_tools.knowledge_search.knowledge_search_tool import knowledge_search_tool
-
+from agents.utils import _load_prompt
 
 class KnowledgeSearchAgent(BaseAgent):
     def __init__(self,
@@ -17,12 +17,11 @@ class KnowledgeSearchAgent(BaseAgent):
                  node_kwargs: Optional[Dict[str, Any]] = None,
                  recursion_limit: Optional[int] = 25,
                  debug: bool = False):
-        
-        if prompt is None:
-            prompt = self._load_prompt()
-        
+           
+        self.prompt = prompt +  _load_prompt("KnowledgeSearchAgent", base_dir=Path(__file__).parent)
+
         super().__init__(
-            prompt=prompt,
+            prompt=self.prompt,
             config=config,
             model_kwargs=model_kwargs,
             vlm_kwargs=vlm_kwargs,
@@ -33,17 +32,6 @@ class KnowledgeSearchAgent(BaseAgent):
         
         self.bind_tools([knowledge_search_tool])
     
-    def _load_prompt(self) -> str:
-        prompt_path = Path(__file__).parent / "prompt.yaml"
-        
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            content = f.read().strip()
-            
-            prompt_data = yaml.safe_load(content)
-            if isinstance(prompt_data, dict) and 'KnowledgeSearchAgent' in prompt_data:
-                return prompt_data['KnowledgeSearchAgent']
-            elif isinstance(prompt_data, str):
-                return prompt_data
 
 if __name__ == "__main__":
     import asyncio

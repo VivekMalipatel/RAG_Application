@@ -13,7 +13,6 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.store.base import BaseStore, IndexConfig
 from langgraph.types import All, StreamMode
 from langgraph.config import get_store
-
 from langgraph.cache.base import BaseCache
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
@@ -23,9 +22,10 @@ from langchain_core.runnables.base import Input
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
 from langchain_openai import OpenAIEmbeddings
 from langgraph.config import get_stream_writer
-
+import yaml
 from openai import BaseModel
-
+from agents.utils import _load_prompt
+from pathlib import Path
 from llm.llm import LLM
 from agents.base_agents.base_state import BaseState
 from agents.base_agents.memory.base_checkpointer import BaseMemorySaver
@@ -96,7 +96,7 @@ class BaseAgent:
         self._resursion_limit = recursion_limit
         self.config = config
 
-        self.prompt = prompt
+        self.prompt = prompt + _load_prompt("base_agent", base_dir=Path(__file__).parent)
 
     def _validate_tools(self, tools: Sequence[Union[typing.Dict[str, Any], type, Callable, BaseTool]]):
         for tool in tools:
@@ -458,6 +458,11 @@ class BaseAgent:
             **kwargs
         )
 
+    @property
+    def graph(self) -> Optional[CompiledStateGraph]:
+        """Access the compiled graph. Returns None if not compiled."""
+        return self._compiled_graph
+
 
 if __name__ == "__main__":
     async def test_base_agent():
@@ -528,3 +533,6 @@ if __name__ == "__main__":
         print(f"\nOutput saved to single_shot_output.txt ({len(output_lines)} lines)")
 
     asyncio.run(test_base_agent())
+    
+    
+    
