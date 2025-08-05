@@ -17,8 +17,8 @@ class BaseMCPServer(ABC):
                 enable_api_keys=os.getenv("MCP_ENABLE_API_KEYS", "true").lower() == "true",
                 enable_jwt=os.getenv("MCP_ENABLE_JWT", "true").lower() == "true"
             )
-        
-        self.app = FastMCP(server_name)
+
+        self.app = FastMCP(server_name, port=self.port)
         self.setup_logging()
         self.setup_common_features()
         self.register_tools()
@@ -124,9 +124,10 @@ class BaseMCPServer(ABC):
             base_caps.extend(["authentication", "authorization", "rate-limiting"])
         return base_caps
     
-    def run(self):
-        """Start the MCP server"""
-        self.logger.info(f"Starting {self.server_name} MCP Server on port {self.port}")
+    def run(self, port: int = None):
+        """Start the MCP server, optionally on a specified port"""
+        run_port = port if port is not None else self.port
+        self.logger.info(f"Starting {self.server_name} MCP Server on port {run_port}")
         self.logger.info(f"Authentication: {'Enabled' if self.enable_auth else 'Disabled'}")
         self.logger.info(f"Capabilities: {', '.join(self.get_capabilities())}")
         

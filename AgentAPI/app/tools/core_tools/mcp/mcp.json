@@ -12,15 +12,26 @@
       "selenium": {
         "command": "npx",
         "args": ["-y", "@angiejones/mcp-selenium"],
-        "enabled": true,
+        "enabled": false,
         "transport": "stdio"
       },
-      
+      "file-management": {
+        "transport": "streamable_http",
+        "url": "http://127.0.0.1:8080/mcp",
+        "headers": {
+          "X-API-Key": "admin-key-456",
+          "Content-Type": "application/json"
+        },
+        "enabled": true,
+        "timeout": 30,
+        "max_retries": 3,
+        "priority": 1
+      },
       "playwright": {
         "type": "stdio",
         "command": "npx",
         "args": ["@playwright/mcp@latest"],
-        "enabled": true,
+        "enabled": false,
         "transport": "stdio"
       },
 
@@ -35,8 +46,6 @@
         "timeout": 30,
         "tools": []
       },
-      
-  
 
       "browsermcp": {
         "url": "stdio",

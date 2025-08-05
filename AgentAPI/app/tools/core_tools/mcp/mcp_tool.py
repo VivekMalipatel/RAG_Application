@@ -24,27 +24,15 @@ TOOL_NAME = "multi_server_mcp_wrapper"
 class MCPServerConfig(BaseModel):
     name: str = Field(description="Unique name for the MCP server")
     transport: Literal["stdio", "streamable_http"] = Field(
-        description="Transport protocol for the MCP server (stdio or streamable_http only)"
+        description="Transport protocol for the MCP server"
     )
-    command: Optional[str] = Field(
-        default=None,
-        description="Command to run for stdio transport"
-    )
-    args: Optional[List[str]] = Field(
-        default=None,
-        description="Arguments for the command (stdio transport)"
-    )
-    url: Optional[str] = Field(
-        default=None,
-        description="URL for HTTP-based transports"
-    )
-    env: Optional[Dict[str, str]] = Field(
-        default=None,
-        description="Environment variables for the server"
-    )
+    command: Optional[str] = Field(default=None, description="Command to run for stdio transport")
+    args: Optional[List[str]] = Field(default=None, description="Arguments for the command")
+    url: Optional[str] = Field(default=None, description="URL for HTTP-based transports")
+    env: Optional[Dict[str, str]] = Field(default=None, description="Environment variables")
     headers: Optional[Dict[str, str]] = Field(
-        default=None,
-        description="HTTP headers for HTTP-based transports"
+        default_factory=dict, 
+        description="HTTP headers for authentication and configuration"
     )
     enabled: bool = Field(default=True, description="Whether the server is enabled")
     priority: Optional[int] = Field(default=1, description="Server priority")
@@ -53,7 +41,6 @@ class MCPServerConfig(BaseModel):
     max_retries: Optional[int] = Field(default=3, description="Maximum retry attempts")
 
 def load_server_configs_from_json(json_path: Optional[str] = None) -> List[MCPServerConfig]:
-    from config import config as app_config
     if json_path is None:
         json_path = app_config.MCP_JSON_PATH
     
@@ -440,7 +427,7 @@ async def test_enabled_servers():
             try:
                 print(f"\nTools for server '{config.name}':")
                 async with client.session(config.name) as session:
-                    tools = await fetch_tools(client, [config], {config.name: connections[config.name]})
+                    tools = await client.get_tools()
                     if tools:
                         for tool in tools:
                             print(f"  - {getattr(tool, 'name', str(tool))}")

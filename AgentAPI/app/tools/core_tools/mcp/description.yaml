@@ -1,31 +1,99 @@
 multi_server_mcp_wrapper: |
-  Execute operations across multiple MCP (Model Context Protocol) servers through a unified Docker Gateway interface.
+  🔧 **Multi-Server MCP Wrapper** - Execute operations across multiple MCP (Model Context Protocol) servers through a unified interface.
   
-  This tool provides access to various capabilities including:
-  - File system operations (read, write, list files and directories)
-  - Web automation (browser screenshots, web scraping, page navigation)
-  - System information gathering (memory, CPU, disk usage)
-  - Database operations and queries
-  - Code analysis and execution
-  - API integrations and HTTP requests
+  This is the **primary tool** for accessing all MCP server capabilities. Think of it as a universal gateway that routes requests to appropriate MCP servers based on the tool name and server specification.
   
-  **Input Format:**
-  - `requests`: Array of MCPToolRequest objects
-  - Each request needs: `tool_name`, `arguments`, optional `server_name`
+  ## 🎯 **Core Purpose**
+  - **Unified Access**: Single entry point to all MCP servers and their tools
+  - **Batch Processing**: Execute multiple operations in a single request
+  - **Server Routing**: Automatically route requests to appropriate servers
+  - **Error Handling**: Built-in retry logic and error recovery
   
-  **Example Usage:**
+  ## 📋 **Input Schema**
   {
-  "requests": [
-    {
-      "tool_name": "screenshot",
-      "arguments": {"url": "https://example.com"},
-      "server_name": "docker-gateway"
+    "requests": [
+      {
+        "tool_name": "string (required) - Exact name of the MCP tool to execute",
+        "arguments": "object (required) - Parameters for the tool",
+        "server_name": "string (optional) - Specific server to target"
       }
     ]
   }
-  **Available Tool Categories:**
-- Browser: screenshot, scrape, navigate
-- File System: read_file, write_file, list_directory
-- System: get_memory_info, get_cpu_info, get_disk_usage
-- Web: http_get, http_post, fetch_url
 
+  ## 🔍 **Tool Discovery**
+  **IMPORTANT**: Before using this tool, ALWAYS discover available tools first:
+
+  1. **Use agent commands to discover tools:**
+    - `mcp.list_tools` - Get all available tools with descriptions
+    - `mcp.server_status` - Check which servers are healthy and active
+    - Tool suggestions - Use partial names to find relevant tools
+
+  2. **Dynamic tool discovery ensures:**
+    - You use actual available tools (not hardcoded examples)
+    - You get current server status and tool availability
+    - You understand tool parameters and requirements
+    - You work with the live system state
+
+  ## 🚀 **Usage Pattern**
+
+  ### **Step 1: Discover Available Tools**
+  Before making any requests, run agent discovery commands:
+  mcp.list_tools # Shows all available tools with servers and descriptions
+
+  ### **Step 2: Execute Based on Discovery**
+  Use the discovered tool names in your requests:
+  {
+    "requests": [
+      {
+        "tool_name": "<actual_tool_name_from_discovery>",
+        "arguments": {"param": "value"},
+        "server_name": "<server_from_discovery>"
+      }
+    ]
+  }
+
+  ## 📊 **Dynamic Tool Categories**
+  Tool categories depend on your active MCP servers. Common patterns include:
+  - **Web operations**: Tools ending in screenshot, scrape, navigate, etc.
+  - **File operations**: Tools containing file, directory, read, write, etc.
+  - **System operations**: Tools with system, memory, cpu, disk, etc.
+  - **API operations**: Tools with http, get, post, fetch, etc.
+  - **Database operations**: Tools with query, sql, database, etc.
+
+  ## ⚡ **Key Features**
+  - **Auto-Discovery**: Automatically finds available tools across all connected servers
+  - **Dynamic Routing**: Routes to appropriate servers based on tool availability
+  - **Retry Logic**: Built-in retry mechanism with configurable attempts
+  - **Security Context**: Automatically injects user/org security context
+  - **Response Formatting**: Standardized response format with metadata
+  - **Error Recovery**: Graceful error handling with detailed error messages
+
+  ## 🎯 **Best Practices**
+  1. **Always discover first**: Use `mcp.list_tools` before executing operations
+  2. **Use exact tool names**: Use tool names exactly as returned by discovery
+  3. **Check server health**: Use `mcp.server_status` to ensure servers are available
+  4. **Batch related operations**: Combine related operations for efficiency
+  5. **Handle dynamic changes**: Re-discover tools if operations fail due to unavailable tools
+
+  ## 🔄 **Dynamic Workflow**
+  Agent starts → Run mcp.list_tools
+
+  Identify needed tools → Check tool descriptions and parameters
+
+  Execute via multi_server_mcp_wrapper → Use discovered tool names
+
+  Handle errors → Re-discover if tools unavailable
+
+  Success → Cache tool info for similar future tasks
+
+  ## 💡 **Pro Tips**
+  - Use tool suggestions to find tools matching your task keywords
+  - Monitor server health regularly for optimal performance
+  - Leverage the VS Code-like interface for interactive tool exploration
+  - Cache discovered tool info to avoid repeated discovery for similar tasks
+
+  ## 🚨 **Important Notes**
+  - **NO HARDCODED EXAMPLES**: Never assume specific tools exist
+  - **ALWAYS DISCOVER**: Tool availability changes with server configurations
+  - **DYNAMIC EXECUTION**: Adapt to whatever tools are actually available
+  - **ERROR RESILIENCE**: Handle cases where expected tools don't exist
