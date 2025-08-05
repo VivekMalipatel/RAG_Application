@@ -3,12 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from api.routes import chat, models, tools
 from db.redis import redis
+from core.background_executor import background_manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    background_manager.initialize()
     redis.init_session()
     yield
     redis.close_session()
+    background_manager.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)

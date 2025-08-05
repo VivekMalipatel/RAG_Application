@@ -31,6 +31,7 @@ from agents.base_agents.memory.base_checkpointer import BaseMemorySaver
 from agents.base_agents.memory.base_store import BaseMemoryStore
 from db.redis import redis
 from config import config as envconfig
+from core.background_executor import submit_background_task_with_redis
 
 @dataclass(frozen=True)
 class AgentConfig:
@@ -147,8 +148,11 @@ class BaseAgent:
             messages_to_save = messages[second_last_ai_index + 1:]
         else:
             messages_to_save = messages
-        
-        asyncio.create_task(self._remember_background(user_id, org_id, messages_to_save, config))
+
+        submit_background_task_with_redis(
+            self._remember_background_safe,
+            user_id, org_id, messages_to_save, config
+        )
 
         num_tokens = state["messages"][-1].usage_metadata.get("total_tokens", 0) if state["messages"][-1].usage_metadata else 0
 
@@ -157,6 +161,42 @@ class BaseAgent:
                 return {"messages": messages[second_last_ai_index:]}
         
         return state
+
+    async def _remember_background_safe(self, redis_client, user_id: str, org_id: str, messages_to_save: list, config: RunnableConfig):
+        try:
+            from agents.base_agents.memory.base_store import BaseMemoryStore
+            from embed.embed import JinaEmbeddings
+            from config import config as envconfig
+            
+            index_config: IndexConfig = {
+                "dims": envconfig.MULTIMODEL_EMBEDDING_MODEL_DIMS,
+                "embed": JinaEmbeddings(
+                    model=envconfig.MULTIMODEL_EMBEDDING_MODEL,
+                    base_url=envconfig.OPENAI_BASE_URL, 
+                    api_key=envconfig.OPENAI_API_KEY
+                ),
+                "ann_index_config": {"vector_type": "vector"},
+                "distance_type": "cosine",
+            }
+
+            store = BaseMemoryStore(
+                redis_client=redis_client,
+                index=index_config,
+            )
+            await store.setup()
+
+            namespace = ("memories", user_id)
+            checkpoint_id = config.get("checkpoint_id")
+            
+            for i, message in enumerate(messages_to_save):
+                await store.aput(
+                    namespace, 
+                    f"{checkpoint_id}_{i}" if checkpoint_id else f"{org_id}_{user_id}_{str(uuid.uuid4())}_{i}", 
+                    {"data": message.content}
+                )
+        
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Background remember task failed: {e}")
 
     async def _remember_background(self, user_id: str, org_id: str, messages_to_save: list, config: RunnableConfig):
         try:
