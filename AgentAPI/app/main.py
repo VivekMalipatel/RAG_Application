@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from api.routes import chat, models, tools, copilot
+from api.routes import chat, models, tools
 from db.redis import redis
 
 @asynccontextmanager
@@ -25,7 +25,6 @@ app.add_middleware(
 app.include_router(chat.router)
 app.include_router(models.router)
 app.include_router(tools.router)
-app.include_router(copilot.router)
 
 def root():
     return {"status": "ok"}

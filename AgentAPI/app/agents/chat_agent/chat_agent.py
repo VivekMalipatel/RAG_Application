@@ -17,7 +17,11 @@ class ChatAgent(BaseAgent):
                  recursion_limit: Optional[int] = 25,
                  debug: bool = False):
                 
-        self.prompt = prompt + _load_prompt("ChatAgent", base_dir=Path(__file__).parent)
+        yaml_prompt = _load_prompt("ChatAgent", base_dir=Path(__file__).parent)
+        if prompt is None:
+            self.prompt = yaml_prompt
+        else:
+            self.prompt = prompt + ("\n" + yaml_prompt if yaml_prompt else "")
         super().__init__(
             prompt=self.prompt,
             config=config,
