@@ -245,9 +245,7 @@ class BaseAgent:
         if self._is_structured_output:
             response = AIMessage(content=json.dumps(response))
         return {
-            "messages": [response], 
-            "user_id": config["configurable"]["user_id"], 
-            "org_id": config["configurable"]["org_id"]
+            "messages": [response]
         }
 
 
@@ -343,6 +341,8 @@ class BaseAgent:
                       **kwargs: Any) -> dict[str, Any] | Any:
         
         config["recursion_limit"] = self._resursion_limit
+        #TODO : Temperorily disable thinking
+        config["extra_body"]={"chat_template_kwargs": {"enable_thinking": False}}
         
         result = await self._compiled_graph.ainvoke(
             input, 
