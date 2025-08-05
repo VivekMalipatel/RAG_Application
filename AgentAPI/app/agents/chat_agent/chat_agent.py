@@ -17,13 +17,14 @@ class ChatAgent(BaseAgent):
                  recursion_limit: Optional[int] = 25,
                  debug: bool = False):
                 
-        yaml_prompt = _load_prompt("ChatAgent", base_dir=Path(__file__).parent)
         if prompt is None:
-            self.prompt = yaml_prompt
-        else:
-            self.prompt = prompt + ("\n" + yaml_prompt if yaml_prompt else "")
+            prompt = ""
+        
+        chat_agent_prompt = _load_prompt("ChatAgent", base_dir=Path(__file__).parent)
+        final_prompt = prompt + chat_agent_prompt
+        
         super().__init__(
-            prompt=self.prompt,
+            prompt=final_prompt,
             config=config,
             model_kwargs=model_kwargs,
             vlm_kwargs=vlm_kwargs,

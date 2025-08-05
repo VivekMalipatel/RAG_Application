@@ -97,7 +97,11 @@ class BaseAgent:
         self._resursion_limit = recursion_limit
         self.config = config
 
-        self.prompt = prompt + _load_prompt("base_agent", base_dir=Path(__file__).parent)
+        if prompt is None:
+            prompt = "You are a helpful assistant."
+        
+        base_prompt = _load_prompt("base_agent", base_dir=Path(__file__).parent)
+        self.prompt = prompt + base_prompt
 
     def _validate_tools(self, tools: Sequence[Union[typing.Dict[str, Any], type, Callable, BaseTool]]):
         for tool in tools:
