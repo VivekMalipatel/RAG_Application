@@ -1,15 +1,19 @@
 import sys
 import json
 import asyncio
-import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
 from langchain_core.runnables import RunnableConfig
 from dataclasses import dataclass
 from enum import Enum
+import logging
+import asyncio
+import traceback
+import sys
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from agents.base_agents.base_agent import BaseAgent
+from agents.utils import _load_prompt
 from tools.core_tools.mcp.mcp_tool import (
     multi_server_mcp_wrapper,  get_available_tools_from_servers, 
     build_server_connections, load_server_configs_from_json
@@ -52,11 +56,13 @@ class MCPAgent(BaseAgent):
         **kwargs
     ):
         if prompt is None:
-            prompt_path = Path(__file__).parent / "prompt.yaml"
-            prompt = load_prompt_or_description(prompt_path, key="MCPAgent")
+            prompt = ""
+        
+        mcp_agent_prompt = _load_prompt("MCPAgent", base_dir=Path(__file__).parent)
+        final_prompt = prompt + mcp_agent_prompt
         
         super().__init__(
-            prompt=prompt,
+            prompt=final_prompt,
             model_kwargs=model_kwargs,
             vlm_kwargs=vlm_kwargs,
             node_kwargs=node_kwargs,

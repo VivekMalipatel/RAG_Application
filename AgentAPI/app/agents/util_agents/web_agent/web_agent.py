@@ -17,11 +17,14 @@ class WebAgent(BaseAgent):
                  node_kwargs: Optional[Dict[str, Any]] = None,
                  recursion_limit: Optional[int] = 25,
                  debug: bool = False):
+        if prompt is None:
+            prompt = ""
         
-        self.prompt = prompt + _load_prompt("WebSearchAgent", base_dir=Path(__file__).parent)
+        web_agent_prompt = _load_prompt("WebSearchAgent", base_dir=Path(__file__).parent)
+        final_prompt = prompt + web_agent_prompt
 
         super().__init__(
-            prompt=self.prompt,
+            prompt=final_prompt,
             config=config,
             model_kwargs=model_kwargs,
             vlm_kwargs=vlm_kwargs,

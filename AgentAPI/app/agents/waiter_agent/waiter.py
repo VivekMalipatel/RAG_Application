@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any
 from langchain_core.runnables import RunnableConfig
 
 from agents.base_agents.base_agent import BaseAgent
+from agents.utils import _load_prompt
 from tools.core_tools.knowledge_search.knowledge_search_tool import knowledge_search_tool
 from .waiter_tools import (
     browse_menu_api,
@@ -32,10 +33,13 @@ class WaiterAgent(BaseAgent):
                  debug: bool = False):
         
         if prompt is None:
-            prompt = self._load_prompt()
+            prompt = ""
+        
+        waiter_agent_prompt = _load_prompt("WaiterAgent", base_dir=Path(__file__).parent)
+        final_prompt = prompt + waiter_agent_prompt
         
         super().__init__(
-            prompt=prompt,
+            prompt=final_prompt,
             config=config,
             model_kwargs=model_kwargs,
             vlm_kwargs=vlm_kwargs,
@@ -59,16 +63,4 @@ class WaiterAgent(BaseAgent):
         ]
         
         self.bind_tools(waiter_tools)
-            
-    def _load_prompt(self) -> str:
-        prompt_path = Path(__file__).parent / "prompt.yaml"
-        
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            content = f.read().strip()
-            
-            prompt_data = yaml.safe_load(content)
-            if isinstance(prompt_data, dict) and 'WaiterAgent' in prompt_data:
-                return prompt_data['WaiterAgent']
-            elif isinstance(prompt_data, str):
-                return prompt_data
 

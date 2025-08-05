@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any
 from langchain_core.runnables import RunnableConfig
 
 from agents.base_agents.base_agent import BaseAgent
+from agents.utils import _load_prompt
 from tools.core_tools.browser_use.browser_use_tool import browser_use_tool, mb_use_browser_tool
 
 class BrowserAgent(BaseAgent):
@@ -18,9 +19,13 @@ class BrowserAgent(BaseAgent):
                  debug: bool = False,
                  use_marinabox: bool = True):
         if prompt is None:
-            prompt = self._load_prompt()
+            prompt = ""
+        
+        browser_agent_prompt = _load_prompt("BrowserAgent", base_dir=Path(__file__).parent)
+        final_prompt = prompt + browser_agent_prompt
+        
         super().__init__(
-            prompt=prompt,
+            prompt=final_prompt,
             config=config,
             model_kwargs=model_kwargs,
             vlm_kwargs=vlm_kwargs,
@@ -35,15 +40,6 @@ class BrowserAgent(BaseAgent):
         else:
             self.bind_tools([browser_use_tool])
 
-    def _load_prompt(self) -> str:
-        prompt_path = Path(__file__).parent / "prompt.yaml"
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            content = f.read().strip()
-            prompt_data = yaml.safe_load(content)
-            if isinstance(prompt_data, dict) and 'BrowserAgent' in prompt_data:
-                return prompt_data['BrowserAgent']
-            elif isinstance(prompt_data, str):
-                return prompt_data
 
 if __name__ == "__main__":
     import asyncio

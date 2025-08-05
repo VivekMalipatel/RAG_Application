@@ -17,11 +17,14 @@ class KnowledgeSearchAgent(BaseAgent):
                  node_kwargs: Optional[Dict[str, Any]] = None,
                  recursion_limit: Optional[int] = 25,
                  debug: bool = False):
-           
-        self.prompt = prompt +  _load_prompt("KnowledgeSearchAgent", base_dir=Path(__file__).parent)
+        if prompt is None:
+            prompt = ""
+        
+        knowledge_search_prompt = _load_prompt("KnowledgeSearchAgent", base_dir=Path(__file__).parent)
+        final_prompt = prompt + knowledge_search_prompt
 
         super().__init__(
-            prompt=self.prompt,
+            prompt=final_prompt,
             config=config,
             model_kwargs=model_kwargs,
             vlm_kwargs=vlm_kwargs,
