@@ -27,6 +27,7 @@ from openai import BaseModel
 from agents.utils import _load_prompt
 from pathlib import Path
 from llm.llm import LLM
+from embed.embed import JinaEmbeddings
 from agents.base_agents.base_state import BaseState
 from agents.base_agents.memory.base_checkpointer import BaseMemorySaver
 from agents.base_agents.memory.base_store import BaseMemoryStore
@@ -129,7 +130,6 @@ class BaseAgent:
     async def remember(self, state: BaseState, config: RunnableConfig):
         user_id = config["configurable"]["user_id"]
         org_id = config["configurable"]["org_id"]
-        namespace = ("memories", user_id)
         messages = state["messages"]
         second_last_ai_index = -1
         ai_count = 0
@@ -146,27 +146,35 @@ class BaseAgent:
         else:
             messages_to_save = messages
         
-        checkpoint_id = config.get("checkpoint_id")
-        tasks = []
-        for i, message in enumerate(messages_to_save):
-            task = asyncio.create_task(get_store().aput(
-                namespace, 
-                f"{checkpoint_id}_{i}" if checkpoint_id else f"{org_id}_{user_id}_{str(uuid.uuid4())}_{i}", 
-                {"data": message.content}
-            ))
-            tasks.append(task)
-        
-        if tasks:
-            await asyncio.gather(*tasks)
+        asyncio.create_task(self._remember_background(user_id, org_id, messages_to_save, config))
 
         num_tokens = state["messages"][-1].usage_metadata.get("total_tokens", 0) if state["messages"][-1].usage_metadata else 0
 
         if num_tokens >= envconfig.MAX_STATE_TOKENS:
             if second_last_ai_index != -1:
-                state["messages"] = messages[second_last_ai_index:]
-            return state
+                return {"messages": messages[second_last_ai_index:]}
         
-        return
+        return state
+
+    async def _remember_background(self, user_id: str, org_id: str, messages_to_save: list, config: RunnableConfig):
+        try:
+            namespace = ("memories", user_id)
+            checkpoint_id = config.get("checkpoint_id")
+            tasks = []
+            
+            for i, message in enumerate(messages_to_save):
+                task = asyncio.create_task(get_store().aput(
+                    namespace, 
+                    f"{checkpoint_id}_{i}" if checkpoint_id else f"{org_id}_{user_id}_{str(uuid.uuid4())}_{i}", 
+                    {"data": message.content}
+                ))
+                tasks.append(task)
+            
+            if tasks:
+                await asyncio.gather(*tasks)
+        
+        except Exception as e:
+            self._logger.error(f"Background remember task failed: {e}")
 
     async def retrieve_memory(self, state: BaseState, config: RunnableConfig):
         user_id = config["configurable"]["user_id"]
@@ -175,33 +183,11 @@ class BaseAgent:
         writer = get_stream_writer()
         writer(f"Retrieving memory.....\n\n")
         store = get_store()
-        
-        async def extract_text_from_content(content):
-            if isinstance(content, list):
-                async def extract_item_text(item):
-                    if isinstance(item, dict) and item.get("type") == "text":
-                        return item.get("text")
-                    return ""
-                
-                if len(content) > 5:
-                    tasks = [extract_item_text(item) for item in content]
-                    text_parts = await asyncio.gather(*tasks)
-                    result = " ".join(filter(None, text_parts))
-                else:
-                    text_parts = []
-                    for item in content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            text_parts.append(item.get("text"))
-                    result = " ".join(text_parts)
-            else:
-                result = str(content)
-            
-            return result
 
         async def get_user_memory():
             namespace = ("memories", user_id)
             try:
-                search_query = await extract_text_from_content(last_message.content)
+                search_query = last_message.content
                 result = await store.asearch(namespace, query=search_query)
                 return result
             except Exception as e:
@@ -211,7 +197,7 @@ class BaseAgent:
         async def get_org_memory():
             namespace = ("memories", org_id)
             try:
-                search_query = await extract_text_from_content(last_message.content)
+                search_query = last_message.content
                 result = await store.asearch(namespace, query=search_query)
                 return result
             except Exception as e:
@@ -308,7 +294,7 @@ class BaseAgent:
         if store is None:
             index_config: IndexConfig = {
                 "dims": envconfig.MULTIMODEL_EMBEDDING_MODEL_DIMS,
-                "embed": OpenAIEmbeddings(
+                "embed": JinaEmbeddings(
                     model=envconfig.MULTIMODEL_EMBEDDING_MODEL,
                     base_url=envconfig.OPENAI_BASE_URL, 
                     api_key=envconfig.OPENAI_API_KEY

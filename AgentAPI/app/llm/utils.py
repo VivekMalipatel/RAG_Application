@@ -10,6 +10,28 @@ from langchain_core.runnables import Runnable
 from config import config
 
 
+def _generate_media_key(block: dict) -> str:
+    key_parts = []
+    
+    if block.get('type'):
+        key_parts.append(f"type:{block['type']}")
+    
+    if 'url' in block:
+        key_parts.append(f"url:{block['url']}")
+    elif 'image_url' in block and isinstance(block['image_url'], dict):
+        if 'url' in block['image_url']:
+            key_parts.append(f"url:{block['image_url']['url']}")
+    elif 'data' in block:
+        key_parts.append(f"data:{str(block['data'])}")
+    elif 'base64_data' in block:
+        key_parts.append(f"base64_data:{str(block['base64_data'])}")
+    
+    if 'mime_type' in block:
+        key_parts.append(f"mime:{block['mime_type']}")
+    
+    return "|".join(key_parts) if key_parts else str(sorted(block.items()))
+
+
 def has_images(messages: List[BaseMessage]) -> bool:
     return has_media(messages, media_types=["image"])
 
@@ -213,24 +235,51 @@ async def process_media_with_vlm(vlm: BaseChatModel, messages: List[BaseMessage]
         return messages
     
     media_blocks_info = []
+    seen_media_keys = set()
+    unique_media_blocks = {}
+    
     for msg_idx, message in enumerate(messages):
         if not hasattr(message, 'content') or not isinstance(message.content, list):
             continue
             
         for block_idx, block in enumerate(message.content):
             if isinstance(block, dict) and is_media_block(block, media_types):
-                media_blocks_info.append({
+                media_key = _generate_media_key(block)
+                
+                media_info = {
                     'msg_idx': msg_idx,
                     'block_idx': block_idx,
                     'block': block,
-                    'media_type': block.get('type', 'unknown')
-                })
+                    'media_type': block.get('type', 'unknown'),
+                    'media_key': media_key
+                }
+                
+                media_blocks_info.append(media_info)
+                
+                if media_key not in seen_media_keys:
+                    seen_media_keys.add(media_key)
+                    unique_media_blocks[media_key] = block
     
-    if not media_blocks_info:
+    if not unique_media_blocks:
         return messages
     
+    unique_media_list = [
+        {'block': block, 'media_type': block.get('type', 'unknown')}
+        for block in unique_media_blocks.values()
+    ]
+    
     chat_context = extract_chat_context(messages)
-    descriptions = await get_media_descriptions_batch(vlm, media_blocks_info, chat_context)
+    unique_descriptions = await get_media_descriptions_batch(vlm, unique_media_list, chat_context)
+    
+    media_key_to_description = {
+        list(unique_media_blocks.keys())[i]: desc
+        for i, desc in enumerate(unique_descriptions)
+    }
+    
+    descriptions = [
+        media_key_to_description[info['media_key']]
+        for info in media_blocks_info
+    ]
     
     processed_messages = []
     for msg_idx, message in enumerate(messages):

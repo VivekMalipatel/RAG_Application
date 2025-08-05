@@ -19,6 +19,8 @@ class Config:
     LLM_MAX_RETRIES: int = int(os.getenv("REASONING_LLM_MAX_RETRIES", 3))
     REASONING_LLM_MAX_TOKENS: int = int(os.getenv("REASONING_LLM_MAX_TOKENS", 50000))
     VLM_LLM_MAX_TOKENS: int = int(os.getenv("VLM_LLM_MAX_TOKENS", 120000))
+    EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", 3600))
+    EMBEDDING_CLEINT_RETRIES: int = int(os.getenv("EMBEDDING_CLEINT_RETRIES", 3))
 
     INDEXER_API_BASE_URL: str = os.getenv("INDEXER_API_BASE_URL")
 
