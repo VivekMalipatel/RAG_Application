@@ -142,7 +142,7 @@ class MCPBatchRequest(BaseModel):
         description="MCP server configurations to connect to"
     )
 
-def get_tool_description(tool_name: str, yaml_filename: str = "mcp_descriptions.yaml") -> str:
+def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml") -> str:
     yaml_path = Path(__file__).parent / yaml_filename
     try:
         return load_prompt_or_description(yaml_path, key=tool_name) or "Multi-server MCP wrapper for executing tools across multiple MCP servers"
