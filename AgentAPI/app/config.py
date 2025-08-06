@@ -22,6 +22,8 @@ class Config:
     EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", 3600))
     EMBEDDING_CLEINT_RETRIES: int = int(os.getenv("EMBEDDING_CLEINT_RETRIES", 3))
 
+    BACKGROUND_TASK_MAX_WORKERS: int = int(os.getenv("BACKGROUND_TASK_MAX_WORKERS", 1))
+
     INDEXER_API_BASE_URL: str = os.getenv("INDEXER_API_BASE_URL")
 
     # Redis Configuration

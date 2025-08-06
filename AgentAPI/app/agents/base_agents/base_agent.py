@@ -168,6 +168,9 @@ class BaseAgent:
             from embed.embed import JinaEmbeddings
             from config import config as envconfig
             
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Starting background memory task for user {user_id}, {len(messages_to_save)} messages")
+            
             index_config: IndexConfig = {
                 "dims": envconfig.MULTIMODEL_EMBEDDING_MODEL_DIMS,
                 "embed": JinaEmbeddings(
@@ -184,19 +187,30 @@ class BaseAgent:
                 index=index_config,
             )
             await store.setup()
+            logger.debug("Memory store setup completed")
 
             namespace = ("memories", user_id)
             checkpoint_id = config.get("checkpoint_id")
             
             for i, message in enumerate(messages_to_save):
-                await store.aput(
-                    namespace, 
-                    f"{checkpoint_id}_{i}" if checkpoint_id else f"{org_id}_{user_id}_{str(uuid.uuid4())}_{i}", 
-                    {"data": message.content}
-                )
+                try:
+                    message_id = f"{checkpoint_id}_{i}" if checkpoint_id else f"{org_id}_{user_id}_{str(uuid.uuid4())}_{i}"
+                    logger.debug(f"Storing message {i+1}/{len(messages_to_save)} with ID: {message_id}")
+                    
+                    await store.aput(
+                        namespace, 
+                        message_id, 
+                        {"data": message.content}
+                    )
+                    logger.debug(f"Successfully stored message {i+1}/{len(messages_to_save)}")
+                except Exception as e:
+                    logger.error(f"Failed to store message {i+1}/{len(messages_to_save)}: {e}")
+                    continue
+            
+            logger.debug(f"Background memory task completed for user {user_id}")
         
         except Exception as e:
-            logging.getLogger(__name__).error(f"Background remember task failed: {e}")
+            logger.error(f"Background remember task failed: {e}", exc_info=True)
 
     async def _remember_background(self, user_id: str, org_id: str, messages_to_save: list, config: RunnableConfig):
         try:
@@ -256,13 +270,13 @@ class BaseAgent:
 
         async def process_user_memory():
             if not user_memory:
-                return [SystemMessage(content="No user memory found.")]
-            return [SystemMessage(content=user_msg.value.get("data", "")) for user_msg in user_memory]
+                return [HumanMessage(content="No user memory found.")]
+            return [HumanMessage(content=user_msg.value.get("data", "")) for user_msg in user_memory]
 
         async def process_org_memory():
             if not org_memory:
-                return [SystemMessage(content="No organization memory found.")]
-            return [SystemMessage(content=org_msg.value.get("data", "")) for org_msg in org_memory]
+                return [HumanMessage(content="No organization memory found.")]
+            return [HumanMessage(content=org_msg.value.get("data", "")) for org_msg in org_memory]
 
         user_messages, org_messages = await asyncio.gather(
             process_user_memory(),
@@ -278,7 +292,7 @@ class BaseAgent:
     async def llm_node(self, state: BaseState, config: RunnableConfig):
         memory_messages = await self.retrieve_memory(state, config)
 
-        messages = [SystemMessage(content=self.prompt)] + memory_messages + state["messages"]
+        messages = [SystemMessage(content=self.prompt)] + [HumanMessage(content="<Retrieved Messages from Memory Start>")] + memory_messages + [HumanMessage(content="<Retrieved Messages from Memory End>")] + state["messages"]
         
         response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
         
@@ -287,7 +301,6 @@ class BaseAgent:
         return {
             "messages": [response]
         }
-
 
     def _compile_graph(self, has_tools: bool, **compile_kwargs) -> CompiledStateGraph:
         graph_builder = StateGraph(BaseState)

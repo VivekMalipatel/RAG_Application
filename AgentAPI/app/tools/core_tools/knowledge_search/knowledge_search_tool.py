@@ -270,7 +270,7 @@ async def knowledge_search_tool(query: str, parameters: Optional[Dict[str, Any]]
     
     try:
         writer = get_stream_writer()
-        writer(f"#### Knowledge Search #### Query: {query}")
+        writer(f"Knowledge Search Query: {query}")
         
         parameters = parameters or {}
         

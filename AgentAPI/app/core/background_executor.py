@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class BackgroundTaskManager:
     _instance: Optional['BackgroundTaskManager'] = None
     
-    def __init__(self, max_workers: int = 10):
+    def __init__(self, max_workers: int = envconfig.BACKGROUND_TASK_MAX_WORKERS):
         self._executor: Optional[ThreadPoolExecutor] = None
         self._max_workers = max_workers
         self._is_initialized = False
