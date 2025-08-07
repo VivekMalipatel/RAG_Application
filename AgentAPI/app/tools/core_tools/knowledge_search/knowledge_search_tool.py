@@ -155,14 +155,21 @@ async def process_single_record(record: Dict[str, Any]) -> List[Dict[str, Any]]:
             content_items = format_content_field(value)
             final_content.extend(content_items)
             content_found = True
-        elif isinstance(value, dict) and "content" in value and isinstance(value["content"], str):
-            content_items = format_content_field(value["content"])
-            final_content.extend(content_items)
-            content_found = True
+        elif isinstance(value, dict):
+            content_key_found = None
+            for nested_key in value.keys():
+                if "content" in nested_key and isinstance(value[nested_key], str):
+                    content_key_found = nested_key
+                    break
             
-            for nested_key, nested_value in value.items():
-                if nested_key != "content" and nested_value is not None:
-                    metadata_parts.append(f"{nested_key}: {nested_value}")
+            if content_key_found:
+                content_items = format_content_field(value[content_key_found])
+                final_content.extend(content_items)
+                content_found = True
+                
+                for nested_key, nested_value in value.items():
+                    if nested_key != content_key_found and nested_value is not None:
+                        metadata_parts.append(f"{nested_key}: {nested_value}")
         else:
             if isinstance(value, dict):
                 nested_parts = []

@@ -35,6 +35,9 @@ class LLM:
             "timeout": reasoningllm_kwargs.get("timeout", config.LLM_TIMEOUT),
             "max_tokens": reasoningllm_kwargs.get("max_tokens", config.REASONING_LLM_MAX_TOKENS),
             "max_retries": reasoningllm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
+            "temperature": reasoningllm_kwargs.get("temperature", config.REASONING_LLM_TEMPERATURE),
+            "top_p": reasoningllm_kwargs.get("top_p", config.REASONING_LLM_TOP_P),
+            "frequency_penalty": reasoningllm_kwargs.get("frequency_penalty", config.REASONING_LLM_FREQUENCY_PENALTY),
             **reasoning_llm_filtered_kwargs
         }
         
@@ -48,6 +51,9 @@ class LLM:
             "timeout": reasoningllm_kwargs.get("timeout", config.LLM_TIMEOUT),
             "max_tokens": reasoningllm_kwargs.get("max_tokens", config.VLM_LLM_MAX_TOKENS),
             "max_retries": reasoningllm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
+            "temperature": reasoningllm_kwargs.get("temperature", config.VLM_LLM_TEMPERATURE),
+            "top_p": reasoningllm_kwargs.get("top_p", config.VLM_LLM_TOP_P),
+            "frequency_penalty": reasoningllm_kwargs.get("frequency_penalty", config.VLM_LLM_FREQUENCY_PENALTY),
             **vlm_filtered_kwargs
         }
 
