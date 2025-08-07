@@ -3,6 +3,7 @@ import os
 import subprocess
 import asyncio
 import logging
+import uuid
 import base64
 from urllib.parse import urlparse
 from pdf2image import convert_from_bytes
@@ -31,8 +32,9 @@ async def convert_to_pdf(file_data: bytes, file_type: str) -> bytes:
             input_bytes = io.BytesIO(file_data)
             input_bytes.seek(0)
             
-            temp_input_path = "/tmp/input_document"
-            temp_output_path = "/tmp/output_document.pdf"
+            id = str(uuid.uuid1())
+            temp_input_path = f"/tmp/{id}_input_document"
+            temp_output_path = f"/tmp/{id}_output_document.pdf"
             
             with open(temp_input_path, 'wb') as temp_file:
                 temp_file.write(input_bytes.getvalue())

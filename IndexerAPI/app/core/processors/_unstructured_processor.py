@@ -157,8 +157,6 @@ class UnstructuredProcessor(BaseProcessor):
         
         logger.info("PDF conversion verified, starting image processing")
         result = await self.convert_to_images(file_data, s3_base_path)
-        
-        logger.info(f"Unstructured document processing completed with {len(result['data']) if 'data' in str(result) else len(result)} pages")
         return {
             "data": result,
             "category": "unstructured"

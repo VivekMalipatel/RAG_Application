@@ -20,12 +20,12 @@ class Config:
     EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", 3600))
     EMBEDDING_CLEINT_RETRIES: int = int(os.getenv("EMBEDDING_CLEINT_RETRIES", 3))
 
-    REASONING_LLM_MAX_TOKENS: int = int(os.getenv("REASONING_LLM_MAX_TOKENS", 98304))
+    REASONING_LLM_MAX_TOKENS: int = int(os.getenv("REASONING_LLM_MAX_TOKENS", 32000))
     REASONING_LLM_TEMPERATURE: float = float(os.getenv("REASONING_LLM_TEMPERATURE", 0.1))
     REASONING_LLM_TOP_P: float = float(os.getenv("REASONING_LLM_TOP_P", 0.1))
     REASONING_LLM_FREQUENCY_PENALTY: float = float(os.getenv("REASONING_LLM_FREQUENCY_PENALTY", 1.0))
 
-    VLM_LLM_MAX_TOKENS: int = int(os.getenv("VLM_LLM_MAX_TOKENS", 32000))
+    VLM_LLM_MAX_TOKENS: int = int(os.getenv("VLM_LLM_MAX_TOKENS", 100000))
     VLM_LLM_TEMPERATURE: float = float(os.getenv("VLM_LLM_TEMPERATURE", 0.1))
     VLM_LLM_TOP_P: float = float(os.getenv("VLM_LLM_TOP_P", 0.1))
     VLM_LLM_FREQUENCY_PENALTY: float = float(os.getenv("VLM_LLM_FREQUENCY_PENALTY", 1.0))

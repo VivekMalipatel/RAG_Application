@@ -24,7 +24,7 @@ class Settings:
     REASONING_MODEL: str = os.getenv("REASONING_MODEL","o3")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL")
     EMBEDDING_DIMENSIONS: int = int(os.getenv("EMBEDDING_DIMENSIONS", "2048"))
-    VLM_MAX_TOKENS: int = int(os.getenv("VLM_MAX_TOKENS", "110000"))
+    VLM_MAX_TOKENS: int = int(os.getenv("VLM_MAX_TOKENS", "15000"))
     REASONING_MAX_TOKENS: int = int(os.getenv("REASONING_MAX_TOKENS", "30000"))
     EMBEDDING_MAX_TOKENS: int = int(os.getenv("EMBEDDING_MAX_TOKENS", "8192"))
 

@@ -323,7 +323,7 @@ class ModelHandler:
 
             REQUIREMENTS:
             1. Extract key information with high precision
-            2. Use lowercase_underscore IDs: "John Smith" -> "john_smith"
+            2. Use lowercase_underscore IDs
             3. Provide detailed profiles and contextual relationships
             4. Handle coreference resolution (pronouns -> actual names)
             5. Consider visual elements in images (charts, diagrams, etc.)
