@@ -20,20 +20,20 @@ class Settings:
     EMBEDDING_API_KEY: str = os.getenv("EMBEDDING_API_KEY")
     EMBEDDING_API_BASE: str = os.getenv("EMBEDDING_API_BASE")
 
-    INFERENCE_MODEL: str = os.getenv("INFERENCE_MODEL","gpt-4o")
+    VLM_MODEL: str = os.getenv("VLM_MODEL","gpt-4o")
     REASONING_MODEL: str = os.getenv("REASONING_MODEL","o3")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL")
     EMBEDDING_DIMENSIONS: int = int(os.getenv("EMBEDDING_DIMENSIONS", "2048"))
-    INFERNECE_STRUCTURED_OUTPUTS_MAX_TOKENS: int = int(os.getenv("ENTITY_RELATION_EXTRACTION_MAX_TOKENS", "110000"))
-    REASONING_STRUCTURED_OUTPUTS_MAX_TOKENS: int = int(os.getenv("REASONING_STRUCTURED_OUTPUTS_MAX_TOKENS", "30000"))
-
+    VLM_MAX_TOKENS: int = int(os.getenv("VLM_MAX_TOKENS", "110000"))
+    REASONING_MAX_TOKENS: int = int(os.getenv("REASONING_MAX_TOKENS", "30000"))
+    EMBEDDING_MAX_TOKENS: int = int(os.getenv("EMBEDDING_MAX_TOKENS", "8192"))
 
     EMBEDDING_CONCURRENT_REQUESTS: int = int(os.getenv("EMBEDDING_CONCURRENT_REQUESTS", "16"))
     INFERENCE_CONCURRENT_REQUESTS: int = int(os.getenv("INFERENCE_CONCURRENT_REQUESTS", "16"))
     EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "240"))
     INFERENCE_CLIENT_TIMEOUT: float = float(os.getenv("INFERENCE_CLIENT_TIMEOUT", "240"))
-    RETRIES: int = int(os.getenv("RETRIES", "1"))
-    RETRY_DELAY: int = int(os.getenv("RETRY_DELAY", "1"))
+    RETRIES: int = int(os.getenv("RETRIES", "3"))
+    RETRY_DELAY: int = int(os.getenv("RETRY_DELAY", "2"))
 
 
     MINIO_ENDPOINT_URL: str = os.getenv("MINIO_ENDPOINT_URL")

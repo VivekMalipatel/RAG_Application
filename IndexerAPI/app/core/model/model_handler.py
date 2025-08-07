@@ -202,7 +202,7 @@ class ModelHandler:
         
         try:
             response : ChatCompletion = await self.chat_completion(
-                model=settings.INFERENCE_MODEL,
+                model=settings.VLM_MODEL,
                 messages=[  
                             {
                                 "role": "system",
@@ -388,9 +388,9 @@ class ModelHandler:
             try:
                 if has_image:
                     response : ChatCompletion = await self.chat_completion(
-                        model=settings.INFERENCE_MODEL,
+                        model=settings.VLM_MODEL,
                         messages=[system_message] + image_messages,
-                        max_completion_tokens=settings.INFERNECE_STRUCTURED_OUTPUTS_MAX_TOKENS,
+                        max_completion_tokens=settings.VLM_MAX_TOKENS,
                     )
                 else:
                     raise ValueError("No image content available, falling back to text-based extraction")
@@ -437,7 +437,7 @@ class ModelHandler:
                     response : ChatCompletion = await self.chat_completion(
                         model=settings.REASONING_MODEL,
                         messages=[system_message] + text_messages,
-                        max_completion_tokens=settings.REASONING_STRUCTURED_OUTPUTS_MAX_TOKENS,
+                        max_completion_tokens=settings.REASONING_MAX_TOKENS,
                     )
                 
                     if (response and 
@@ -526,14 +526,18 @@ class ModelHandler:
             
             Keep the summary concise but comprehensive, suitable for embedding and retrieval."""
 
-            user_prompt = f"Analyze this structured dataset and provide a comprehensive summary:\n\n{dataframe_text}"
+            user_prompt = f"Analyze this structured dataset and provide a comprehensive summary:\n\n{dataframe_text[:settings.REASONING_MAX_TOKENS-10000]}"
 
             response :ChatCompletion = await self.chat_completion(
-                model=settings.INFERENCE_MODEL,
+                model=settings.REASONING_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
-                ]
+                ],
+                max_completion_tokens=settings.REASONING_MAX_TOKENS,
+                temperature=0.5,
+                top_p=0.2,
+                frequency_penalty=0.5
             )
             
             if (response and 
@@ -571,16 +575,16 @@ class ModelHandler:
             
             Extract ALL columns present in the dataset and provide thorough analysis for each."""
 
-            user_prompt = f"Analyze each column in this dataset and provide detailed profiles:\n\n{dataframe_text}"
+            user_prompt = f"Analyze each column in this dataset and provide detailed profiles:\n\n{dataframe_text[:settings.REASONING_MAX_TOKENS-10000]}"
 
             response : ParsedChatCompletion[ColumnProfilesSchema] = await self.structured_chat_completion(
-                model=settings.INFERENCE_MODEL,
+                model=settings.REASONING_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 response_format=ColumnProfilesSchema,
-                max_completion_tokens=settings.INFERNECE_STRUCTURED_OUTPUTS_MAX_TOKENS,
+                max_completion_tokens=settings.VLM_MAX_TOKENS,
             )
             
             if (response and 
