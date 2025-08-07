@@ -463,7 +463,7 @@ class Neo4jHandler:
             async with self.driver.session(database=self.database) as session:
                 result = await session.run(query, parameters or {})
                 records = await result.data()
-                return [dict(record) for record in records]
+                return records
         except Exception as e:  
             logger.error(f"Error executing Cypher query: {e}")
             raise e
