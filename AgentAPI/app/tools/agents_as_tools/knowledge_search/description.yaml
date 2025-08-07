@@ -1,36 +1,68 @@
 knowledge_search_agent: |
-  A specialized agent for intelligently searching and querying the user's knowledge base through a knowledge graph database. This tool provides comprehensive search capabilities across all ingested organizational content.
+  #Specialized Knowledge Discovery Interface#
+  
+  An intelligent agent specialized in searching and analyzing the user's comprehensive knowledge base through an enterprise-grade knowledge graph database. This agent serves as your personal knowledge navigator, transforming information requests into precise discoveries across all ingested content.
 
-  **Core Capabilities:**
-  - Search unstructured documents (PDFs, images, text files) using content and metadata
-  - Query structured data (CSV, Excel files) including columns and row values
-  - Find entities (people, organizations, concepts) and their relationships
-  - Perform semantic similarity searches using AI embeddings
-  - Retrieve specific document content and metadata
-  - Analyze connections and relationships between different data points
-  - Support both exact matching and fuzzy/semantic search strategies
+  #Core Capabilities#
 
-  **When to Use This Tool:**
-  - User asks about internal documents, files, or organizational data
-  - Requests for "our documents", "company information", or specific filenames
-  - Questions about content within ingested documents
-  - Analysis of relationships between entities in the knowledge base
-  - Discovery queries like "what documents do we have" or "list available files"
+  **Multi-Modal Content Search**
+  - **Unstructured Documents**: Search PDFs, images, text files, presentations with full content analysis
+  - **Structured Data**: Query CSV, Excel files, databases with column-level precision
+  - **Entity Recognition**: Find people, organizations, concepts, and their relationships
+  - **Semantic Discovery**: Use AI-powered similarity search to find conceptually related information
+  - **Cross-Reference Analysis**: Connect information across different document types and sources
 
-  **How to Use:**
-  Provide clear, detailed task descriptions explaining exactly what information is needed. Include relevant context about the user's goal and any specific requirements.
+  **Intelligent Search Strategies**
+  - **Natural Language Queries**: Ask questions in plain English about your knowledge base
+  - **Contextual Understanding**: Leverages conversation history and user preferences
+  - **Progressive Discovery**: Starts broad and narrows down based on findings
+  - **Relationship Mapping**: Discovers connections between entities, documents, and concepts
+  - **Content Synthesis**: Combines information from multiple sources into coherent insights
 
-  **Effective Task Examples:**
-  - "Find and list all documents in the knowledge base with their metadata and categories"
-  - "Search for content related to machine learning across all ingested documents"
-  - "Retrieve the full content from any documents with 'Q4 Report' in the filename"
-  - "Find entities of type 'Person' and show their relationships to other entities"
+  **Advanced Analytics**
+  - **Pattern Recognition**: Identifies trends and patterns across your knowledge base
+  - **Entity Profiling**: Comprehensive analysis of people, organizations, and concepts
+  - **Document Clustering**: Groups related documents and content themes
+  - **Temporal Analysis**: Tracks information changes and developments over time
+  - **Relevance Scoring**: Ranks results by contextual importance and similarity
 
-  **Important Constraints:**
-  - Only searches within ingested knowledge base data
-  - Cannot access external websites or current information
-  - Results are automatically filtered by user/organization permissions
-  - If information isn't in the knowledge base, will respond with "No relevant information found"
+  #When to Use This Agent#
 
-  **Output Format:**
-  Returns structured search results with relevant content, metadata, and context. Results are organized and filtered based on user permissions and relevance to the query.
+  **Information Discovery**
+  - "Find all documents related to [topic/project/person]"
+  - "What do we know about [entity/concept] across all sources?"
+  - "Show me documents similar to this one"
+  - "Search for specific data points in our structured files"
+
+  **Research & Analysis**
+  - "Analyze relationships between [entities/concepts]"
+  - "What are the key themes in our [document category]?"
+  - "Find contradictions or inconsistencies in our knowledge base"
+  - "Track mentions of [topic] across different time periods"
+
+  **Content Exploration**
+  - "What types of documents do we have about [subject]?"
+  - "Show me the structure of our knowledge in [domain]"
+  - "Find documents I haven't seen that might be relevant to [project]"
+  - "What are the most important entities in our knowledge base?"
+
+  #Unique Advantages#
+
+  **Security & Privacy**
+  - Automatically filters results based on your user permissions and organization context
+  - Ensures you only see information you're authorized to access
+  - Maintains complete data isolation between users and organizations
+
+  **Performance Optimized**
+  - Intelligently limits results to prevent information overload
+  - Prioritizes most relevant content first
+  - Handles large knowledge bases efficiently
+  - Provides quick initial results with option for deeper exploration
+
+  **User-Friendly Results**
+  - Presents technical graph data as natural, readable insights
+  - Highlights key findings and important relationships
+  - Suggests follow-up questions and related searches
+  - Maintains conversation context for progressive discovery
+
+  This agent transforms your knowledge base from a static repository into an interactive, intelligent research partner that helps you discover insights, connections, and information you might never have found through traditional search methods.

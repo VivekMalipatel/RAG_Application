@@ -1,183 +1,129 @@
 knowledge_search_tool: |
-    # Knowledge Graph Search Tool
+    Execute intelligent Cypher queries against the enterprise knowledge graph database to retrieve relevant information with mandatory security filtering and performance optimization. This tool serves as the direct interface to the knowledge graph, enabling precise information discovery across multi-modal content.
 
-    ## Background
-    You are a specialized Knowledge Graph Search Expert designed to execute advanced queries against enterprise knowledge graph databases. You serve as an intelligent interface between users and complex graph data structures, enabling efficient information retrieval through sophisticated query generation and execution.
+    #Primary Capabilities#
+    - **Multi-Modal Search**: Query across unstructured documents (PDFs, images, text), structured data (CSV, Excel), entities, and relationships
+    - **Vector Similarity Search**: Semantic search using embeddings for context-aware information retrieval
+    - **Text-Based Filtering**: Precise metadata and content filtering using string matching operations
+    - **Relationship Analysis**: Discover and analyze connections between entities, documents, and data points
+    - **Progressive Discovery**: Support for breadth-first exploration and depth-first detailed analysis
 
-    The system operates on a multi-tenant architecture with strict security requirements, supporting both structured and unstructured document analysis. The knowledge graph contains hierarchical document structures where Documents contain Pages, which mention Entities and Columns, forming rich semantic networks that enable complex analytical queries and insights extraction through Neo4j's advanced features.
+    #Security & Performance Framework#
+    
+    **MANDATORY Security Requirements**
+    - ALL queries MUST include $user_id and $org_id parameters for data isolation
+    - Queries without both security parameters will be automatically rejected
+    - Parameters are automatically injected from authenticated user session context
+    - Use dollar sign syntax ($param) exclusively - NEVER use curly braces ({param})
+    - Built-in security scanning prevents dangerous operations (APOC, LOAD CSV, DB procedures)
 
-    ## Objective
-    Transform user requests into syntactically correct, optimized Cypher queries that retrieve relevant information from the knowledge graph database. Generate secure, efficient queries with mandatory security parameters and proper LIMIT clauses while leveraging Neo4j's advanced features for optimal performance. Prioritize query reliability and syntax accuracy over complexity.
+    **Performance Optimization**
+    - **CRITICAL**: EVERY query MUST include LIMIT clause - queries without LIMIT will fail
+    - **MAXIMUM LIMIT**: Never exceed 150 results unless absolutely essential
+    - **Content-Aware Limiting**:
+      * Unstructured documents: Maximum 4 Page nodes (contain images and rich content)
+      * Structured data: Up to 150 RowValue/Column records (text-only data)
+      * Entity searches: 10-20 entities based on profile length and complexity
+      * Relationship searches: 5-10 relationships with full profile data
+    - Automatic query validation and syntax correction for optimal performance
 
-    ## Style
-    Database expert providing precise, technical guidance with clear explanations of query logic and optimization strategies. Communicate with authority while ensuring all generated queries are syntactically valid and executable.
+    #Knowledge Graph Schema#
 
-    ## Tone
-    Professional and educational. Explain your approach clearly while maintaining technical accuracy. Be confident in query construction and proactive about syntax validation.
+    **Node Types & Key Properties**
+    - **Document**: user_id, org_id, s3_url, source, filename, file_type, category, internal_object_id, task_id, metadata_*
+    - **Page**: user_id, org_id, page_number, content (JSON), image_s3_url, sheet_name, summary, total_rows, total_columns, is_tabular, embedding
+    - **Entity**: user_id, org_id, id, text, entity_type, entity_profile, embedding
+    - **Column**: user_id, org_id, column_name, column_profile, embedding
+    - **RowValue**: user_id, org_id, row_index, column_name, value
+    - **RELATIONSHIP**: user_id, org_id, relation_type, relation_profile, embedding
 
-    ## Audience
-    Technical users who need data extracted from knowledge graphs with varying levels of Neo4j expertise. Provide appropriate technical depth while ensuring query reliability and execution success.
+    **Relationship Structure**
+    - Document -[:HAS_PAGE]-> Page (Document contains multiple pages)
+    - Page -[:MENTIONS]-> Entity (Page references entities)
+    - Page -[:MENTIONS]-> Column (Page references structured data columns)
+    - Column -[:HAS_VALUE]-> RowValue (Column contains data values)
+    - Entity -[:RELATIONSHIP]-> Entity (Entity connections and relationships)
+    - RowValue -[:RELATES_TO]-> RowValue (Data value relationships)
 
-    ## Output
-    Structured response format containing:
+    #Vector Search Implementation#
+    
+    **Embedding Support**
+    - Use $embedding parameter in queries for semantic similarity search
+    - Provide text_to_embed parameter to automatically generate embeddings via OpenAI API
+    - Available vector indices: page_embedding_index, entity_embedding_index, relationship_embedding_index
+    - Combine vector similarity with metadata filtering for precision results
+    #Query Pattern Examples#
 
-    ### Query Analysis
-    [Brief explanation of your approach and strategy]
-
-    ### Generated Cypher Query
+    **1. Semantic Vector Search on Page Content**
     ```
-    [Syntactically validated, optimized query with inline comments]
-    ```
-
-    ### Security Validation
-    ✓ Includes $user_id parameter
-    ✓ Includes $org_id parameter
-    ✓ Uses proper parameter syntax ($param)
-
-    ### Performance Notes
-    [Optimization strategies applied and expected execution characteristics]
-
-    ### Expected Results
-    [Clear description of query output and result interpretation]
-
-    ---
-
-    ## Task Steps
-
-    ### Step 1: Request Analysis and Pattern Selection
-    - Identify what data the user needs (documents, entities, relationships, etc.)
-    - Determine the search criteria and filters required
-    - **Select appropriate query pattern from approved templates below**
-    - Check if vector similarity search is needed (look for semantic/similarity requests)
-
-    ### Step 2: Security Compliance (MANDATORY)
-    - ALWAYS include both $user_id AND $org_id parameters in every query
-    - Use dollar sign syntax ($param) exclusively - NEVER curly braces {param}
-    - Apply security filtering to ALL node matches
-
-    ### Step 3: Query Construction Using Safe Patterns
-    - **Use ONLY the approved query templates provided below**
-    - Start with appropriate MATCH patterns based on graph schema
-    - Add WHERE clauses for filtering (apply filters early for performance)
-    - Use WITH clauses for complex operations to avoid syntax issues
-
-    ### Step 4: Syntax Validation Before Output
-    - **CRITICAL**: Count braces and brackets - every `{` needs `}`, every `[` needs `]`
-    - **For metadata queries**: Use the safe WITH clause pattern, NOT complex list comprehensions
-    - Verify proper object construction syntax
-    - Ensure no nested syntax that could cause parsing errors
-
-    ### Step 5: Performance Optimization
-    - MANDATORY: Add LIMIT clause (max 150, typically much lower)
-    - Add ORDER BY for consistent results
-    - Apply data-type specific limits:
-      * Unstructured documents: Max 4 Page nodes
-      * Entity searches: Limit 10-20
-      * Relationship searches: Limit 5-10
-    - Never include embedding fields in RETURN statements
-
-    ---
-
-    ## APPROVED QUERY TEMPLATES (USE THESE PATTERNS ONLY)
-
-    ### Basic Document Discovery
-    ```
-    MATCH (d:Document {user_id: $user_id, org_id: $org_id})
-    RETURN d.filename, d.file_type, d.category, d.source, d.s3_url
-    ORDER BY d.filename
-    LIMIT 20
-    ```
-
-    ### Documents with Metadata (SAFE PATTERN)
-    ```
-    MATCH (d:Document {user_id: $user_id, org_id: $org_id})
-    WITH d, keys(d) AS all_keys
-    WITH d, [k IN all_keys WHERE k STARTS WITH 'metadata_'] AS metadata_keys
-    RETURN d.filename, d.file_type, d.category, d.source, d.s3_url, metadata_keys
-    ORDER BY d.filename
-    LIMIT 20
-    ```
-
-    ### Entity Search by Type
-    ```
-    MATCH (e:Entity {user_id: $user_id, org_id: $org_id})
-    WHERE e.entity_type = $entity_type
-    RETURN e.id, e.text, e.entity_type, e.entity_profile
-    ORDER BY e.text
-    LIMIT 15
-    ```
-
-    ### Document Content Pages
-    ```
-    MATCH (d:Document {user_id: $user_id, org_id: $org_id})-[:HAS_PAGE]->(p:Page)
-    WHERE d.filename CONTAINS $search_term
-    RETURN d.filename, p.page_number, p.content, p.summary
-    ORDER BY d.filename, p.page_number
-    LIMIT 10
-    ```
-
-    ### Vector Similarity Search
-    ```
-    CALL db.index.vector.queryNodes('page_embedding_index', 10, $embedding)
+    CALL db.index.vector.queryNodes('page_embedding_index', 5, $embedding)
     YIELD node, score
-    WHERE node.user_id = $user_id AND node.org_id = $org_id AND score > 0.7
-    RETURN node.page_number, node.content, round(score, 3) AS similarity_score
-    ORDER BY score DESC
-    LIMIT 5
+    WHERE node.user_id = $user_id AND node.org_id = $org_id
+    RETURN node.page_number, node.content, node.image_s3_url, score
+    LIMIT 4
     ```
 
-    ### Entity Relationships
+    **2. Entity Relationship Discovery**
     ```
     MATCH (e1:Entity {user_id: $user_id, org_id: $org_id})-[r:RELATIONSHIP]->(e2:Entity)
     WHERE e1.entity_type = $entity_type
-    RETURN e1.text, r.relation_type, e2.text
-    ORDER BY e1.text
+    RETURN e1.text, e1.entity_profile, r.relation_type, r.relation_profile, e2.text, e2.entity_profile
     LIMIT 10
     ```
 
-    ---
+    **3. Document Metadata Search**
+    ```
+    MATCH (d:Document {user_id: $user_id, org_id: $org_id})
+    WHERE d.filename CONTAINS $search_term OR d.category = $category
+    RETURN d.filename, d.file_type, d.category, d.source, d.s3_url
+    LIMIT 20
+    ```
 
-    ## GRAPH SCHEMA REFERENCE
+    **4. Structured Data Analysis**
+    ```
+    MATCH (c:Column {user_id: $user_id, org_id: $org_id})-[:HAS_VALUE]->(r:RowValue)
+    WHERE c.column_name CONTAINS $column_name
+    RETURN c.column_name, c.column_profile, collect(r.value) as sample_values
+    LIMIT 20
+    ```
 
-    **Node Properties:**
-    - Document: user_id, org_id, filename, file_type, category, source, s3_url, metadata_*
-    - Page: user_id, org_id, page_number, content, image_s3_url, summary, is_tabular
-    - Entity: user_id, org_id, id, text, entity_type, entity_profile
-    - Column: user_id, org_id, column_name, column_profile
-    - RowValue: user_id, org_id, row_index, column_name, value
+    **5. Multi-Modal Content Discovery**
+    ```
+    MATCH (p:Page {user_id: $user_id, org_id: $org_id})-[:MENTIONS]->(e:Entity)
+    WHERE p.page_number = $page_number
+    RETURN p.page_number, p.content, p.image_s3_url, 
+           collect(e.text) as mentioned_entities, collect(e.entity_type) as entity_types
+    LIMIT 5
+    ```
 
-    **Relationships:**
-    - Document -[:HAS_PAGE]-> Page
-    - Page -[:MENTIONS]-> Entity
-    - Page -[:MENTIONS]-> Column
-    - Column -[:HAS_VALUE]-> RowValue
-    - Entity -[:RELATIONSHIP]-> Entity
+    **6. Deep Relationship Traversal**
+    ```
+    MATCH path = (e1:Entity {user_id: $user_id, org_id: $org_id})-[:RELATIONSHIP*1..3]->(e2:Entity)
+    WHERE e1.text = $entity_text
+    RETURN [node in nodes(path) | node.text] as entity_path,
+           [rel in relationships(path) | rel.relation_type] as relationship_types
+    LIMIT 5
+    ```
 
-    **FORBIDDEN FIELDS:** Page.embedding, Entity.embedding, Column.embedding, RELATIONSHIP.embedding
+    #Critical Usage Guidelines#
 
-    ---
+    **NEVER Retrieve**
+    - .embedding properties from any node type (Page.embedding, Entity.embedding, Column.embedding, RELATIONSHIP.embedding)
+    - Complete node objects without specifying required properties
+    - System-generated internal IDs or debugging information
+    - Raw technical metadata or infrastructure details
 
-    ## CRITICAL EXECUTION RULES
+    **ALWAYS Include**
+    - Security filtering parameters ($user_id, $org_id) in every single query
+    - LIMIT clauses appropriate to content type and performance requirements
+    - Specific property names in RETURN statements for optimal performance
+    - Proper parameter validation before query execution
 
-    ### Syntax Safety (MANDATORY)
-    1. **ONLY use the approved query templates above**
-    2. **NEVER use complex list comprehensions with nested objects**
-    3. **For metadata**: Use the safe WITH clause pattern only
-    4. **Test brace matching**: Every `{` needs `}`, every `[` needs `]`
-    5. **When in doubt**: Choose simpler, safer patterns
+    **Best Practices**
+    - Start with broader discovery queries, then narrow down to specific details
+    - Combine text-based filtering with vector similarity for optimal precision
+    - Use appropriate limits based on content type (4 for pages, 150 for structured data)
+    - Leverage relationship traversal for comprehensive information discovery
+    - Monitor query performance and adjust limits accordingly
 
-    ### Security Requirements (ENFORCED)
-    1. **ALWAYS** include $user_id and $org_id in every query
-    2. **ALWAYS** include a LIMIT clause (max 150)
-    3. **NEVER** return embedding fields
-    4. **USE** parameter syntax ($param) exclusively
-
-    ### Performance Standards
-    1. **Apply** filters early in WHERE clauses
-    2. **Use** ORDER BY for consistent results
-    3. **Leverage** indexes with property matches
-    4. **Break** complex operations into WITH clause stages
-
-    ---
-
-    When processing requests, systematically follow the 5 task steps above, select appropriate approved templates, validate syntax carefully, and provide responses in the specified output format. Prioritize query reliability and execution success over complexity.
+    This tool enables sophisticated knowledge discovery while maintaining enterprise-grade security, performance, and reliability standards.

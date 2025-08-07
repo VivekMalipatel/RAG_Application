@@ -41,28 +41,30 @@ if __name__ == "__main__":
     from langchain_core.messages import HumanMessage
     
     async def test_knowledge_search_agent():
+
+        config = {
+            "configurable": {
+                "thread_id": "test_thread",
+                "user_id": "36cdf650-0eb6-4dfa-a51d-5377cf704700",
+                "org_id": "1"
+            }
+        }
+
         agent = KnowledgeSearchAgent(
             model_kwargs={},
             vlm_kwargs={},
             node_kwargs={},
-            debug=True
+            debug=True,
+            config=config
         )
         
         compiled_agent = await agent.compile(name="KnowledgeSearchAgent")
-        
-        config = {
-            "configurable": {
-                "thread_id": "test_thread",
-                "user_id": "test_user",
-                "org_id": "test_org"
-            }
-        }
         
         print("=== Testing Knowledge Search Agent ===")
         
         test_input = {
             "messages": [
-                HumanMessage(content="Search for all documents in the knowledge graph and show me their metadata.")
+                HumanMessage(content="Search for all documents in the knowledge graph and show me their metadata and summarise their content.")
             ],
             "user_id": config["configurable"]["user_id"],
             "org_id": config["configurable"]["org_id"]
@@ -74,7 +76,7 @@ if __name__ == "__main__":
         
         follow_up_input = {
             "messages": [
-                HumanMessage(content="Now search for some of the entities and their relationships in the knowledge graph.")
+                HumanMessage(content="Now search for some of the pages and describe them.")
             ]
         }
         

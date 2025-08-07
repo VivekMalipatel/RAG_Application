@@ -19,7 +19,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.schema import StreamEvent
 from langchain_core.runnables.utils import Output
 from langchain_core.runnables.base import Input
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage, ToolMessage
 from langgraph.config import get_stream_writer
 from openai import BaseModel
 from agents.utils import _load_prompt

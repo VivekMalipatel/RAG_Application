@@ -42,15 +42,15 @@ class JinaEmbeddings(OpenAIEmbeddings):
             if not parsed_doc or parsed_doc == [] or parsed_doc == "[]":
                 self._logger.debug(f"Processing empty document: {doc}")
                 return None
-            elif isinstance(parsed_doc.get("data"), str):
-                parsed_doc = {"data": [{"type": "text", "text": parsed_doc["data"]}]}
-                return parsed_doc["data"]
             elif isinstance(parsed_doc, list):
                 if not parsed_doc:
                     self._logger.debug(f"Processing empty list document: {doc}")
                     return None
                 else:
                     return parsed_doc
+            elif isinstance(parsed_doc.get("data"), str):
+                parsed_doc = {"data": [{"type": "text", "text": parsed_doc["data"]}]}
+                return parsed_doc["data"]
             else:
                 return parsed_doc["data"]
         except (json.JSONDecodeError, KeyError):
