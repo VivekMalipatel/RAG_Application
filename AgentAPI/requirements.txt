@@ -21,5 +21,5 @@ langgraph-checkpoint-redis
 scrapegraphai
 fastapi_mcp
 langchain_mcp_adapters
-uuid
-dataclasses
+tiktoken
+langchain-aws

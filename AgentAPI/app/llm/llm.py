@@ -17,6 +17,8 @@ from llm.utils import (
 import logging
 import asyncio
 
+import os
+
 
 class LLM:
     def __init__(self, reasoningllm_kwargs: Optional[dict] = None, vlm_kwargs: Optional[dict] = None):
@@ -33,11 +35,10 @@ class LLM:
             "base_url": reasoningllm_kwargs.get("base_url", config.OPENAI_BASE_URL),
             "api_key": reasoningllm_kwargs.get("api_key", config.OPENAI_API_KEY),
             "timeout": reasoningllm_kwargs.get("timeout", config.LLM_TIMEOUT),
-            "max_tokens": reasoningllm_kwargs.get("max_tokens", config.REASONING_LLM_MAX_TOKENS),
             "max_retries": reasoningllm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
             "temperature": reasoningllm_kwargs.get("temperature", config.REASONING_LLM_TEMPERATURE),
             "top_p": reasoningllm_kwargs.get("top_p", config.REASONING_LLM_TOP_P),
-            "frequency_penalty": reasoningllm_kwargs.get("frequency_penalty", config.REASONING_LLM_FREQUENCY_PENALTY),
+            "presence_penalty": reasoningllm_kwargs.get("presence_penalty", config.REASONING_LLM_PRESENCE_PENALTY),
             **reasoning_llm_filtered_kwargs
         }
         
@@ -49,11 +50,10 @@ class LLM:
             "base_url": vlm_kwargs.get("base_url", config.OPENAI_BASE_URL),
             "api_key": vlm_kwargs.get("api_key", config.OPENAI_API_KEY),
             "timeout": reasoningllm_kwargs.get("timeout", config.LLM_TIMEOUT),
-            "max_tokens": reasoningllm_kwargs.get("max_tokens", config.VLM_LLM_MAX_TOKENS),
             "max_retries": reasoningllm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
             "temperature": reasoningllm_kwargs.get("temperature", config.VLM_LLM_TEMPERATURE),
             "top_p": reasoningllm_kwargs.get("top_p", config.VLM_LLM_TOP_P),
-            "frequency_penalty": reasoningllm_kwargs.get("frequency_penalty", config.VLM_LLM_FREQUENCY_PENALTY),
+            "presence_penalty": reasoningllm_kwargs.get("presence_penalty", config.VLM_LLM_PRESENCE_PENALTY),
             **vlm_filtered_kwargs
         }
 

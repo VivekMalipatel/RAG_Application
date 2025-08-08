@@ -1,4 +1,3 @@
-import uuid
 import typing
 import asyncio
 import logging
@@ -29,6 +28,10 @@ from embed.embed import JinaEmbeddings
 from agents.base_agents.base_state import BaseState
 from agents.base_agents.memory.base_checkpointer import BaseMemorySaver
 from agents.base_agents.memory.base_store import BaseMemoryStore
+from agents.base_agents.utils import (
+    count_tokens, optimize_messages_for_tokens, get_messages_to_save, 
+    generate_message_id, should_trim_state, find_second_last_ai_index
+)
 from db.redis import redis
 from config import config as envconfig
 from core.background_executor import submit_background_task_with_redis
@@ -134,29 +137,16 @@ class BaseAgent:
         user_id = config["configurable"]["user_id"]
         org_id = config["configurable"]["org_id"]
         messages = state["messages"]
-        second_last_ai_index = -1
-        ai_count = 0
         
-        for i in range(len(messages) - 1, -1, -1):
-            if isinstance(messages[i], AIMessage):
-                ai_count += 1
-                if ai_count == 2:
-                    second_last_ai_index = i
-                    break
-        
-        if second_last_ai_index != -1:
-            messages_to_save = messages[second_last_ai_index + 1:]
-        else:
-            messages_to_save = messages
+        messages_to_save = get_messages_to_save(messages)
 
         submit_background_task_with_redis(
             self._remember_background_safe,
             user_id, org_id, messages_to_save, config
         )
 
-        num_tokens = state["messages"][-1].usage_metadata.get("total_tokens", 0) if state["messages"][-1].usage_metadata else 0
-
-        if num_tokens >= envconfig.MAX_STATE_TOKENS:
+        if should_trim_state(messages):
+            second_last_ai_index = find_second_last_ai_index(messages)
             if second_last_ai_index != -1:
                 return {"messages": messages[second_last_ai_index:]}
         
@@ -194,7 +184,7 @@ class BaseAgent:
             
             for i, message in enumerate(messages_to_save):
                 try:
-                    message_id = f"{checkpoint_id}_{i}" if checkpoint_id else f"{org_id}_{user_id}_{str(uuid.uuid4())}_{i}"
+                    message_id = generate_message_id(checkpoint_id, org_id, user_id, i)
                     logger.debug(f"Storing message {i+1}/{len(messages_to_save)} with ID: {message_id}")
                     
                     await store.aput(
@@ -219,9 +209,10 @@ class BaseAgent:
             tasks = []
             
             for i, message in enumerate(messages_to_save):
+                message_id = generate_message_id(checkpoint_id, org_id, user_id, i)
                 task = asyncio.create_task(get_store().aput(
                     namespace, 
-                    f"{checkpoint_id}_{i}" if checkpoint_id else f"{org_id}_{user_id}_{str(uuid.uuid4())}_{i}", 
+                    message_id, 
                     {"data": message.content}
                 ))
                 tasks.append(task)
@@ -244,7 +235,7 @@ class BaseAgent:
             namespace = ("memories", user_id)
             try:
                 search_query = last_message.content
-                result = await store.asearch(namespace, query=search_query)
+                result = await store.asearch(namespace, query=search_query, limit=envconfig.MAX_MEMORY_SEARCH_RESULTS)
                 return result
             except Exception as e:
                 self._logger.error(f"User memory search failed: {e}")
@@ -254,7 +245,7 @@ class BaseAgent:
             namespace = ("memories", org_id)
             try:
                 search_query = last_message.content
-                result = await store.asearch(namespace, query=search_query)
+                result = await store.asearch(namespace, query=search_query, limit=envconfig.MAX_MEMORY_SEARCH_RESULTS)
                 return result
             except Exception as e:
                 self._logger.error(f"Org memory search failed: {e}")
@@ -292,15 +283,43 @@ class BaseAgent:
     async def llm_node(self, state: BaseState, config: RunnableConfig):
         memory_messages = await self.retrieve_memory(state, config)
 
-        messages = [SystemMessage(content=self.prompt)] + [HumanMessage(content="<Retrieved Messages from Memory Start>")] + memory_messages + [HumanMessage(content="<Retrieved Messages from Memory End>")] + state["messages"]
+        system_messages = [SystemMessage(content=self.prompt)]
+        memory_wrapper = [
+            HumanMessage(content="<Retrieved Messages from Memory Start>"),
+            *memory_messages,
+            HumanMessage(content="<Retrieved Messages from Memory End>")
+        ]
+        state_messages = state["messages"]
+        
+        optimized_system, optimized_memory, optimized_state, was_optimized, trimmed_messages = optimize_messages_for_tokens(
+            system_messages,
+            memory_wrapper,
+            state_messages,
+            envconfig.MAX_STATE_TOKENS,
+            self._logger
+        )
+        
+        if trimmed_messages:
+            user_id = config["configurable"]["user_id"]
+            org_id = config["configurable"]["org_id"]
+            self._logger.debug(f"Storing {len(trimmed_messages)} trimmed messages in background")
+            submit_background_task_with_redis(
+                self._remember_background_safe,
+                user_id, org_id, trimmed_messages, config
+            )
+        
+        messages = optimized_system + optimized_memory + optimized_state
         
         response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
         
         if self._is_structured_output:
             response = AIMessage(content=json.dumps(response))
-        return {
-            "messages": [response]
-        }
+        
+        if was_optimized and optimized_state != state_messages:
+            self._logger.debug(f"Returning optimized state: {len(optimized_state)} messages + new response")
+            return {"messages": optimized_state + [response]}
+        else:
+            return {"messages": [response]}
 
     def _compile_graph(self, has_tools: bool, **compile_kwargs) -> CompiledStateGraph:
         graph_builder = StateGraph(BaseState)
@@ -395,7 +414,13 @@ class BaseAgent:
         
         config["recursion_limit"] = self._resursion_limit
         #TODO : Temperorily disable thinking
-        config["extra_body"]={"chat_template_kwargs": {"enable_thinking": False}}
+        if "extra_body" not in config:
+            config["extra_body"] = {}
+        if "chat_template_kwargs" not in config["extra_body"]:
+            config["extra_body"]["chat_template_kwargs"] = {}
+        config["extra_body"]["chat_template_kwargs"]["enable_thinking"]=True
+        config["extra_body"]["chat_template_kwargs"]["top_k"]=envconfig.REASONING_LLM_TOP_K
+        config["extra_body"]["chat_template_kwargs"]["min_p"]=envconfig.REASONING_LLM_MIN_P
         
         result = await self._compiled_graph.ainvoke(
             input, 

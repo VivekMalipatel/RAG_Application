@@ -24,7 +24,7 @@ class KnowledgeSearch(BaseModel):
     )
     text_to_embed: Optional[str] = Field(
         default=None,
-        description="Text to convert to embedding vector. Required when query contains $embedding parameter for vector similarity search."
+        description="Text to convert to embedding vector. Required when query contains $query_embedding parameter for vector similarity search."
     )
     
 
@@ -255,11 +255,11 @@ async def knowledge_search_tool(query: str, parameters: Optional[Dict[str, Any]]
         
         parameters = parameters or {}
         
-        if text_to_embed and "$embedding" in query:
+        if text_to_embed and "$query_embedding" in query:
             embedding = await generate_embedding(text_to_embed)
             parameters["embedding"] = embedding
-        elif "$embedding" in query and not text_to_embed:
-            return [{"type": "text", "text": "Error: Query contains $embedding parameter but no text_to_embed provided"}]
+        elif "$query_embedding" in query and not text_to_embed:
+            return [{"type": "text", "text": "Error: Query contains $query_embedding parameter but no text_to_embed provided"}]
         
         query, parameters = validate_and_inject_security_params(query, parameters)
         

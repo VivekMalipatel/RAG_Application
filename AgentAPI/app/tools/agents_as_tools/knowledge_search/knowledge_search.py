@@ -5,6 +5,7 @@ from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage
 from langgraph.config import get_stream_writer
+from typing import Optional, Dict, Any, List
 
 from agents.base_agents.base_state import BaseState
 from agents.base_agents.base_agent import BaseAgent
@@ -32,7 +33,7 @@ def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml"
     infer_schema=True,
     response_format="content"
 )
-async def knowledge_search_agent(prompt : str, config: RunnableConfig) :
+async def knowledge_search_agent(prompt : str, config: RunnableConfig) -> List[Dict[str, Any]] :
 
     org_id : str = config.get("configurable").get("org_id")
 
@@ -68,4 +69,4 @@ async def knowledge_search_agent(prompt : str, config: RunnableConfig) :
         }
 
     result = await compiled_agent.ainvoke(input, config=config)
-    return {"messages": result["messages"], "user_id": config["configurable"]["user_id"], "org_id": config["configurable"]["org_id"]}
+    return [{"type": "text", "text": result["messages"][-1].content}]

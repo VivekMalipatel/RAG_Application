@@ -1,129 +1,124 @@
 knowledge_search_tool: |
-    Execute intelligent Cypher queries against the enterprise knowledge graph database to retrieve relevant information with mandatory security filtering and performance optimization. This tool serves as the direct interface to the knowledge graph, enabling precise information discovery across multi-modal content.
-
-    #Primary Capabilities#
-    - **Multi-Modal Search**: Query across unstructured documents (PDFs, images, text), structured data (CSV, Excel), entities, and relationships
-    - **Vector Similarity Search**: Semantic search using embeddings for context-aware information retrieval
-    - **Text-Based Filtering**: Precise metadata and content filtering using string matching operations
-    - **Relationship Analysis**: Discover and analyze connections between entities, documents, and data points
-    - **Progressive Discovery**: Support for breadth-first exploration and depth-first detailed analysis
-
-    #Security & Performance Framework#
     
-    **MANDATORY Security Requirements**
-    - ALL queries MUST include $user_id and $org_id parameters for data isolation
-    - Queries without both security parameters will be automatically rejected
-    - Parameters are automatically injected from authenticated user session context
-    - Use dollar sign syntax ($param) exclusively - NEVER use curly braces ({param})
-    - Built-in security scanning prevents dangerous operations (APOC, LOAD CSV, DB procedures)
+    Execute Cypher queries against the knowledge graph database with mandatory security filtering and performance optimization. This is a direct interface for precise information retrieval across multi-modal content stored in Neo4j knowledge graphs.
 
-    **Performance Optimization**
-    - **CRITICAL**: EVERY query MUST include LIMIT clause - queries without LIMIT will fail
-    - **MAXIMUM LIMIT**: Never exceed 150 results unless absolutely essential
-    - **Content-Aware Limiting**:
-      * Unstructured documents: Maximum 4 Page nodes (contain images and rich content)
-      * Structured data: Up to 150 RowValue/Column records (text-only data)
-      * Entity searches: 10-20 entities based on profile length and complexity
-      * Relationship searches: 5-10 relationships with full profile data
-    - Automatic query validation and syntax correction for optimal performance
+    **Critical Requirements**
+    - ALL queries MUST include $user_id and $org_id parameters for security. You can assume random placeholder values (e.g., $user_id = 'placeholder_user', $org_id = 'placeholder_org') when generating queries—these will be replaced with actual IDs in postprocessing.
+    - Use dollar sign syntax ($param) exclusively - NEVER curly braces ({param}).
+    - Automatic security scanning prevents dangerous operations.
+    - For any string matching (property-based searches), ALWAYS use partial matching (e.g., CONTAINS or regex) to handle potential misspellings or variations. Perform this iteratively: Start with broad matches, refine in subsequent queries based on results, and narrow down to the ideal document or node. NEVER use exact equality (==) directly, as users may provide incorrect spellings.
 
-    #Knowledge Graph Schema#
+    ### Knowledge Graph Schema Overview
+    This Neo4j graph stores documents and their extracted content, entities, and relationships. All nodes include `user_id` and `org_id` properties for access control (e.g., filter by these in queries). Key nodes, properties, and relationships:
 
-    **Node Types & Key Properties**
-    - **Document**: user_id, org_id, s3_url, source, filename, file_type, category, internal_object_id, task_id, metadata_*
-    - **Page**: user_id, org_id, page_number, content (JSON), image_s3_url, sheet_name, summary, total_rows, total_columns, is_tabular, embedding
-    - **Entity**: user_id, org_id, id, text, entity_type, entity_profile, embedding
-    - **Column**: user_id, org_id, column_name, column_profile, embedding
-    - **RowValue**: user_id, org_id, row_index, column_name, value
-    - **RELATIONSHIP**: user_id, org_id, relation_type, relation_profile, embedding
+    - **Document** node: Represents the root of a document. Properties: `user_id`, `org_id`, `s3_url`, `source`, `filename`, `file_type`, `category`, `internal_object_id`, `task_id`, and optional `metadata_*` fields (e.g., `metadata_key`).
+    - **Page** node: Represents pages or chunks from documents (unstructured, structured, or direct). Properties: `page_number`, `user_id`, `org_id`, `content` (JSON string), `embedding` (vector), optional `image_s3_url`, `sheet_name` (for tabular data), `summary`, `total_rows`, `total_columns`, `is_tabular` (boolean).
+    - **Entity** node: Extracted entities from pages. Properties: `id`, `text`, `entity_type`, `entity_profile`, `user_id`, `org_id`, `embedding` (vector).
+    - **Column** node: For tabular data in structured documents. Properties: `column_name`, `column_profile`, `user_id`, `org_id`, `embedding` (vector).
+    - **RowValue** node: Individual cell values in tabular data. Properties: `row_index`, `column_name`, `value`, `user_id`, `org_id`.
 
-    **Relationship Structure**
-    - Document -[:HAS_PAGE]-> Page (Document contains multiple pages)
-    - Page -[:MENTIONS]-> Entity (Page references entities)
-    - Page -[:MENTIONS]-> Column (Page references structured data columns)
-    - Column -[:HAS_VALUE]-> RowValue (Column contains data values)
-    - Entity -[:RELATIONSHIP]-> Entity (Entity connections and relationships)
-    - RowValue -[:RELATES_TO]-> RowValue (Data value relationships)
+    Relationships:
+    - `Document -[:HAS_PAGE]-> Page`: Links documents to their pages/chunks.
+    - `Page -[:MENTIONS]-> Entity`: Links pages to mentioned entities.
+    - `Page -[:MENTIONS]-> Column`: Links tabular pages to columns (for structured docs).
+    - `Column -[:HAS_VALUE]-> RowValue`: Links columns to their row values.
+    - `Entity -[:RELATIONSHIP {relation_type, relation_profile, embedding (vector)}]-> Entity`: Directed relationships between entities.
+    - `RowValue -[:RELATES_TO]-> RowValue`: Links values within the same row in tabular data.
 
-    #Vector Search Implementation#
-    
-    **Embedding Support**
-    - Use $embedding parameter in queries for semantic similarity search
-    - Provide text_to_embed parameter to automatically generate embeddings via OpenAI API
-    - Available vector indices: page_embedding_index, entity_embedding_index, relationship_embedding_index
-    - Combine vector similarity with metadata filtering for precision results
-    #Query Pattern Examples#
+    Indexes (use these for efficient queries):
+    - Vector indexes for similarity searches: `page_embedding_index` (on Page.embedding), `entity_embedding_index` (on Entity.embedding), `column_embedding_index` (on Column.embedding), `relationship_embedding_index` (on RELATIONSHIP.embedding). All use cosine similarity with dimension from settings.EMBEDDING_DIMENSIONS.
+    - Property indexes: On Document (user_id, org_id), Page (user_id, org_id), Entity (id, entity_type, user_id, org_id), Column (column_name, user_id, org_id), RowValue (row_index, column_name, user_id, org_id).
 
-    **1. Semantic Vector Search on Page Content**
-    ```
-    CALL db.index.vector.queryNodes('page_embedding_index', 5, $embedding)
-    YIELD node, score
-    WHERE node.user_id = $user_id AND node.org_id = $org_id
-    RETURN node.page_number, node.content, node.image_s3_url, score
-    LIMIT 4
-    ```
+    All queries must filter by `user_id` and `org_id` to ensure data isolation (e.g., WHERE n.user_id = $user_id AND n.org_id = $org_id).
 
-    **2. Entity Relationship Discovery**
-    ```
-    MATCH (e1:Entity {user_id: $user_id, org_id: $org_id})-[r:RELATIONSHIP]->(e2:Entity)
-    WHERE e1.entity_type = $entity_type
-    RETURN e1.text, e1.entity_profile, r.relation_type, r.relation_profile, e2.text, e2.entity_profile
-    LIMIT 10
-    ```
+    ### All Ways to Search the Knowledge Graph
+    Generate Cypher queries using these methods, choosing the most appropriate based on the user's request. Combine methods as needed (e.g., vector search + graph traversal). Always parameterize inputs (e.g., $query_embedding, $user_id, $org_id) for security and flexibility. Limit results with LIMIT if unspecified, and use aggregations (e.g., COUNT, COLLECT) for summaries.
 
-    **3. Document Metadata Search**
-    ```
-    MATCH (d:Document {user_id: $user_id, org_id: $org_id})
-    WHERE d.filename CONTAINS $search_term OR d.category = $category
-    RETURN d.filename, d.file_type, d.category, d.source, d.s3_url
-    LIMIT 20
-    ```
+    1. **Vector Similarity Search (Semantic Search on Embeddings)**:
+    - Use for finding similar content, entities, columns, or relationships based on vector embeddings (e.g., via cosine similarity).
+    - Cypher function: `db.index.vector.queryNodes('index_name', $top_k, $query_embedding)` or `db.index.vector.queryRelationships`.
+    - Example: Search for pages similar to a query embedding.
+        ```
+        CALL db.index.vector.queryNodes('page_embedding_index', $top_k, $query_embedding)
+        YIELD node AS p, score
+        WHERE p.user_id = $user_id AND p.org_id = $org_id
+        RETURN p.page_number, p.content, score
+        ORDER BY score DESC
+        LIMIT $limit
+        ```
+    - Variations: Use for Entity, Column, or RELATIONSHIP indexes. Combine with filters (e.g., p.is_tabular = true).
 
-    **4. Structured Data Analysis**
-    ```
-    MATCH (c:Column {user_id: $user_id, org_id: $org_id})-[:HAS_VALUE]->(r:RowValue)
-    WHERE c.column_name CONTAINS $column_name
-    RETURN c.column_name, c.column_profile, collect(r.value) as sample_values
-    LIMIT 20
-    ```
+    2. **Property-Based Search (Exact or Pattern Matching)**:
+    - Use indexes for fast lookups on properties like filename, entity_type, column_name, row_index, or value. Always prioritize partial matching iteratively to handle misspellings—start broad (e.g., CONTAINS $keyword) and refine in follow-up queries.
+    - Example: Partial match for documents by filename (iterative: first broad search, then narrow).
+        ```
+        MATCH (d:Document)
+        WHERE toLower(d.filename) CONTAINS toLower($filename_partial) AND d.category = $category AND d.user_id = $user_id AND d.org_id = $org_id
+        RETURN d.internal_object_id, d.s3_url
+        ORDER BY size(d.filename) ASC  // Refine by relevance in iterations
+        LIMIT $limit
+        ```
+    - Variations: Use CONTAINS for partial matches, regex (e.g., WHERE c.column_name =~ '(?i).*pric.*') for case-insensitive fuzzy matching. Iterate if initial results are too broad or none match exactly.
 
-    **5. Multi-Modal Content Discovery**
-    ```
-    MATCH (p:Page {user_id: $user_id, org_id: $org_id})-[:MENTIONS]->(e:Entity)
-    WHERE p.page_number = $page_number
-    RETURN p.page_number, p.content, p.image_s3_url, 
-           collect(e.text) as mentioned_entities, collect(e.entity_type) as entity_types
-    LIMIT 5
-    ```
+    3. **Graph Traversal and Pattern Matching**:
+    - Traverse relationships to find connected nodes (e.g., entities in a document's pages).
+    - Example: Find all entities mentioned in pages of a specific document.
+        ```
+        MATCH (d:Document {internal_object_id: $doc_id, user_id: $user_id, org_id: $org_id})-[:HAS_PAGE]->(p:Page)-[:MENTIONS]->(e:Entity)
+        RETURN e.id, e.text, e.entity_type, p.page_number
+        ```
+    - Variations: Variable-length paths (e.g., (e1)-[*1..3]-(e2) for multi-hop relationships), or aggregations (e.g., COLLECT(e.text) AS entities).
 
-    **6. Deep Relationship Traversal**
-    ```
-    MATCH path = (e1:Entity {user_id: $user_id, org_id: $org_id})-[:RELATIONSHIP*1..3]->(e2:Entity)
-    WHERE e1.text = $entity_text
-    RETURN [node in nodes(path) | node.text] as entity_path,
-           [rel in relationships(path) | rel.relation_type] as relationship_types
-    LIMIT 5
-    ```
+    4. **Tabular Data Search (For Structured Documents)**:
+    - Query columns, rows, and values in tabular sheets.
+    - Example: Find row values for a specific column in a sheet.
+        ```
+        MATCH (p:Page {sheet_name: $sheet_name, is_tabular: true, user_id: $user_id, org_id: $org_id})-[:MENTIONS]->(c:Column {column_name: $column_name})-[:HAS_VALUE]->(r:RowValue)
+        RETURN r.row_index, r.value
+        ORDER BY r.row_index ASC
+        ```
+    - Variations: Use RELATES_TO for row-wise connections (e.g., MATCH (r1)-[:RELATES_TO]->(r2) WHERE r1.value > $threshold).
 
-    #Critical Usage Guidelines#
+    5. **Relationship-Based Search**:
+    - Query entity relationships or row relations, including vector similarity on relationship embeddings.
+    - Example: Find relationships between two entity types.
+        ```
+        MATCH (e1:Entity {entity_type: $type1})- [r:RELATIONSHIP {relation_type: $rel_type}]->(e2:Entity {entity_type: $type2})
+        WHERE e1.user_id = $user_id AND e1.org_id = $org_id
+        RETURN e1.text, r.relation_type, e2.text
+        ```
+    - Vector example: 
+        ```
+        CALL db.index.vector.queryRelationships('relationship_embedding_index', $top_k, $query_embedding)
+        YIELD relationship AS r, score
+        RETURN r.relation_type, score
+        ```
 
-    **NEVER Retrieve**
-    - .embedding properties from any node type (Page.embedding, Entity.embedding, Column.embedding, RELATIONSHIP.embedding)
-    - Complete node objects without specifying required properties
-    - System-generated internal IDs or debugging information
-    - Raw technical metadata or infrastructure details
+    6. **Aggregation and Summarization**:
+    - Count, collect, or compute stats (e.g., total entities per document).
+    - Example: Count entities per document.
+        ```
+        MATCH (d:Document {user_id: $user_id, org_id: $org_id})-[:HAS_PAGE]->(p)-[:MENTIONS]->(e)
+        RETURN d.filename, COUNT(e) AS entity_count
+        ORDER BY entity_count DESC
+        ```
 
-    **ALWAYS Include**
-    - Security filtering parameters ($user_id, $org_id) in every single query
-    - LIMIT clauses appropriate to content type and performance requirements
-    - Specific property names in RETURN statements for optimal performance
-    - Proper parameter validation before query execution
+    7. **Hybrid Search (Combine Methods)**:
+    - Mix vector search with traversals or properties (e.g., semantic search on pages, then traverse to entities).
+    - Example: Vector search on pages, then get related entities.
+        ```
+        CALL db.index.vector.queryNodes('page_embedding_index', $top_k, $query_embedding)
+        YIELD node AS p, score
+        MATCH (p)-[:MENTIONS]->(e:Entity)
+        WHERE p.user_id = $user_id AND p.org_id = $org_id
+        RETURN p.page_number, e.text, score
+        ```
 
-    **Best Practices**
-    - Start with broader discovery queries, then narrow down to specific details
-    - Combine text-based filtering with vector similarity for optimal precision
-    - Use appropriate limits based on content type (4 for pages, 150 for structured data)
-    - Leverage relationship traversal for comprehensive information discovery
-    - Monitor query performance and adjust limits accordingly
+    ### Guidelines for Generating Queries
+    - **Input Handling**: Accept parameters like $user_id, $org_id, $query_embedding (vector), $top_k (e.g., 5), $limit. If a query involves embeddings, assume they are provided or generated externally.
+    - **Efficiency**: Use indexes, avoid full scans (e.g., prefer MATCH with WHERE on indexed properties). For large results, add LIMIT or pagination.
+    - **Error Handling**: If no results, return an empty list or message. Validate against schema (e.g., don't query non-existent properties).
+    - **Output**: Return query results as a list of dictionaries (e.g., [{ "page_number": 1, "content": "..." }]). If the user asks for explanations, include a brief summary.
+    - **Restrictions**: Never delete or modify data—only read. Always include user_id and org_id filters.
 
-    This tool enables sophisticated knowledge discovery while maintaining enterprise-grade security, performance, and reliability standards.
+    When a user provides a search request (e.g., "Find entities similar to 'AI technology' in documents from org XYZ"), analyze it, select the best method(s), generate the Cypher query, execute it (if possible), and return the results.
