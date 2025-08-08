@@ -327,7 +327,7 @@ class ModelHandler:
             3. Provide detailed profiles and contextual relationships
             4. Handle coreference resolution (pronouns -> actual names)
             5. Consider visual elements in images (charts, diagrams, etc.)
-            6. Be concise - max 15 top entities and relationships (less than 10000 characters total)
+            6. Be concise - max 5 top entities and relationships
 
             OUTPUT FORMAT - Return ONLY valid JSON in this exact format:
             {
@@ -385,36 +385,77 @@ class ModelHandler:
                     }
                 ]
 
-            try:
-                if has_image:
-                    response : ChatCompletion = await self.chat_completion(
-                        model=settings.VLM_MODEL,
-                        messages=[system_message] + image_messages,
-                        max_completion_tokens=settings.VLM_MAX_TOKENS,
-                    )
-                else:
-                    raise ValueError("No image content available, falling back to text-based extraction")
-                
-                if (response and 
-                    hasattr(response, 'choices') and 
-                    response.choices and 
-                    len(response.choices) > 0 and
-                    hasattr(response.choices[0], 'message') and
-                    hasattr(response.choices[0].message, 'content') and
-                    response.choices[0].message.content):
-                    
-                    content = response.choices[0].message.content.strip()
-                    
-                    if content.startswith('```json'):
-                        content = content[7:]
-                    if content.endswith('```'):
-                        content = content[:-3]
-                    content = content.strip()
-                    
+            image_extraction_success = False
+            if has_image:
+                settings.RETRIES = 1 if settings.RETRIES < 1 else settings.RETRIES
+                for attempt in range(settings.RETRIES):
                     try:
-                        parsed_result = json.loads(content)
-                        entities = parsed_result.get("entities", [])
-                        relationships = parsed_result.get("relationships", [])
+                        response : ParsedChatCompletion[EntityRelationSchema] = await self.structured_chat_completion(
+                            model=settings.VLM_MODEL,
+                            messages=[system_message] + image_messages,
+                            response_format=EntityRelationSchema,
+                            max_completion_tokens=settings.VLM_MAX_TOKENS,
+                        )
+                        
+                        if (response and 
+                            hasattr(response, 'choices') and 
+                            response.choices and 
+                            len(response.choices) > 0 and
+                            hasattr(response.choices[0], 'message') and
+                            hasattr(response.choices[0].message, 'parsed') and
+                            response.choices[0].message.parsed):
+                            
+                            parsed_result = response.choices[0].message.parsed
+                            entities = [entity.model_dump() for entity in parsed_result.entities]
+                            relationships = [rel.model_dump() for rel in parsed_result.relationships]
+                            
+                            for entity in entities:
+                                entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
+                            
+                            for rel in relationships:
+                                rel["source"] = rel["source"].lower().replace(" ", "_").replace("-", "_")
+                                rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
+                            
+                            image_extraction_success = True
+                            return {"entities": entities, "relationships": relationships}
+                        else:
+                            logger.warning(f"Attempt {attempt + 1}: Failed to get valid response from image-based extraction")
+                            if attempt == settings.RETRIES - 1:
+                                break
+                            else:
+                                await asyncio.sleep(settings.RETRY_DELAY)
+                                continue
+                        
+                    except Exception as e:
+                        logger.warning(f"Attempt {attempt + 1}: Image-based entity extraction failed: {e}")
+                        if attempt == settings.RETRIES - 1:
+                            break
+                        else:
+                            await asyncio.sleep(settings.RETRY_DELAY)
+                            continue
+            
+            if not image_extraction_success:
+                logger.warning(f"Image-based entity extraction failed after {settings.RETRIES} attempts. Falling back to text-based extraction.")
+                
+                try:
+                    response : ParsedChatCompletion[EntityRelationSchema] = await self.structured_chat_completion(
+                        model=settings.REASONING_MODEL,
+                        messages=[system_message] + text_messages,
+                        response_format=EntityRelationSchema,
+                        max_completion_tokens=settings.REASONING_MAX_TOKENS,
+                    )
+                
+                    if (response and 
+                        hasattr(response, 'choices') and 
+                        response.choices and 
+                        len(response.choices) > 0 and
+                        hasattr(response.choices[0], 'message') and
+                        hasattr(response.choices[0].message, 'parsed') and
+                        response.choices[0].message.parsed):
+                        
+                        parsed_result = response.choices[0].message.parsed
+                        entities = [entity.model_dump() for entity in parsed_result.entities]
+                        relationships = [rel.model_dump() for rel in parsed_result.relationships]
                         
                         for entity in entities:
                             entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
@@ -424,54 +465,6 @@ class ModelHandler:
                             rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
                         
                         return {"entities": entities, "relationships": relationships}
-                    except json.JSONDecodeError as json_e:
-                        logger.warning(f"Failed to parse JSON from image response: {json_e}. Content: {content[:500]}")
-                        raise ValueError("Failed to parse image-based JSON response")
-                else:
-                    raise ValueError("Failed to get valid response from image-based extraction")
-                    
-            except Exception as e:
-                logger.warning(f"Image-based entity extraction failed: {e}. Falling back to text-based extraction.")
-                
-                try:
-                    response : ChatCompletion = await self.chat_completion(
-                        model=settings.REASONING_MODEL,
-                        messages=[system_message] + text_messages,
-                        max_completion_tokens=settings.REASONING_MAX_TOKENS,
-                    )
-                
-                    if (response and 
-                        hasattr(response, 'choices') and 
-                        response.choices and 
-                        len(response.choices) > 0 and
-                        hasattr(response.choices[0], 'message') and
-                        hasattr(response.choices[0].message, 'content') and
-                        response.choices[0].message.content):
-                        
-                        content = response.choices[0].message.content.strip()
-                        
-                        if content.startswith('```json'):
-                            content = content[7:]
-                        if content.endswith('```'):
-                            content = content[:-3]
-                        content = content.strip()
-                        
-                        try:
-                            parsed_result = json.loads(content)
-                            entities = parsed_result.get("entities", [])
-                            relationships = parsed_result.get("relationships", [])
-                            
-                            for entity in entities:
-                                entity["id"] = entity["id"].lower().replace(" ", "_").replace("-", "_")
-                            
-                            for rel in relationships:
-                                rel["source"] = rel["source"].lower().replace(" ", "_").replace("-", "_")
-                                rel["target"] = rel["target"].lower().replace(" ", "_").replace("-", "_")
-                            
-                            return {"entities": entities, "relationships": relationships}
-                        except json.JSONDecodeError as json_e:
-                            logger.error(f"Failed to parse JSON from text response: {json_e}. Content: {content[:500]}")
-                            return {"entities": [], "relationships": []}
                     else:
                         logger.error("Both image and text-based entity extraction failed")
                         return {"entities": [], "relationships": []}
@@ -584,7 +577,7 @@ class ModelHandler:
                     {"role": "user", "content": user_prompt}
                 ],
                 response_format=ColumnProfilesSchema,
-                max_completion_tokens=settings.VLM_MAX_TOKENS,
+                max_completion_tokens=settings.REASONING_MAX_TOKENS,
             )
             
             if (response and 
