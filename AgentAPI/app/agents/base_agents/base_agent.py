@@ -34,7 +34,6 @@ from agents.base_agents.utils import (
 )
 from db.redis import redis
 from config import config as envconfig
-from core.background_executor import submit_background_task_with_redis
 
 @dataclass(frozen=True)
 class AgentConfig:
@@ -47,8 +46,9 @@ class AgentConfig:
 def requires_compile(fn):
     @wraps(fn)
     async def wrapper(self, *args, **kwargs):
-        if not self._compiled_graph:
-            raise ValueError("Agent not compiled. Call compile() first.")
+        if not self._compiled_graph or self._needs_compilation:
+            await self.compile()
+            self._needs_compilation = False
         return await fn(self, *args, **kwargs)
     return wrapper
 
@@ -56,8 +56,9 @@ def requires_compile(fn):
 def requires_compile_generator(fn):
     @wraps(fn)
     async def wrapper(self, *args, **kwargs):
-        if not self._compiled_graph:
-            raise ValueError("Agent not compiled. Call compile() first.")
+        if not self._compiled_graph or self._needs_compilation:
+            await self.compile()
+            self._needs_compilation = False
         async for item in fn(self, *args, **kwargs):
             yield item
     return wrapper
@@ -89,6 +90,8 @@ class BaseAgent:
         self._llm = LLM(self._config.model_kwargs, self._config.vlm_kwargs)
         self._tools: Sequence[Union[typing.Dict[str, Any], type, Callable, BaseTool]] = []
         self._logger = logging.getLogger(__name__)
+        self._needs_compilation = False
+        self._memory_tasks: list[asyncio.Task] = []
         
         self._checkpointer = None
         self._store = None
@@ -103,7 +106,7 @@ class BaseAgent:
             prompt = "You are a helpful assistant."
         
         base_prompt = _load_prompt("base_agent", base_dir=Path(__file__).parent)
-        self.prompt = prompt + base_prompt
+        self.prompt = f"User ID : {config['configurable']['user_id']}, Org ID : {config['configurable']['org_id']}" + prompt + base_prompt
 
     def _validate_tools(self, tools: Sequence[Union[typing.Dict[str, Any], type, Callable, BaseTool]]):
         for tool in tools:
@@ -130,7 +133,7 @@ class BaseAgent:
         self._validate_tools(tools)
         self._tools = tools
         self._llm = self._llm.bind_tools(tools, tool_choice=tool_choice, **kwargs)
-        self.compile()
+        self._needs_compilation = True
         return self
 
     async def remember(self, state: BaseState, config: RunnableConfig):
@@ -140,10 +143,8 @@ class BaseAgent:
         
         messages_to_save = get_messages_to_save(messages)
 
-        submit_background_task_with_redis(
-            self._remember_background_safe,
-            user_id, org_id, messages_to_save, config
-        )
+        task = asyncio.create_task(self._remember_background(user_id, org_id, messages_to_save, config))
+        self._memory_tasks.append(task)
 
         if should_trim_state(messages):
             second_last_ai_index = find_second_last_ai_index(messages)
@@ -151,56 +152,6 @@ class BaseAgent:
                 return {"messages": messages[second_last_ai_index:]}
         
         return state
-
-    async def _remember_background_safe(self, redis_client, user_id: str, org_id: str, messages_to_save: list, config: RunnableConfig):
-        try:
-            from agents.base_agents.memory.base_store import BaseMemoryStore
-            from embed.embed import JinaEmbeddings
-            from config import config as envconfig
-            
-            logger = logging.getLogger(__name__)
-            logger.debug(f"Starting background memory task for user {user_id}, {len(messages_to_save)} messages")
-            
-            index_config: IndexConfig = {
-                "dims": envconfig.MULTIMODEL_EMBEDDING_MODEL_DIMS,
-                "embed": JinaEmbeddings(
-                    model=envconfig.MULTIMODEL_EMBEDDING_MODEL,
-                    base_url=envconfig.OPENAI_BASE_URL, 
-                    api_key=envconfig.OPENAI_API_KEY
-                ),
-                "ann_index_config": {"vector_type": "vector"},
-                "distance_type": "cosine",
-            }
-
-            store = BaseMemoryStore(
-                redis_client=redis_client,
-                index=index_config,
-            )
-            await store.setup()
-            logger.debug("Memory store setup completed")
-
-            namespace = ("memories", user_id)
-            checkpoint_id = config.get("checkpoint_id")
-            
-            for i, message in enumerate(messages_to_save):
-                try:
-                    message_id = generate_message_id(checkpoint_id, org_id, user_id, i)
-                    logger.debug(f"Storing message {i+1}/{len(messages_to_save)} with ID: {message_id}")
-                    
-                    await store.aput(
-                        namespace, 
-                        message_id, 
-                        {"data": message.content}
-                    )
-                    logger.debug(f"Successfully stored message {i+1}/{len(messages_to_save)}")
-                except Exception as e:
-                    logger.error(f"Failed to store message {i+1}/{len(messages_to_save)}: {e}")
-                    continue
-            
-            logger.debug(f"Background memory task completed for user {user_id}")
-        
-        except Exception as e:
-            logger.error(f"Background remember task failed: {e}", exc_info=True)
 
     async def _remember_background(self, user_id: str, org_id: str, messages_to_save: list, config: RunnableConfig):
         try:
@@ -222,6 +173,16 @@ class BaseAgent:
         
         except Exception as e:
             self._logger.error(f"Background remember task failed: {e}")
+
+    async def wait_for_memory_tasks(self):
+        if self._memory_tasks:
+            try:
+                await asyncio.gather(*self._memory_tasks, return_exceptions=True)
+                self._logger.debug(f"Completed {len(self._memory_tasks)} memory tasks")
+            except Exception as e:
+                self._logger.error(f"Error waiting for memory tasks: {e}")
+            finally:
+                self._memory_tasks.clear()
 
     async def retrieve_memory(self, state: BaseState, config: RunnableConfig):
         user_id = config["configurable"]["user_id"]
@@ -251,7 +212,11 @@ class BaseAgent:
                 self._logger.error(f"Org memory search failed: {e}")
                 return []
         
-        user_memory, org_memory = await asyncio.gather(get_user_memory(), get_org_memory())
+        user_memory_task = asyncio.create_task(get_user_memory())
+        org_memory_task = asyncio.create_task(get_org_memory())
+        
+        user_memory = await user_memory_task
+        org_memory = await org_memory_task
 
         if not user_memory and not org_memory:
             writer(f"Memory retrieved......\n\n")
@@ -261,18 +226,19 @@ class BaseAgent:
 
         async def process_user_memory():
             if not user_memory:
-                return [HumanMessage(content="No user memory found.")]
-            return [HumanMessage(content=user_msg.value.get("data", "")) for user_msg in user_memory]
+                return [SystemMessage(content="No user memory found.")]
+            return [SystemMessage(content=user_msg.value.get("data", "")) for user_msg in user_memory]
 
         async def process_org_memory():
             if not org_memory:
-                return [HumanMessage(content="No organization memory found.")]
-            return [HumanMessage(content=org_msg.value.get("data", "")) for org_msg in org_memory]
+                return [SystemMessage(content="No organization memory found.")]
+            return [SystemMessage(content=org_msg.value.get("data", "")) for org_msg in org_memory]
 
-        user_messages, org_messages = await asyncio.gather(
-            process_user_memory(),
-            process_org_memory()
-        )
+        user_messages_task = asyncio.create_task(process_user_memory())
+        org_messages_task = asyncio.create_task(process_org_memory())
+        
+        user_messages = await user_messages_task
+        org_messages = await org_messages_task
         
         memory_messages.extend(user_messages)
         memory_messages.extend(org_messages)
@@ -303,10 +269,8 @@ class BaseAgent:
             user_id = config["configurable"]["user_id"]
             org_id = config["configurable"]["org_id"]
             self._logger.debug(f"Storing {len(trimmed_messages)} trimmed messages in background")
-            submit_background_task_with_redis(
-                self._remember_background_safe,
-                user_id, org_id, trimmed_messages, config
-            )
+            task = asyncio.create_task(self._remember_background(user_id, org_id, trimmed_messages, config))
+            self._memory_tasks.append(task)
         
         messages = optimized_system + optimized_memory + optimized_state
         
@@ -416,11 +380,12 @@ class BaseAgent:
         #TODO : Temperorily disable thinking
         if "extra_body" not in config:
             config["extra_body"] = {}
-        if "chat_template_kwargs" not in config["extra_body"]:
-            config["extra_body"]["chat_template_kwargs"] = {}
-        config["extra_body"]["chat_template_kwargs"]["enable_thinking"]=True
-        config["extra_body"]["chat_template_kwargs"]["top_k"]=envconfig.REASONING_LLM_TOP_K
-        config["extra_body"]["chat_template_kwargs"]["min_p"]=envconfig.REASONING_LLM_MIN_P
+        # if "chat_template_kwargs" not in config["extra_body"]:
+        #     config["extra_body"]["chat_template_kwargs"] = {}
+        # # config["extra_body"]["chat_template_kwargs"]["enable_thinking"]=True
+        config["extra_body"]["top_k"]=envconfig.REASONING_LLM_TOP_K
+        config["extra_body"]["min_p"]=envconfig.REASONING_LLM_MIN_P
+        config["extra_body"]["repetition_penalty"] = envconfig.REASONING_LLM_REPETITION_PENALTY
         
         result = await self._compiled_graph.ainvoke(
             input, 

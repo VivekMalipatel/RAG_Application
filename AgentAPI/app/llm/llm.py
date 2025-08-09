@@ -7,9 +7,11 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.chat_models import LanguageModelInput
 from langchain_core.messages import HumanMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig, Runnable
+from langgraph.config import get_stream_writer
 from langchain_core.runnables.utils import Output
 from langchain_core.runnables.schema import StreamEvent
 from pydantic import BaseModel
+from openai import AsyncOpenAI
 from config import config
 from llm.utils import (
     has_media, process_media_with_vlm
@@ -43,23 +45,39 @@ class LLM:
         }
         
         vlm_filtered_kwargs = {k: v for k, v in vlm_kwargs.items() 
-                              if k not in ["model", "model_provider", "base_url", "api_key"]}
+                              if k not in ["model", "model_provider", "base_url", "api_key", "timeout", "max_retries"]}
         vlm_config = {
             "model": vlm_kwargs.get("model", config.VLM_MODEL),
             "model_provider": vlm_kwargs.get("model_provider", config.MODEL_PROVIDER),
             "base_url": vlm_kwargs.get("base_url", config.OPENAI_BASE_URL),
             "api_key": vlm_kwargs.get("api_key", config.OPENAI_API_KEY),
-            "timeout": reasoningllm_kwargs.get("timeout", config.LLM_TIMEOUT),
-            "max_retries": reasoningllm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
-            "temperature": reasoningllm_kwargs.get("temperature", config.VLM_LLM_TEMPERATURE),
-            "top_p": reasoningllm_kwargs.get("top_p", config.VLM_LLM_TOP_P),
-            "presence_penalty": reasoningllm_kwargs.get("presence_penalty", config.VLM_LLM_PRESENCE_PENALTY),
+            "timeout": vlm_kwargs.get("timeout", config.LLM_TIMEOUT),
+            "max_retries": vlm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
+            "temperature": vlm_kwargs.get("temperature", config.VLM_LLM_TEMPERATURE),
+            "top_p": vlm_kwargs.get("top_p", config.VLM_LLM_TOP_P),
+            "top_k": vlm_kwargs.get("top_k", config.VLM_LLM_TOP_K),
+            "min_p": vlm_kwargs.get("min_p", config.VLM_LLM_MIN_P),
+            "repetition_penalty": vlm_kwargs.get("repetition_penalty", config.VLM_LLM_REPETITION_PENALTY),
+            "presence_penalty": vlm_kwargs.get("presence_penalty", config.VLM_LLM_PRESENCE_PENALTY),
             **vlm_filtered_kwargs
         }
 
         self.reasoning_llm: BaseChatModel = init_chat_model(**reasoning_llm_config)
 
-        self.vlm: BaseChatModel = init_chat_model(**vlm_config)
+        self.vlm_client = AsyncOpenAI(
+            api_key=vlm_config["api_key"],
+            base_url=vlm_config["base_url"],
+            timeout=vlm_config["timeout"],
+            max_retries=vlm_config["max_retries"]
+        )
+        self.vlm_model = vlm_config["model"]
+        self.vlm_model_kwargs = {
+            # "temperature": vlm_config["temperature"],
+            # "top_p": vlm_config["top_p"],
+            # "presence_penalty": vlm_config["presence_penalty"],
+            # "extra_body":{"top_k": vlm_config["top_k"], "min_p": vlm_config["min_p"]},
+            **vlm_filtered_kwargs
+        }
         self.tools = []
         self.logger = logging.getLogger(__name__)
     
@@ -93,10 +111,12 @@ class LLM:
                       config: RunnableConfig | None = None,
                       **kwargs: Any)  -> Output :
         if has_media(input):
-            processed_messages = await process_media_with_vlm(self.vlm, input)
+            writer = get_stream_writer()
+            writer(f"Analysing Images.....\n\n")
+            processed_messages = await process_media_with_vlm(self.vlm_client, self.vlm_model, input, **self.vlm_model_kwargs)
         else:
             processed_messages = input
-
+        # processed_messages = input
         if self.tools:
             return await self.reasoning_llm_with_tools.ainvoke(processed_messages, config=config, **kwargs)
         else:
@@ -107,10 +127,12 @@ class LLM:
                       config: RunnableConfig | None = None,
                       **kwargs: Any | None) -> AsyncIterator[Output]:
         if has_media(input):
-            processed_messages = await process_media_with_vlm(self.vlm, input)
+            writer = get_stream_writer()
+            writer(f"Analysing Images.....\n\n")
+            processed_messages = await process_media_with_vlm(self.vlm_client, self.vlm_model, input, **self.vlm_model_kwargs)
         else:
             processed_messages = input
-        
+        # processed_messages = input
         if self.tools:
             async for chunk in self.reasoning_llm_with_tools.astream(processed_messages, config=config, **kwargs):
                 yield chunk
@@ -131,10 +153,12 @@ class LLM:
                              exclude_tags: Sequence[str] | None = None,
                              **kwargs: Any) -> AsyncIterator[StreamEvent] :
         if has_media(input):
-            processed_messages = await process_media_with_vlm(self.vlm, input)
+            writer = get_stream_writer()
+            writer(f"Analysing Images.....\n\n")
+            processed_messages = await process_media_with_vlm(self.vlm_client, self.vlm_model, input, **self.vlm_model_kwargs)
         else:
             processed_messages = input
-
+        # processed_messages = input
         if self.tools:
             async for event in self.reasoning_llm_with_tools.astream_events(
                 processed_messages, 
@@ -173,9 +197,12 @@ class LLM:
         processed_inputs = []
         for messages in inputs:
             if has_media(messages):
-                processed_messages = await process_media_with_vlm(self.vlm, messages)
+                writer = get_stream_writer()
+                writer(f"Analysing Images.....\n\n")                
+                processed_messages = await process_media_with_vlm(self.vlm_client, self.vlm_model, messages, **self.vlm_model_kwargs)
             else:
                 processed_messages = messages
+            # processed_messages = messages
             processed_inputs.append(processed_messages)
         
         if self.tools:

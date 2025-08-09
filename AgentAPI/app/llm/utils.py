@@ -1,13 +1,26 @@
 from typing import List, Dict, Any, Union
 import asyncio
 import logging
+import yaml
+from pathlib import Path
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, SystemMessage
 from langchain_core.messages.content_blocks import is_data_content_block
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain import embeddings
 from langchain_core.embeddings import Embeddings
 from langchain_core.runnables import Runnable
-from config import config
+from openai import AsyncOpenAI
+
+
+def load_media_description_prompt() -> str:
+    """Load media description prompt from prompt.yaml file"""
+    llm_prompt_path = Path(__file__).parent / "prompt.yaml"
+    try:
+        with open(llm_prompt_path, 'r', encoding='utf-8') as f:
+            prompt_data = yaml.safe_load(f)
+            return prompt_data.get("MEDIA_DESCRIPTION_PROMPT")
+    except (FileNotFoundError, yaml.YAMLError, KeyError):
+        return "Provide an extremely detailed description of this media content. Include every visible/audible element, text, object, person, color, layout, sounds, speech, and any other relevant details without missing anything."
 
 
 def _generate_media_key(block: dict) -> str:
@@ -139,7 +152,7 @@ def is_media_block(block: dict, media_types: List[str]) -> bool:
     return False
 
 
-async def get_media_descriptions_batch(vlm: BaseChatModel, media_blocks_info: List[Dict], chat_context: str = "") -> List[str]:
+async def get_media_descriptions_batch(vlm_client: AsyncOpenAI, model: str, media_blocks_info: List[Dict], chat_context: str = "", **model_kwargs) -> List[str]:
     logger = logging.getLogger(__name__)
     vlm_tasks = []
     
@@ -151,11 +164,11 @@ async def get_media_descriptions_batch(vlm: BaseChatModel, media_blocks_info: Li
             human_content.insert(0, {"type": "text", "text": chat_context})
         
         messages = [
-            SystemMessage(content=config.MEDIA_DESCRIPTION_PROMPT),
-            HumanMessage(content=human_content)
+            {"role": "system", "content": load_media_description_prompt()},
+            {"role": "user", "content": human_content}
         ]
         
-        vlm_tasks.append(safe_vlm_invoke(vlm, messages))
+        vlm_tasks.append(safe_vlm_invoke(vlm_client, model, messages, **model_kwargs))
     
     descriptions = await asyncio.gather(*vlm_tasks, return_exceptions=True)
     
@@ -167,8 +180,7 @@ async def get_media_descriptions_batch(vlm: BaseChatModel, media_blocks_info: Li
             error_count += 1
             processed_descriptions.append(f"[Error processing {media_blocks_info[i]['media_type']}: {str(desc)}]")
         else:
-            content = desc.content if hasattr(desc, 'content') else str(desc)
-            processed_descriptions.append(content)
+            processed_descriptions.append(desc)
     
     if error_count > 0:
         logger.warning(f"Failed to process {error_count} out of {len(media_blocks_info)} media blocks")
@@ -176,14 +188,19 @@ async def get_media_descriptions_batch(vlm: BaseChatModel, media_blocks_info: Li
     return processed_descriptions
 
 
-async def safe_vlm_invoke(vlm: BaseChatModel, messages: List[BaseMessage]) -> Any:
+async def safe_vlm_invoke(vlm_client: AsyncOpenAI, model: str, messages: List[Dict], **model_kwargs) -> str:
     logger = logging.getLogger(__name__)
     try:
-        return await vlm.ainvoke(messages)
+        response = await vlm_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=False,
+            **model_kwargs
+        )
+        return response.choices[0].message.content
     except Exception as e:
         logger.error(f"VLM invocation failed: {e}")
         raise e
-
 
 async def replace_media_blocks_in_message(
     message: BaseMessage, 
@@ -224,7 +241,7 @@ async def replace_media_blocks_in_message(
     return type(message)(content=new_content, **message_attrs)
 
 
-async def process_media_with_vlm(vlm: BaseChatModel, messages: List[BaseMessage], media_types: List[str] = None) -> List[BaseMessage]:
+async def process_media_with_vlm(vlm_client: AsyncOpenAI, model: str, messages: List[BaseMessage], media_types: List[str] = None, **model_kwargs) -> List[BaseMessage]:
     if media_types is None:
         media_types = ["image", "audio", "video"]
     
@@ -269,7 +286,7 @@ async def process_media_with_vlm(vlm: BaseChatModel, messages: List[BaseMessage]
     ]
     
     chat_context = extract_chat_context(messages)
-    unique_descriptions = await get_media_descriptions_batch(vlm, unique_media_list, chat_context)
+    unique_descriptions = await get_media_descriptions_batch(vlm_client, model, unique_media_list, chat_context, **model_kwargs)
     
     media_key_to_description = {
         list(unique_media_blocks.keys())[i]: desc
@@ -291,14 +308,6 @@ async def process_media_with_vlm(vlm: BaseChatModel, messages: List[BaseMessage]
     return processed_messages
 
 
-async def get_image_description(vlm: BaseChatModel, vlm_messages: List[Dict]) -> str:
-    try:
-        response = await vlm.ainvoke(vlm_messages)
-        return response.content if hasattr(response, 'content') else str(response)
-    except Exception as e:
-        return f"[Error processing image: {str(e)}]"
-
-
 def extract_chat_context(messages: List[BaseMessage]) -> str:
     text_blocks = []
     
@@ -315,4 +324,5 @@ def extract_chat_context(messages: List[BaseMessage]) -> str:
 
 
 def init_embeddings(model: str)-> Union[Embeddings, Runnable[Any, list[float]]]:
+    from config import config
     return embeddings.init_embeddings(model=model, provider="openai", base_url=config.OPENAI_BASE_URL, api_key=config.OPENAI_API_KEY)

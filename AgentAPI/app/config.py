@@ -20,19 +20,21 @@ class Config:
     EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", 3600))
     EMBEDDING_CLEINT_RETRIES: int = int(os.getenv("EMBEDDING_CLEINT_RETRIES", 3))
 
-    REASONING_LLM_TEMPERATURE: float = float(os.getenv("REASONING_LLM_TEMPERATURE", 0.7))
-    REASONING_LLM_TOP_P: float = float(os.getenv("REASONING_LLM_TOP_P", 0.8))
-    REASONING_LLM_PRESENCE_PENALTY: float = float(os.getenv("REASONING_LLM_PRESENCE_PENALTY", 1.5))
+    REASONING_LLM_TEMPERATURE: float = float(os.getenv("REASONING_LLM_TEMPERATURE", 0.6))
+    REASONING_LLM_TOP_P: float = float(os.getenv("REASONING_LLM_TOP_P", 0.95))
+    REASONING_LLM_REPETITION_PENALTY: float = float(os.getenv("REASONING_LLM_REPETITION_PENALTY", 1.05))
+    REASONING_LLM_PRESENCE_PENALTY: float = float(os.getenv("REASONING_LLM_PRESENCE_PENALTY", 1.25))
     REASONING_LLM_TOP_K: int = int(os.getenv("REASONING_LLM_TOP_K", 20))
     REASONING_LLM_MIN_P: int = int(os.getenv("REASONING_LLM_MIN_P", 0))
 
     VLM_LLM_TEMPERATURE: float = float(os.getenv("VLM_LLM_TEMPERATURE", 0.1))
-    VLM_LLM_TOP_P: float = float(os.getenv("VLM_LLM_TOP_P", 0.1))
+    VLM_LLM_TOP_P: float = float(os.getenv("VLM_LLM_TOP_P", 0.95))
+    VLM_LLM_REPETITION_PENALTY: float = float(os.getenv("VLM_LLM_REPETITION_PENALTY", 1.05))
     VLM_LLM_PRESENCE_PENALTY: float = float(os.getenv("VLM_LLM_PRESENCE_PENALTY", 1.5))
+    VLM_LLM_TOP_K: int = int(os.getenv("REASONING_LLM_TOP_K", 20))
+    VLM_LLM_MIN_P: int = int(os.getenv("REASONING_LLM_MIN_P", 0))
 
     MAX_MEMORY_SEARCH_RESULTS: int = int(os.getenv("MAX_MEMORY_SEARCH_RESULTS", 3))
-
-    BACKGROUND_TASK_MAX_WORKERS: int = int(os.getenv("BACKGROUND_TASK_MAX_WORKERS", 1))
 
     INDEXER_API_BASE_URL: str = os.getenv("INDEXER_API_BASE_URL")
 
@@ -41,11 +43,6 @@ class Config:
     REDIS_PORT: int = int(os.getenv("REDIS_PORT"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD")
     REDIS_DB: int = int(os.getenv("REDIS_DB"))
-
-    # Prompt Configuration
-    MEDIA_DESCRIPTION_PROMPT: str = os.getenv(
-        "MEDIA_DESCRIPTION_PROMPT", "Provide an extremely detailed description of this media content. Include every visible/audible element, text, object, person, color, layout, sounds, speech, and any other relevant details without missing anything."
-    )
 
     # Searx Configuration
     SEARX_URL: str = "https://websearch.gauravshivaprasad.com"
