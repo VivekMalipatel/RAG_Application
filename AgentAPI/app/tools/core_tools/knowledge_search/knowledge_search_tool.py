@@ -26,8 +26,6 @@ class KnowledgeSearch(BaseModel):
         default=None,
         description="Text to convert to embedding vector. Required when query contains $query_embedding parameter for vector similarity search."
     )
-    
-
 
 def validate_cypher_syntax(query: str) -> tuple[bool, str, str]:
     """
@@ -59,7 +57,7 @@ def validate_cypher_syntax(query: str) -> tuple[bool, str, str]:
         return False, corrected_query, f"Mismatched parentheses: {open_parens} open, {close_parens} close"
     
     if '$user_id' not in corrected_query or '$org_id' not in corrected_query:
-        return False, corrected_query, "Missing required security parameters ($user_id and $org_id)"
+        return False, corrected_query, "Missing required security parameters ($user_id and $org_id). Put some random user_id and org_id in the query and the system will automatically inject the actual values."
     
     dangerous_patterns = [
         (r'CALL\s+apoc\.', "APOC procedure calls not allowed"),
@@ -257,7 +255,7 @@ async def knowledge_search_tool(query: str, parameters: Optional[Dict[str, Any]]
         
         if text_to_embed and "$query_embedding" in query:
             embedding = await generate_embedding(text_to_embed)
-            parameters["embedding"] = embedding
+            parameters["query_embedding"] = embedding
         elif "$query_embedding" in query and not text_to_embed:
             return [{"type": "text", "text": "Error: Query contains $query_embedding parameter but no text_to_embed provided"}]
         

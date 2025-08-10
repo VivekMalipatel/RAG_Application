@@ -377,15 +377,15 @@ class BaseAgent:
                       **kwargs: Any) -> dict[str, Any] | Any:
         
         config["recursion_limit"] = self._resursion_limit
-        #TODO : Temperorily disable thinking
-        if "extra_body" not in config:
-            config["extra_body"] = {}
-        # if "chat_template_kwargs" not in config["extra_body"]:
-        #     config["extra_body"]["chat_template_kwargs"] = {}
-        # # config["extra_body"]["chat_template_kwargs"]["enable_thinking"]=True
-        config["extra_body"]["top_k"]=envconfig.REASONING_LLM_TOP_K
-        config["extra_body"]["min_p"]=envconfig.REASONING_LLM_MIN_P
-        config["extra_body"]["repetition_penalty"] = envconfig.REASONING_LLM_REPETITION_PENALTY
+        # #TODO : Temperorily disable thinking
+        # if "extra_body" not in config:
+        #     config["extra_body"] = {}
+        # # if "chat_template_kwargs" not in config["extra_body"]:
+        # #     config["extra_body"]["chat_template_kwargs"] = {}
+        # # # config["extra_body"]["chat_template_kwargs"]["enable_thinking"]=True
+        # config["extra_body"]["top_k"]=envconfig.REASONING_LLM_TOP_K
+        # config["extra_body"]["min_p"]=envconfig.REASONING_LLM_MIN_P
+        # config["extra_body"]["repetition_penalty"] = envconfig.REASONING_LLM_REPETITION_PENALTY
         
         result = await self._compiled_graph.ainvoke(
             input, 

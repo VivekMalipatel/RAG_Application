@@ -1,5 +1,4 @@
 knowledge_search_tool: |
-    
     Execute Cypher queries against the knowledge graph database with mandatory security filtering and performance optimization. This is a direct interface for precise information retrieval across multi-modal content stored in Neo4j knowledge graphs.
 
     **Critical Requirements**
@@ -11,11 +10,15 @@ knowledge_search_tool: |
     ### Knowledge Graph Schema Overview
     This Neo4j graph stores documents and their extracted content, entities, and relationships. All nodes include `user_id` and `org_id` properties for access control (e.g., filter by these in queries). Key nodes, properties, and relationships:
 
-    - **Document** node: Represents the root of a document. Properties: `user_id`, `org_id`, `s3_url`, `source`, `filename`, `file_type`, `category`, `internal_object_id`, `task_id`, and optional `metadata_*` fields (e.g., `metadata_key`).
-    - **Page** node: Represents pages or chunks from documents (unstructured, structured, or direct). Properties: `page_number`, `user_id`, `org_id`, `content` (JSON string), `embedding` (vector), optional `image_s3_url`, `sheet_name` (for tabular data), `summary`, `total_rows`, `total_columns`, `is_tabular` (boolean).
-    - **Entity** node: Extracted entities from pages. Properties: `id`, `text`, `entity_type`, `entity_profile`, `user_id`, `org_id`, `embedding` (vector).
-    - **Column** node: For tabular data in structured documents. Properties: `column_name`, `column_profile`, `user_id`, `org_id`, `embedding` (vector).
-    - **RowValue** node: Individual cell values in tabular data. Properties: `row_index`, `column_name`, `value`, `user_id`, `org_id`.
+    - **Document** node: Represents the root of a document. Properties: `user_id`, `org_id`, `s3_url`, `source`, `filename`, `file_type`, `category`, `internal_object_id`, `task_id`, and optional `metadata_*` fields (e.g., `metadata_key`). -> This is where you always start your search from, as this is the root node for all the documents.
+    - **Page** node: Represents pages or chunks from documents (unstructured, structured, or direct). Properties: `page_number`, `user_id`, `org_id`, `content` (JSON string), `embedding` (vector), optional `image_s3_url`, `sheet_name` (for tabular data), `summary`, `total_rows`, `total_columns`, `is_tabular` (boolean). -> This is the node where you will get the content of the document in the "content" field and the embedding related to the content in the "embedding" field. If you want to summarise the content in that document, you need to retrivee all these page nodes for the document node and then summarise the content field.
+    - **Entity** node: Extracted entities from pages. Properties: `id`, `text`, `entity_type`, `entity_profile`, `user_id`, `org_id`, `embedding` (vector). -> Use this for named entities, keywords, or concepts based search
+    - **Column** node: For tabular data in structured documents. Properties: `column_name`, `column_profile`, `user_id`, `org_id`, `embedding` (vector). -> Use this for column name based search
+    - **RowValue** node: Individual cell values in tabular data. Properties: `row_index`, `column_name`, `value`, `user_id`, `org_id`. -> Use this for cell value based search but mostly you will need to get to the row value through the column node. But you can also do row based search to backtrack to the column and page.
+
+    Search Hierarchy:
+    Document -> Page -> (Entity, Column -> RowValue)
+    you can do it reverse too, RowValue -> Column -> Page -> Document, to backtrack from a cell value to the document it came from, however once you found the document, you will need to get all the page nodes for that document to get the content of the document.
 
     Relationships:
     - `Document -[:HAS_PAGE]-> Page`: Links documents to their pages/chunks.
@@ -47,6 +50,7 @@ knowledge_search_tool: |
         LIMIT $limit
         ```
     - Variations: Use for Entity, Column, or RELATIONSHIP indexes. Combine with filters (e.g., p.is_tabular = true).
+    - This is a reliable method for search, as this will be using a multimodel embedding vector search, you can just do a text search and get all the documents (both visual and text) that are similar to the query.
 
     2. **Property-Based Search (Exact or Pattern Matching)**:
     - Use indexes for fast lookups on properties like filename, entity_type, column_name, row_index, or value. Always prioritize partial matching iteratively to handle misspellings—start broad (e.g., CONTAINS $keyword) and refine in follow-up queries.

@@ -49,7 +49,7 @@ async def knowledge_search_agent(prompt : str, config: RunnableConfig) -> List[D
     }
 
     writer = get_stream_writer()
-    writer(f"Knowledge Search Agent invoked with '{prompt}' as instruction")
+    writer(f"Knowledge Search Agent invoked with '{prompt}' as instruction\n\n")
     knowledge_search_agent = KnowledgeSearchAgent(
                                 config=config,
                                 model_kwargs={},
