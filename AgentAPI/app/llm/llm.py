@@ -8,11 +8,15 @@ from langchain_core.language_models.chat_models import LanguageModelInput
 from langchain_core.messages import HumanMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig, Runnable
 from langgraph.config import get_stream_writer
-from langchain_core.runnables.utils import Output
+from langchain_core.runnables.utils import Output, Input
 from langchain_core.runnables.schema import StreamEvent
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 from config import config
+from typing import (
+    Optional
+)
+
 from llm.utils import (
     has_media, process_media_with_vlm
 )
@@ -107,9 +111,10 @@ class LLM:
         return self
 
     async def ainvoke(self,
-                      input: LanguageModelInput,
-                      config: RunnableConfig | None = None,
-                      **kwargs: Any)  -> Output :
+                      input: Input,
+                      config: Optional[RunnableConfig] = None,
+                      **kwargs: Any
+                    )  -> Output :
         if has_media(input):
             writer = get_stream_writer()
             writer(f"Analysing Images.....\n\n")
@@ -123,9 +128,10 @@ class LLM:
             return await self.reasoning_llm.ainvoke(processed_messages, config=config, **kwargs)
 
     async def astream(self,
-                      input: LanguageModelInput,
-                      config: RunnableConfig | None = None,
-                      **kwargs: Any | None) -> AsyncIterator[Output]:
+                      input: Input,
+                      config: Optional[RunnableConfig] = None,
+                      **kwargs: Optional[Any]
+                    ) -> AsyncIterator[Output]:
         if has_media(input):
             writer = get_stream_writer()
             writer(f"Analysing Images.....\n\n")
@@ -142,15 +148,15 @@ class LLM:
 
     async def astream_events(self,
                              input: Any, 
-                             config: RunnableConfig | None = None,
+                             config: Optional[RunnableConfig] = None,
                              *,
                              version: Literal['v1', 'v2'] = "v2", 
-                             include_names: Sequence[str] | None = None,
-                             include_types: Sequence[str] | None = None,
-                             include_tags: Sequence[str] | None = None,
-                             exclude_names: Sequence[str] | None = None,
-                             exclude_types: Sequence[str] | None = None,
-                             exclude_tags: Sequence[str] | None = None,
+                             include_names: Optional[Sequence[str]] = None,
+                             include_types: Optional[Sequence[str]] = None,
+                             include_tags: Optional[Sequence[str]] = None,
+                             exclude_names: Optional[Sequence[str]] = None,
+                             exclude_types: Optional[Sequence[str]] = None,
+                             exclude_tags: Optional[Sequence[str]] = None,
                              **kwargs: Any) -> AsyncIterator[StreamEvent] :
         if has_media(input):
             writer = get_stream_writer()
@@ -189,11 +195,11 @@ class LLM:
                 yield event
     
     async def abatch(self,
-                     inputs: list[LanguageModelInput],
-                     config: RunnableConfig | list[RunnableConfig] | None = None,
+                     inputs: list[Input],
+                     config: Optional[Union[RunnableConfig, list[RunnableConfig]]] = None,
                      *,
                      return_exceptions: bool = False,
-                     **kwargs: Any | None) -> list[Output] :
+                     **kwargs:  Optional[Any]) -> list[Output] :
         processed_inputs = []
         for messages in inputs:
             if has_media(messages):

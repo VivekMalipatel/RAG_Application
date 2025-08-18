@@ -17,8 +17,8 @@ class Config:
     MODEL_PROVIDER: str = os.getenv("MODEL_PROVIDER")
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", 240))
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", 3))
-    EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", 3600))
-    EMBEDDING_CLEINT_RETRIES: int = int(os.getenv("EMBEDDING_CLEINT_RETRIES", 3))
+    EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", 30))
+    EMBEDDING_CLEINT_RETRIES: int = int(os.getenv("EMBEDDING_CLEINT_RETRIES", 1))
 
     REASONING_LLM_TEMPERATURE: float = float(os.getenv("REASONING_LLM_TEMPERATURE", 0.6))
     REASONING_LLM_TOP_P: float = float(os.getenv("REASONING_LLM_TOP_P", 0.95))

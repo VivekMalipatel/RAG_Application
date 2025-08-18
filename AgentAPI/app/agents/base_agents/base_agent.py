@@ -5,12 +5,17 @@ import json
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Sequence, Union, Optional, Callable, AsyncIterator, Literal
-
+from langgraph.typing import ContextT, InputT, OutputT, StateT
+from langgraph.types import (
+    All,
+    Checkpointer,
+    Command,
+)
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.store.base import BaseStore, IndexConfig
-from langgraph.types import All, StreamMode
+from langgraph.types import All, StreamMode, Durability
 from langgraph.config import get_store
 from langgraph.cache.base import BaseCache
 from langchain_core.tools import BaseTool
@@ -18,7 +23,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.schema import StreamEvent
 from langchain_core.runnables.utils import Output
 from langchain_core.runnables.base import Input
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
+from langchain_core.messages.base import messages_to_dict
 from langgraph.config import get_stream_writer
 from openai import BaseModel
 from agents.utils import _load_prompt
@@ -29,7 +35,7 @@ from agents.base_agents.base_state import BaseState
 from agents.base_agents.memory.base_checkpointer import BaseMemorySaver
 from agents.base_agents.memory.base_store import BaseMemoryStore
 from agents.base_agents.utils import (
-    count_tokens, optimize_messages_for_tokens, get_messages_to_save, 
+    optimize_messages_for_tokens, get_messages_to_save, 
     generate_message_id, should_trim_state, find_second_last_ai_index
 )
 from db.redis import redis
@@ -251,9 +257,9 @@ class BaseAgent:
 
         system_messages = [SystemMessage(content=self.prompt)]
         memory_wrapper = [
-            HumanMessage(content="<Retrieved Messages from Memory Start>"),
+            SystemMessage(content="<Retrieved Messages from Memory Start>"),
             *memory_messages,
-            HumanMessage(content="<Retrieved Messages from Memory End>")
+            SystemMessage(content="<Retrieved Messages from Memory End>")
         ]
         state_messages = state["messages"]
         
@@ -282,10 +288,10 @@ class BaseAgent:
         if was_optimized and optimized_state != state_messages:
             self._logger.debug(f"Returning optimized state: {len(optimized_state)} messages + new response")
             return {"messages": optimized_state + [response]}
-        else:
-            return {"messages": [response]}
 
-    def _compile_graph(self, has_tools: bool, **compile_kwargs) -> CompiledStateGraph:
+        return {"messages": [response]}
+
+    def _compile_graph(self, has_tools: bool, **compile_kwargs) -> CompiledStateGraph[StateT, ContextT, InputT, OutputT]:
         graph_builder = StateGraph(BaseState)
         llm_node_name = f"llm${self.config.get('configurable').get('user_id')}"
         graph_builder.add_node(llm_node_name, self.llm_node)
@@ -311,14 +317,14 @@ class BaseAgent:
         return compiled_graph
 
     async def compile(self,
-                      checkpointer: Optional[BaseMemorySaver] = None,
+                      checkpointer: Checkpointer = None,
                       *,
                       cache: BaseCache | None = None,
-                      store: Optional[BaseStore] = None,
-                      interrupt_before: list[str] | Literal['*'] | None = None,
-                      interrupt_after: list[str] | Literal['*'] | None = None,
+                      store: BaseStore | None = None,
+                      interrupt_before: All | list[str] | None = None,
+                      interrupt_after: All | list[str] | None = None,
                       debug: bool = False,
-                      name: str | None = None) -> 'BaseAgent':
+                      name: str | None = None) -> CompiledStateGraph[StateT, ContextT, InputT, OutputT]:
 
         self._checkpointer = checkpointer
         if checkpointer is None:
@@ -366,15 +372,18 @@ class BaseAgent:
 
     @requires_compile
     async def ainvoke(self,
-                      input: dict[str, Any] | Any,
+                      input: InputT | Command | None,
                       config: RunnableConfig | None = None,
                       *,
+                      context: ContextT | None = None,
                       stream_mode: StreamMode = "values",
                       print_mode: StreamMode | Sequence[StreamMode] = (),
                       output_keys: str | Sequence[str] | None = None,
                       interrupt_before: All | Sequence[str] | None = None,
                       interrupt_after: All | Sequence[str] | None = None,
-                      **kwargs: Any) -> dict[str, Any] | Any:
+                      durability: Durability | None = None,
+                      **kwargs: Any
+                    ) -> dict[str, Any] | Any:
         
         config["recursion_limit"] = self._resursion_limit
         # #TODO : Temperorily disable thinking
@@ -389,12 +398,14 @@ class BaseAgent:
         
         result = await self._compiled_graph.ainvoke(
             input, 
-            config=config, 
+            config=config,
+            context=context,
             stream_mode=stream_mode,
             output_keys=output_keys, 
             print_mode=print_mode,
             interrupt_before=interrupt_before, 
-            interrupt_after=interrupt_after, 
+            interrupt_after=interrupt_after,
+            durability=durability,
             **kwargs
         )
         
@@ -402,29 +413,31 @@ class BaseAgent:
 
     @requires_compile_generator
     async def astream(self,
-                      input: dict[str, Any] | Any,
+                      input: InputT | Command | None,
                       config: RunnableConfig | None = None,
                       *,
+                      context: ContextT | None = None,
                       stream_mode: StreamMode | Sequence[StreamMode] | None = None,
                       print_mode: StreamMode | Sequence[StreamMode] = (),
                       output_keys: str | Sequence[str] | None = None,
                       interrupt_before: All | Sequence[str] | None = None,
                       interrupt_after: All | Sequence[str] | None = None,
-                      checkpoint_during: bool | None = None,
-                      debug: bool | None = None,
+                      durability: Durability | None = None,
                       subgraphs: bool = False,
+                      debug: bool | None = None,
                       **kwargs: Any) -> AsyncIterator[dict[str, Any] | Any]:
-        
+
         if isinstance(stream_mode, str):
             async for chunk in self._compiled_graph.astream(
                 input, 
                 config=config, 
+                context=context,
                 stream_mode=stream_mode, 
                 print_mode=print_mode,
                 output_keys=output_keys, 
                 interrupt_before=interrupt_before, 
                 interrupt_after=interrupt_after, 
-                checkpoint_during=checkpoint_during, 
+                durability=durability, 
                 debug=debug, 
                 subgraphs=subgraphs, 
                 **kwargs
@@ -434,12 +447,13 @@ class BaseAgent:
             async for stream_mode, chunk in self._compiled_graph.astream(
                 input, 
                 config=config, 
+                context=context,
                 stream_mode=stream_mode, 
                 print_mode=print_mode,
                 output_keys=output_keys, 
                 interrupt_before=interrupt_before, 
                 interrupt_after=interrupt_after, 
-                checkpoint_during=checkpoint_during, 
+                durability=durability, 
                 debug=debug, 
                 subgraphs=subgraphs, 
                 **kwargs

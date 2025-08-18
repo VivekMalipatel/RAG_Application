@@ -1,30 +1,18 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Set environment variables
-ENV PYTHONPATH=/app/app
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-pip \
+    python3-uno \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install system dependencies and Python packages in one layer
 COPY requirements.txt .
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc g++ && \
-    pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
-    apt-get purge -y gcc g++ && \
-    apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -rf ~/.cache/pip
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy only the app folder (contains main.py and all your code)
-COPY app/ ./app/
-
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash app && \
-    chown -R app:app /app
-USER app
+COPY app/ ./
 
 ENV PORT=8010 
 ENV WORKERS=1
