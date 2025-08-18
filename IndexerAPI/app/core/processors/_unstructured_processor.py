@@ -39,12 +39,18 @@ class UnstructuredProcessor(BaseProcessor):
             extracted_text, (_, image_base64) = await asyncio.gather(extracted_text_task, image_task)
             logger.debug(f"Page {page_num + 1}: extracted {len(extracted_text)} characters of text and generated base64 image")
             
+            logger.debug(f"Generating text description for page {page_num + 1}")
+            text_description = await self.model_handler.generate_text_description(image_base64)
+            logger.debug(f"Page {page_num + 1}: generated {len(text_description)} characters of description")
+            
+            combined_text = f"description: {text_description}\n\nExtracted text from page: {extracted_text}"
+            
             messages = [
                 {
                     "role": "user", 
                     "content": [
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
-                        {"type": "text", "text": f"Extracted text from page: {extracted_text}"}
+                        {"type": "text", "text": combined_text}
                     ]
                 }
             ]
@@ -56,7 +62,8 @@ class UnstructuredProcessor(BaseProcessor):
                 {
                     "role": "user", 
                     "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
+                        {"type": "text", "text": combined_text[:1000]}
                     ]
                 }
             ]
