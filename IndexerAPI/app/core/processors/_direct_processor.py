@@ -50,8 +50,7 @@ class DirectProcessor(BaseProcessor):
                 if current_chunk:
                     text_chunks.append(' '.join(current_chunk))
             
-            chunks_with_entities = []
-            for i, chunk in enumerate(text_chunks):
+            async def process_chunk(i, chunk):
                 messages = [
                     {
                         "role": "user", 
@@ -74,14 +73,19 @@ class DirectProcessor(BaseProcessor):
                     chunk_embedding_task
                 )
                 
-                chunks_with_entities.append({
+                return {
                     "page_number": i + 1,
                     "messages": messages,
                     "entities": entities,
                     "relationships": relationships,
                     "image_s3_url": "",
                     "embedding": chunk_embedding[0] if chunk_embedding else None
-                })
+                }
+            
+            # Process all chunks in parallel
+            chunks_with_entities = await asyncio.gather(
+                *[process_chunk(i, chunk) for i, chunk in enumerate(text_chunks)]
+            )
             
             return {
                 "data": chunks_with_entities,

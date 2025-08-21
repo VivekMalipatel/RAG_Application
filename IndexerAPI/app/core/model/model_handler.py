@@ -435,7 +435,7 @@ class ModelHandler:
                             continue
             
             if not image_extraction_success:
-                logger.warning(f"Image-based entity extraction failed after {settings.RETRIES} attempts. Falling back to text-based extraction.")
+                # logger.warning(f"Image-based entity extraction failed after {settings.RETRIES} attempts. Falling back to text-based extraction.")
                 
                 try:
                     response : ParsedChatCompletion[EntityRelationSchema] = await self.structured_chat_completion(
