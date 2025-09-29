@@ -1,5 +1,4 @@
 import tiktoken
-import uuid
 import logging
 from typing import List, Tuple, Optional
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
@@ -82,24 +81,11 @@ def optimize_messages_for_tokens(
     if second_last_ai_index != -1:
         trimmed_messages = state_messages[:second_last_ai_index]
         remaining_messages = state_messages[second_last_ai_index:]
-        logger.debug(f"Storing {len(trimmed_messages)} trimmed messages for background save")
+        logger.debug(f"Trimming {len(trimmed_messages)} messages from state to fit token limits")
         return system_messages, [], remaining_messages, True, trimmed_messages
     else:
         logger.debug("No trimming possible - keeping all state messages")
         return system_messages, [], state_messages, True, []
-
-def get_messages_to_save(messages: List[BaseMessage]) -> List[BaseMessage]:
-    second_last_ai_index = find_second_last_ai_index(messages)
-    
-    if second_last_ai_index != -1:
-        return messages[second_last_ai_index + 1:]
-    else:
-        return messages
-
-def generate_message_id(checkpoint_id: Optional[str], org_id: str, user_id: str, index: int) -> str:
-    if checkpoint_id:
-        return f"{checkpoint_id}_{index}"
-    return f"{org_id}_{user_id}_{str(uuid.uuid4())}_{index}"
 
 def should_trim_state(messages: List[BaseMessage]) -> bool:
     if not messages:

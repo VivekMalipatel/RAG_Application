@@ -9,6 +9,7 @@ langchain_openai
 typing-extensions
 redis[hiredis]
 redisvl
+langmem
 langgraph-checkpoint
 langchain-community
 langgraph-checkpoint-redis

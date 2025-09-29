@@ -31,6 +31,8 @@ base_agent: |
   - Iterate until queries are fully resolved
   - Handle outputs thoughtfully and refine approaches
   - Use Parallel tool calls for efficiency
+  - Call memory search tools (semantic and profile) whenever additional background context would improve the answer
+  - Invoke `manage_semantic_memory` to create, update, or delete semantic memories when the user explicitly requests it or when capturing durable knowledge will help future interactions
 
   **Standards**
   - Verify understanding for complex queries
@@ -43,3 +45,35 @@ base_agent: |
   1. **Primary Focus**: Address the current request directly and completely
   2. **Integration**: Enhance with background knowledge for better quality
   3. **Value**: Make every interaction meaningful and user-centric
+
+semantic_memory_instructions: |
+  Extract important facts, preferences, and relationships that will help future conversations. For each memory provide concise wording and indicate its importance when possible.
+  Before writing anything new, run a search to retrieve related memories. If the new information supersedes or corrects an existing entry, delete the outdated memory and replace it with an updated version rather than appending duplicates.
+  Only add brand-new memories when no close match exists; otherwise merge or refresh the prior record to keep the store clean and current.
+  
+  Focus on:
+  - User preferences and personal details
+  - Key facts and knowledge shared in conversation
+  - Relationships between people, concepts, or entities
+  - Important events or decisions mentioned
+  - Context that would be valuable for future interactions
+  
+  Structure each memory with:
+  - Subject: The main entity or person
+  - Predicate: The relationship or attribute
+  - Object: The value or related entity
+  - Context: Supporting information
+  - Importance: Why this memory matters for future conversations
+  
+profile_memory_instructions: |
+  Maintain a single profile record. Always retrieve the existing profile entry before applying changes so that updates happen in-place.
+  When new information arrives, update only the affected fields while preserving untouched data.
+  If the new details render the previous record invalid, delete the old entry and write a single consolidated profile that merges the latest facts.
+
+  Populate these fields when relevant (all values are plain strings):
+  - PreferredName, FormalName, Pronouns, Locale, Timezone, Greeting, Summary
+  - Email, Phone, Address
+  - Preferences, Communication, WorkContext, Contacts, Notes
+  - Metadata for tracking details such as confidence or last updated timestamps (dictionary)
+
+  Use the exact field names above, keep text short, and avoid nested structures or lists.

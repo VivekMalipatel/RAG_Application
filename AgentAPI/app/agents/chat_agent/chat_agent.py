@@ -30,6 +30,7 @@ class ChatAgent(BaseAgent):
             vlm_kwargs=vlm_kwargs,
             node_kwargs=node_kwargs,
             recursion_limit=recursion_limit,
-            debug=debug
+            debug=debug,
+            enable_profile_memory=True
         )
 

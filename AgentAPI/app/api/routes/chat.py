@@ -199,15 +199,12 @@ class ChatCompletionService:
                         
                         collector.add_reasoning(reasoning_text)
                 
-                asyncio.create_task(agent.wait_for_memory_tasks())
                 yield "data: [DONE]\n\n"
             except asyncio.CancelledError:
-                asyncio.create_task(agent.wait_for_memory_tasks())
                 yield "data: [DONE]\n\n"
                 return
             except Exception as e:
                 logger.error(f"Streaming error: {e}")
-                asyncio.create_task(agent.wait_for_memory_tasks())
                 error_chunk = {
                     "id": self.completion_id,
                     "object": "error",
@@ -245,8 +242,6 @@ class ChatCompletionService:
                     else:
                         collector.add_reasoning(str(chunk))
             
-            await agent.wait_for_memory_tasks()
-            
             return {
                 "id": self.completion_id,
                 "object": "chat.completion",
@@ -275,7 +270,6 @@ class ChatCompletionService:
             }
         except Exception as e:
             logger.error(f"Non-streaming error: {e}")
-            asyncio.create_task(agent.wait_for_memory_tasks())
             raise HTTPException(status_code=500, detail="Internal processing error")
 
 @router.post("/v1/chat/completions")
