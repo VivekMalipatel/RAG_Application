@@ -1,7 +1,12 @@
-from pathlib import Path
+import asyncio
 import json
+import logging
+from collections.abc import Iterable
+from datetime import datetime, timezone
+from pathlib import Path
+
 import yaml
-from typing import Any, Optional, Union, Sequence, Dict, Callable, get_args, get_origin
+from typing import Any, Optional, Union, Sequence, Dict, Callable, Awaitable, get_args, get_origin
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, model_validator
@@ -269,3 +274,91 @@ def _coerce_to_target(value: Any, target: Any) -> Any:
         if isinstance(value, dict):
             return target.model_validate(value)
     return value
+
+
+PrecontextProvider = Callable[[Any, RunnableConfig], Awaitable[Any] | Any]
+
+
+def register_precontext_provider(registry: dict[str, PrecontextProvider], name: str, provider: PrecontextProvider) -> None:
+    registry[name] = provider
+
+
+def unregister_precontext_provider(registry: dict[str, PrecontextProvider], name: str) -> None:
+    registry.pop(name, None)
+
+
+async def build_system_precontext(
+    prompt: str,
+    providers: dict[str, PrecontextProvider],
+    state: Any,
+    config: Optional[RunnableConfig],
+    *,
+    fallback_config: RunnableConfig,
+    logger: logging.Logger,
+) -> list[str]:
+    active_config = config or fallback_config
+    context_parts: list[str] = [prompt.strip()] if prompt else []
+    for name, provider in providers.items():
+        try:
+            result = provider(state, active_config)
+            if asyncio.iscoroutine(result):
+                result = await result
+        except Exception:
+            logger.exception("Pre-context provider '%s' failed", name)
+            continue
+        context_parts.extend(_normalize_precontext_result(result))
+    return [part for part in context_parts if part]
+
+
+def make_profile_precontext_provider(
+    get_profile_context: Callable[[RunnableConfig], Awaitable[tuple[Optional[str], Optional[dict[str, Any]]]]],
+    build_profile_directives_fn: Callable[[Any], Optional[str]],
+    get_profile_memory_key: Callable[[], Optional[str]],
+) -> PrecontextProvider:
+
+    async def _provider(state: Any, config: RunnableConfig) -> Optional[list[str]]:
+        overview_text, profile_content = await get_profile_context(config)
+        if not overview_text and not profile_content:
+            return None
+        sections: list[str] = []
+        if overview_text:
+            sections.append(overview_text)
+        profile_directives = build_profile_directives_fn(profile_content)
+        if profile_directives:
+            sections.append(profile_directives)
+        memory_key = get_profile_memory_key()
+        if memory_key:
+            sections.append(
+                "Use manage_profile_memory with action='update' and id='{}' when the user requests profile changes. If no existsing profile is found, do not create a new one. We will create a new one in the background.".format(memory_key)
+            )
+        return sections
+
+    return _provider
+
+
+def make_utc_datetime_precontext_provider() -> PrecontextProvider:
+
+    def _provider(state: Any, config: RunnableConfig) -> str:
+        now = datetime.now(timezone.utc)
+        return now.strftime("Current UTC date: %Y-%m-%d | Current UTC time: %H:%M:%S")
+
+    return _provider
+
+
+def _normalize_precontext_result(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, Iterable):
+        items: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                items.append(text)
+        return items
+    text = str(value).strip()
+    return [text] if text else []

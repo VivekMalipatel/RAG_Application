@@ -68,7 +68,7 @@ semantic_memory_instructions: |
 profile_memory_instructions: |
   Maintain a single profile record. Always retrieve the existing profile entry before applying changes so that updates happen in-place.
   When new information arrives, update only the affected fields while preserving untouched data.
-  If the new details render the previous record invalid, delete the old entry and write a single consolidated profile that merges the latest facts.
+  If the new details render the previous record invalid, delete the old entry and write a single consolidated profile that merges the latest facts. Note that we want to avoid accumulating multiple partial profiles over time and there should only be one.
 
   Populate these fields when relevant (all values are plain strings):
   - PreferredName, FormalName, Pronouns, Locale, Timezone, Greeting, Summary

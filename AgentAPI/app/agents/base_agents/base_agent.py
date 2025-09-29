@@ -4,7 +4,7 @@ import logging
 import json
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Sequence, Union, Optional, Callable, AsyncIterator, Literal
+from typing import Any, Sequence, Union, Optional, Callable, AsyncIterator, Literal, Awaitable
 from langgraph.typing import ContextT, InputT, OutputT, StateT
 from langgraph.types import (
     All,
@@ -34,6 +34,11 @@ from agents.utils import (
     format_profile_overview,
     build_profile_directives,
     wrap_manage_memory_tool_json,
+    register_precontext_provider,
+    unregister_precontext_provider,
+    build_system_precontext,
+    make_profile_precontext_provider,
+    make_utc_datetime_precontext_provider,
 )
 from pathlib import Path
 from llm.llm import LLM
@@ -131,6 +136,8 @@ class BaseAgent:
         user_context = f"User ID : {config['configurable']['user_id']}, Org ID : {config['configurable']['org_id']}"
         prompt_parts = [user_context.strip(), prompt.strip(), base_prompt.strip()]
         self.prompt = "\n\n".join(part for part in prompt_parts if part)
+        self._precontext_providers: dict[str, Callable[[BaseState, RunnableConfig], Awaitable[Any] | Any]] = {}
+        register_precontext_provider(self._precontext_providers, "utc_datetime", make_utc_datetime_precontext_provider())
 
     def with_structured_output(self, schema: Union[dict, type[BaseModel]], **kwargs: Any) -> 'BaseAgent':
         self._llm = self._llm.with_structured_output(schema=schema, **kwargs)
@@ -173,7 +180,11 @@ class BaseAgent:
         self._memory_tools.append(self._semantic_manager.search_tool)
         self._semantic_manage_tool = create_manage_memory_tool(
             namespace=namespace,
-            instructions="Call this tool when you need to create, update, or delete semantic memories for the current user.",
+            instructions=(
+                "Run the semantic memory search tool first to retrieve similar entries. "
+                "If the new information supersedes existing memories, delete or update those records instead of creating duplicates. "
+                "Only create a new memory when no relevant entry exists, and provide content as JSON matching the semantic memory schema."
+            ),
             schema=SemanticMemory,
             store=store,
             name="manage_semantic_memory",
@@ -189,6 +200,7 @@ class BaseAgent:
         self._profile_reflection_executor = None
         self._profile_manage_tool = None
         self._profile_memory_key = None
+        unregister_precontext_provider(self._precontext_providers, "profile_context")
         if not store or not self._config.profile_memory_enabled:
             return
         namespace = ("memories", "{org_id}", "{user_id}", "profile")
@@ -207,11 +219,12 @@ class BaseAgent:
         self._profile_manage_tool = create_manage_memory_tool(
             namespace=namespace,
             instructions=(
-                "Update the existing profile record when the user explicitly requests a change. "
-                "Always supply the profile memory id provided in the system context."
+                "Fetch the current profile entry (using the provided memory id or the profile search tool) before making changes. "
+                "Update that single record in-place, preserving fields the user did not mention. "
+                "If the profile must be rewritten, delete the old entry and write one consolidated replacement."
             ),
             schema=UserProfileMemory,
-            actions_permitted=("update"),
+            actions_permitted=("update","delete"),
             store=store,
             name="manage_profile_memory",
         )
@@ -220,6 +233,12 @@ class BaseAgent:
             tool_name="manage_profile_memory",
         )
         self._memory_tools.append(self._profile_manage_tool)
+        profile_provider = make_profile_precontext_provider(
+            lambda run_config: self._get_profile_context(run_config),
+            build_profile_directives,
+            lambda: self._profile_memory_key,
+        )
+        register_precontext_provider(self._precontext_providers, "profile_context", profile_provider)
 
     async def _get_profile_context(self, config: Optional[RunnableConfig]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
         self._profile_memory_key = None
@@ -250,19 +269,15 @@ class BaseAgent:
         return format_profile_overview(overview_source), content
 
     async def llm_node(self, state: BaseState, config: RunnableConfig):
-        system_parts = [self.prompt.strip()]
-        if self._profile_manager and self._config.profile_memory_enabled:
-            overview_text, profile_content = await self._get_profile_context(config or self.config)
-            if overview_text:
-                system_parts.append(overview_text)
-            profile_directives = build_profile_directives(profile_content)
-            if profile_directives:
-                system_parts.append(profile_directives)
-            if self._profile_memory_key:
-                system_parts.append(
-                    f"Use manage_profile_memory with action='update' and id='{self._profile_memory_key}' when the user requests profile changes. If no existsing profile is found, do not create a new one. We will create a new one in the background."
-                )
-        system_messages = [SystemMessage(content="\n\n".join(part for part in system_parts if part))]
+        system_parts = await build_system_precontext(
+            self.prompt,
+            self._precontext_providers,
+            state,
+            config,
+            fallback_config=self.config,
+            logger=self._logger,
+        )
+        system_messages = [SystemMessage(content="\n\n".join(system_parts))]
         state_messages = state["messages"]
 
         messages = system_messages + state_messages
