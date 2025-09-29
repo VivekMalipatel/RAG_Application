@@ -31,13 +31,17 @@ from agents.utils import (
     validate_tools,
     build_memory_config,
     coerce_profile_content,
+    coerce_procedural_content,
     format_profile_overview,
+    format_procedural_overview,
     build_profile_directives,
+    build_procedural_directives,
     wrap_manage_memory_tool_json,
     register_precontext_provider,
     unregister_precontext_provider,
     build_system_precontext,
     make_profile_precontext_provider,
+    make_procedural_precontext_provider,
     make_utc_datetime_precontext_provider,
 )
 from pathlib import Path
@@ -46,7 +50,7 @@ from embed.embed import JinaEmbeddings
 from agents.base_agents.base_state import BaseState
 from agents.base_agents.memory.base_checkpointer import BaseMemorySaver
 from agents.base_agents.memory.base_store import BaseMemoryStore
-from agents.base_agents.memory.base_memorymodels import SemanticMemory, UserProfileMemory
+from agents.base_agents.memory.base_memorymodels import SemanticMemory, UserProfileMemory, EpisodicMemoryModel, ProceduralMemoryModel
 from db.redis import redis
 from config import config as envconfig
 
@@ -57,6 +61,7 @@ class AgentConfig:
     node_kwargs: dict[str, Any] = field(default_factory=dict)
     debug: bool = False
     profile_memory_enabled: bool = False
+    procedural_memory_enabled: bool = False
 
 def requires_compile(fn):
     @wraps(fn)
@@ -90,7 +95,8 @@ class BaseAgent:
                  node_kwargs: Optional[dict[str, Any]] = None,
                  recursion_limit: Optional[int] = 25,
                  debug: bool = False,
-                 enable_profile_memory: bool = False):
+                 enable_profile_memory: bool = False,
+                 enable_procedural_memory: bool = False):
         
         if not config:
             raise ValueError("Runnable Config with user_id, thread_id, org_id and/or checkpoint_id must be provided.")
@@ -101,6 +107,7 @@ class BaseAgent:
             node_kwargs=node_kwargs or {},
             debug=debug,
             profile_memory_enabled=enable_profile_memory,
+            procedural_memory_enabled=enable_procedural_memory,
         )
         
         self._compiled_graph: Optional[CompiledStateGraph] = None
@@ -119,6 +126,13 @@ class BaseAgent:
         self._profile_reflection_executor = None
         self._profile_manage_tool = None
         self._profile_memory_key: Optional[str] = None
+        self._episodic_manager = None
+        self._episodic_reflection_executor = None
+        self._episodic_manage_tool = None
+        self._procedural_manager = None
+        self._procedural_reflection_executor = None
+        self._procedural_manage_tool = None
+        self._procedural_memory_key: Optional[str] = None
         
         self._checkpointer = None
         self._store = None
@@ -240,6 +254,84 @@ class BaseAgent:
         )
         register_precontext_provider(self._precontext_providers, "profile_context", profile_provider)
 
+    def _setup_procedural_manager(self, store: Optional[BaseStore]):
+        self._procedural_manager = None
+        self._procedural_reflection_executor = None
+        self._procedural_manage_tool = None
+        self._procedural_memory_key = None
+        unregister_precontext_provider(self._precontext_providers, "procedural_context")
+        if not store or not self._config.procedural_memory_enabled:
+            return
+        namespace = ("memories", "{org_id}", "{user_id}", "procedural")
+        procedural_instructions = _load_prompt("procedural_memory_instructions", base_dir=Path(__file__).parent)
+        self._procedural_manager = create_memory_store_manager(
+            self._llm.reasoning_llm,
+            store=store,
+            namespace=namespace,
+            schemas=[ProceduralMemoryModel],
+            instructions=procedural_instructions,
+            enable_inserts=False,
+            query_limit=envconfig.PROCEDURAL_MEMORY_QUERY_LIMIT,
+        )
+        self._procedural_reflection_executor = ReflectionExecutor(self._procedural_manager, store=store)
+        self._memory_tools.append(self._procedural_manager.search_tool)
+        self._procedural_manage_tool = create_manage_memory_tool(
+            namespace=namespace,
+            instructions=(
+                "Retrieve the existing procedural record before applying changes. Update it in place, preserving directives not mentioned. Delete only when replacing it with a consolidated version in the same call."
+            ),
+            schema=ProceduralMemoryModel,
+            actions_permitted=("update","delete"),
+            store=store,
+            name="manage_procedural_memory",
+        )
+        self._procedural_manage_tool = wrap_manage_memory_tool_json(
+            self._procedural_manage_tool,
+            tool_name="manage_procedural_memory",
+        )
+        self._memory_tools.append(self._procedural_manage_tool)
+        procedural_provider = make_procedural_precontext_provider(
+            lambda run_config: self._get_procedural_context(run_config),
+            build_procedural_directives,
+            lambda: self._procedural_memory_key,
+        )
+        register_precontext_provider(self._precontext_providers, "procedural_context", procedural_provider)
+
+    def _setup_episodic_manager(self, store: Optional[BaseStore]):
+        self._episodic_manager = None
+        self._episodic_reflection_executor = None
+        self._episodic_manage_tool = None
+        if not store:
+            return
+        namespace = ("memories", "{org_id}", "{user_id}", "episodic")
+        episodic_instructions = _load_prompt("episodic_memory_instructions", base_dir=Path(__file__).parent)
+        self._episodic_manager = create_memory_store_manager(
+            self._llm.reasoning_llm,
+            store=store,
+            namespace=namespace,
+            schemas=[EpisodicMemoryModel],
+            instructions=episodic_instructions,
+            enable_inserts=True,
+            enable_deletes=True,
+            query_limit=envconfig.EPISODIC_MEMORY_QUERY_LIMIT,
+        )
+        self._episodic_reflection_executor = ReflectionExecutor(self._episodic_manager, store=store)
+        self._memory_tools.append(self._episodic_manager.search_tool)
+        self._episodic_manage_tool = create_manage_memory_tool(
+            namespace=namespace,
+            instructions=(
+                "Run the episodic memory search tool before modifying entries. Update or delete older episodes when the new experience supersedes them. Provide content as JSON that matches the episodic memory schema."
+            ),
+            schema=EpisodicMemoryModel,
+            store=store,
+            name="manage_episodic_memory",
+        )
+        self._episodic_manage_tool = wrap_manage_memory_tool_json(
+            self._episodic_manage_tool,
+            tool_name="manage_episodic_memory",
+        )
+        self._memory_tools.append(self._episodic_manage_tool)
+
     async def _get_profile_context(self, config: Optional[RunnableConfig]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
         self._profile_memory_key = None
         if not self._profile_manager or not self._config.profile_memory_enabled or not config:
@@ -267,6 +359,26 @@ class BaseAgent:
             key: value for key, value in content.items() if key != "Metadata"
         }
         return format_profile_overview(overview_source), content
+
+    async def _get_procedural_context(self, config: Optional[RunnableConfig]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+        self._procedural_memory_key = None
+        if not self._procedural_manager or not self._config.procedural_memory_enabled or not config:
+            return None, None
+        try:
+            results = await self._procedural_manager.asearch(limit=envconfig.PROCEDURAL_MEMORY_QUERY_LIMIT, config=config)
+        except Exception as exc:
+            self._logger.error("Procedural snapshot retrieval failed", exc_info=exc)
+            return None, None
+        if not results:
+            return None, None
+        item = results[0]
+        self._procedural_memory_key = getattr(item, "key", None)
+        content = coerce_procedural_content(item.value)
+        if not isinstance(content, dict):
+            self._procedural_memory_key = None
+            return None, None
+        overview = format_procedural_overview(content)
+        return overview, content
 
     async def llm_node(self, state: BaseState, config: RunnableConfig):
         system_parts = await build_system_precontext(
@@ -314,6 +426,32 @@ class BaseAgent:
                 )
             except Exception as exc:
                 self._logger.error("Profile memory submission failed", exc_info=exc)
+        if self._procedural_reflection_executor and self._config.procedural_memory_enabled:
+            procedural_payload = {
+                "messages": payload_messages,
+                "max_steps": envconfig.PROCEDURAL_MEMORY_MAX_UPDATES_PER_TURN,
+            }
+            try:
+                self._procedural_reflection_executor.submit(
+                    procedural_payload,
+                    after_seconds=envconfig.PROCEDURAL_MEMORY_DELAY_SECONDS,
+                    config=build_memory_config(config),
+                )
+            except Exception as exc:
+                self._logger.error("Procedural memory submission failed", exc_info=exc)
+        if self._episodic_reflection_executor:
+            episodic_payload = {
+                "messages": payload_messages,
+                "max_steps": envconfig.EPISODIC_MEMORY_MAX_UPDATES_PER_TURN,
+            }
+            try:
+                self._episodic_reflection_executor.submit(
+                    episodic_payload,
+                    after_seconds=envconfig.EPISODIC_MEMORY_DELAY_SECONDS,
+                    config=build_memory_config(config),
+                )
+            except Exception as exc:
+                self._logger.error("Episodic memory submission failed", exc_info=exc)
 
         return {"messages": [response]}
 
@@ -376,6 +514,8 @@ class BaseAgent:
         self._memory_tools = []
         self._setup_semantic_manager(self._store)
         self._setup_profile_manager(self._store)
+        self._setup_procedural_manager(self._store)
+        self._setup_episodic_manager(self._store)
         self._apply_tool_binding()
 
         self._interrupt_before = interrupt_before
@@ -424,6 +564,8 @@ class BaseAgent:
 
         _shutdown_executor("_reflection_executor")
         _shutdown_executor("_profile_reflection_executor")
+        _shutdown_executor("_procedural_reflection_executor")
+        _shutdown_executor("_episodic_reflection_executor")
 
         checkpointer, store = self._checkpointer, self._store
         self._checkpointer = None

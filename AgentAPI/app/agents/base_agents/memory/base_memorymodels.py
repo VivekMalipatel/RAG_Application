@@ -40,4 +40,13 @@ class EpisodicMemoryModel(BaseModel):
     Action: Optional[str] = Field(None, description="The action taken during the event")
     Result: Optional[str] = Field(None, description="The result of the action taken")
 
+# Procedural Memory
+
+class ProceduralMemoryModel(BaseModel):
+    CoreDirectives: Optional[str] = Field(None, description="Primary persona and mission")
+    ResponseGuidelines: Optional[str] = Field(None, description="Response structure and tone guidance")
+    ToolingGuidelines: Optional[str] = Field(None, description="Expectations for tool usage")
+    EscalationPolicy: Optional[str] = Field(None, description="How to handle failures or sensitive situations")
+    Metadata: Optional[dict[str, Any]] = Field(None, description="Tracking metadata")
+
 

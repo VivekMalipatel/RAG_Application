@@ -63,6 +63,12 @@ def coerce_profile_content(payload: Any) -> Optional[dict[str, Any]]:
         return None
     return payload if isinstance(payload, dict) else None
 
+def coerce_procedural_content(payload: Any) -> Optional[dict[str, Any]]:
+    content = coerce_profile_content(payload)
+    if isinstance(content, dict):
+        return {k: v for k, v in content.items()}
+    return None
+
 def format_profile_overview(data: Any) -> Optional[str]:
     if data is None:
         return None
@@ -114,6 +120,49 @@ def format_profile_overview(data: Any) -> Optional[str]:
     lines.append("</User Details>")
     return "\n".join(lines)
 
+def format_procedural_overview(data: Any) -> Optional[str]:
+    if data is None:
+        return None
+    if hasattr(data, "model_dump"):
+        data = data.model_dump(exclude_none=True)
+    elif hasattr(data, "dict"):
+        data = data.dict(exclude_none=True)
+    elif isinstance(data, dict):
+        data = {k: v for k, v in data.items() if v is not None}
+    else:
+        return None
+    if not data:
+        return None
+    ordered_keys = [
+        ("CoreDirectives", "Core Directives"),
+        ("ResponseGuidelines", "Response Guidelines"),
+        ("ToolingGuidelines", "Tooling Guidelines"),
+        ("EscalationPolicy", "Escalation Policy"),
+    ]
+    lines = ["<Procedural Instructions>"]
+    for key, label in ordered_keys:
+        if key not in data:
+            continue
+        value = data.get(key)
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple, set)):
+            items = [str(item) for item in value if item is not None]
+            rendered = ", ".join(item.strip() for item in items if item.strip())
+        elif isinstance(value, dict):
+            rendered = ", ".join(f"{k}: {v}" for k, v in value.items() if v is not None)
+        else:
+            rendered = str(value).strip()
+        if rendered:
+            lines.append(f"{label}: {rendered}")
+    metadata = data.get("Metadata") if isinstance(data, dict) else None
+    if isinstance(metadata, dict) and metadata:
+        rendered = ", ".join(f"{k}: {v}" for k, v in metadata.items() if v is not None)
+        if rendered:
+            lines.append(f"Metadata: {rendered}")
+    lines.append("</Procedural Instructions>")
+    return "\n".join(lines)
+
 def _extract_profile_strings(value: Any) -> list[str]:
     if isinstance(value, str):
         text = value.strip()
@@ -159,6 +208,26 @@ def build_profile_directives(content: Any) -> Optional[str]:
     if not directives:
         return None
     return "Use the user's profile preferences below when responding.\n" + "\n".join(directives)
+
+def build_procedural_directives(content: Any) -> Optional[str]:
+    if not isinstance(content, dict):
+        return None
+    sections: list[str] = []
+    core = content.get("CoreDirectives")
+    if isinstance(core, str) and core.strip():
+        sections.append("Core directives:\n" + core.strip())
+    response = content.get("ResponseGuidelines")
+    if isinstance(response, str) and response.strip():
+        sections.append("Response guidelines:\n" + response.strip())
+    tooling = content.get("ToolingGuidelines")
+    if isinstance(tooling, str) and tooling.strip():
+        sections.append("Tool usage expectations:\n" + tooling.strip())
+    escalation = content.get("EscalationPolicy")
+    if isinstance(escalation, str) and escalation.strip():
+        sections.append("Escalation policy:\n" + escalation.strip())
+    if not sections:
+        return None
+    return "Apply these procedural rules when generating responses.\n" + "\n\n".join(sections)
 
 
 def _coerce_manage_tool_content(payload: Any, *, tool_name: str) -> Any:
@@ -330,6 +399,32 @@ def make_profile_precontext_provider(
         if memory_key:
             sections.append(
                 "Use manage_profile_memory with action='update' and id='{}' when the user requests profile changes. If no existsing profile is found, do not create a new one. We will create a new one in the background.".format(memory_key)
+            )
+        return sections
+
+    return _provider
+
+
+def make_procedural_precontext_provider(
+    get_procedural_context: Callable[[RunnableConfig], Awaitable[tuple[Optional[str], Optional[dict[str, Any]]]]],
+    build_procedural_directives_fn: Callable[[Any], Optional[str]],
+    get_procedural_memory_key: Callable[[], Optional[str]],
+) -> PrecontextProvider:
+
+    async def _provider(state: Any, config: RunnableConfig) -> Optional[list[str]]:
+        overview_text, procedural_content = await get_procedural_context(config)
+        if not overview_text and not procedural_content:
+            return None
+        sections: list[str] = []
+        if overview_text:
+            sections.append(overview_text)
+        procedural_directives = build_procedural_directives_fn(procedural_content)
+        if procedural_directives:
+            sections.append(procedural_directives)
+        memory_key = get_procedural_memory_key()
+        if memory_key:
+            sections.append(
+                "Use manage_procedural_memory with action='update' and id='{}' when adjusting system directives. Do not create additional procedural records.".format(memory_key)
             )
         return sections
 

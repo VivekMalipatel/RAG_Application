@@ -77,3 +77,26 @@ profile_memory_instructions: |
   - Metadata for tracking details such as confidence or last updated timestamps (dictionary)
 
   Use the exact field names above, keep text short, and avoid nested structures or lists.
+
+procedural_memory_instructions: |
+  Maintain one canonical procedural memory entry that defines the agent's operating rules. Always search and retrieve the existing record before making edits. Update the same record to refine directives; delete only when replacing it with a consolidated version in the same call. Do not create multiple procedural entries.
+
+  Capture:
+  - CoreDirectives: The primary system persona and mission
+  - ResponseGuidelines: How responses should be structured and phrased
+  - ToolingGuidelines: Expectations for tool usage and chaining
+  - EscalationPolicy: How to react to errors, unknowns, or sensitive topics
+  - Metadata: Tracking fields such as confidence or last updated (dictionary)
+
+  Keep text concise and actionable. Write from the perspective of system rules to be directly inserted into the agent prompt.
+
+episodic_memory_instructions: |
+  Only Capture successful interactions as complete episodes that future runs can reuse. Focus on the scenario, the reasoning that led to the action, what was done, and why it worked. Stay concise and prefer first-person wording from the agent's perspective.
+
+  Before inserting, search existing episodic memories to avoid duplicates. Update or delete older entries when the new episode supersedes them. Only create a new episode when it materially adds fresh learning.
+
+  Structure each episode with:
+  - Observation: Situation and relevant context
+  - Thoughts: Key reasoning steps and considerations
+  - Action: What was executed, including format or tool choices
+  - Result: Outcome and guidance on future application
