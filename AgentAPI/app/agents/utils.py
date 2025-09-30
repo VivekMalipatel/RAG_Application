@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import threading
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any, Optional, Union, Sequence, Dict, Callable, Awaitable, ge
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, model_validator
+from langmem.short_term import RunningSummary
 
 def _load_prompt(key: str = None, filename: str = "prompt.yaml", base_dir: str = None) -> str:
     if base_dir is None:
@@ -42,6 +44,38 @@ def build_memory_config(config: Optional[RunnableConfig]) -> dict[str, Any]:
     if configurable is None:
         configurable = {}
     return {"configurable": dict(configurable)}
+
+
+def coerce_running_summary(value: Any) -> Optional[RunningSummary]:
+    if isinstance(value, RunningSummary):
+        return value
+    if isinstance(value, dict):
+        summary_text = value.get("summary")
+        if not summary_text:
+            return None
+        summarized_ids = value.get("summarized_message_ids") or []
+        if isinstance(summarized_ids, set):
+            normalized_ids = {str(item) for item in summarized_ids}
+        else:
+            normalized_ids = {str(item) for item in summarized_ids}
+        last_id = value.get("last_summarized_message_id")
+        return RunningSummary(
+            summary=summary_text,
+            summarized_message_ids=normalized_ids,
+            last_summarized_message_id=last_id,
+        )
+    return None
+
+
+def consume_summary_update(
+    summary_updates: dict[str, dict[str, Any]],
+    summary_lock: threading.Lock,
+    thread_id: Optional[str],
+) -> Optional[dict[str, Any]]:
+    if not thread_id:
+        return None
+    with summary_lock:
+        return summary_updates.pop(thread_id, None)
 
 def coerce_profile_content(payload: Any) -> Optional[dict[str, Any]]:
     if hasattr(payload, "model_dump"):
@@ -430,6 +464,56 @@ def make_procedural_precontext_provider(
 
     return _provider
 
+
+def make_summary_precontext_provider() -> PrecontextProvider:
+
+    def _provider(state: Any, config: RunnableConfig) -> Optional[str]:
+        if not isinstance(state, dict):
+            return None
+        summary_value = state.get("summary_context")
+        if isinstance(summary_value, RunningSummary):
+            summary_text = summary_value.summary
+        elif isinstance(summary_value, dict):
+            summary_text = summary_value.get("summary")
+        else:
+            summary_text = None
+        if not summary_text:
+            return None
+        content = summary_text.strip()
+        if not content:
+            return None
+        return "\n".join(("<Conversation Summary>", content, "</Conversation Summary>"))
+
+    return _provider
+
+def count_words_in_messages(messages: Sequence[Any]) -> int:
+    total = 0
+    for message in messages:
+        content = getattr(message, "content", message)
+        total += count_words_in_content(content)
+    return total
+
+
+def count_words_in_content(content: Any) -> int:
+    if content is None:
+        return 0
+    if isinstance(content, str):
+        return len([part for part in content.split() if part])
+    if isinstance(content, list):
+        total = 0
+        for item in content:
+            total += count_words_in_content(item)
+        return total
+    if isinstance(content, dict):
+        total = 0
+        for value in content.values():
+            total += count_words_in_content(value)
+        return total
+    if hasattr(content, "model_dump"):
+        return count_words_in_content(content.model_dump())
+    if hasattr(content, "dict"):
+        return count_words_in_content(content.dict())
+    return len([part for part in str(content).split() if part])
 
 def make_utc_datetime_precontext_provider() -> PrecontextProvider:
 

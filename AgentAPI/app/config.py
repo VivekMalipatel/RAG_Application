@@ -47,6 +47,10 @@ class Config:
     EPISODIC_MEMORY_DELAY_SECONDS: int = int(os.getenv("EPISODIC_MEMORY_DELAY_SECONDS", 60))
     EPISODIC_MEMORY_MAX_UPDATES_PER_TURN: int = int(os.getenv("EPISODIC_MEMORY_MAX_UPDATES_PER_TURN", 1))
     EPISODIC_MEMORY_QUERY_LIMIT: int = int(os.getenv("EPISODIC_MEMORY_QUERY_LIMIT", 5))
+    SUMMARIZATION_SOFT_LIMIT_RATIO: float = float(os.getenv("SUMMARIZATION_SOFT_LIMIT_RATIO", 0.8))
+    SUMMARIZATION_DELAY_SECONDS: int = int(os.getenv("SUMMARIZATION_DELAY_SECONDS", 5))
+    SUMMARIZATION_TARGET_TOKENS: int = int(os.getenv("SUMMARIZATION_TARGET_TOKENS", 4096))
+    SUMMARIZATION_SUMMARY_TOKENS: int = int(os.getenv("SUMMARIZATION_SUMMARY_TOKENS", 512))
 
     INDEXER_API_BASE_URL: str = os.getenv("INDEXER_API_BASE_URL")
 
@@ -59,7 +63,7 @@ class Config:
     # Searx Configuration
     SEARX_URL: str = "https://websearch.gauravshivaprasad.com"
     # State Management
-    MAX_STATE_TOKENS: int = int(os.getenv("MAX_STATE_TOKENS", 20000))
+    MAX_STATE_TOKENS: int = int(os.getenv("MAX_STATE_TOKENS", 32000))
     
     # MCP Server Configuration
     MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://10.9.0.5:8082/mcp")

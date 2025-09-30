@@ -1,13 +1,10 @@
-from typing import Any, Sequence, Literal, Union, Optional, Callable, AsyncIterator
+from typing import Any, Sequence, Literal, Union, Optional, Callable, AsyncIterator, List, cast
 import typing
 from langchain.chat_models import init_chat_model
-from langchain.chat_models.base import _ConfigurableModel
 from langchain_core.tools import BaseTool
-from langchain_core.language_models import BaseChatModel
-from langchain_core.language_models.chat_models import LanguageModelInput
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, BaseMessage
-from langchain_core.runnables import RunnableConfig, Runnable
-from langgraph.config import get_stream_writer
+from langchain_core.runnables import Runnable, RunnableConfig, RunnableBinding
 from langchain_core.runnables.utils import Output, Input
 from langchain_core.runnables.schema import StreamEvent
 from pydantic import BaseModel
@@ -17,16 +14,27 @@ from typing import (
     Optional
 )
 
+from langchain_core.outputs import ChatResult, ChatGeneration
+from langchain_core.callbacks import CallbackManagerForLLMRun, AsyncCallbackManagerForLLMRun
+
 from llm.utils import (
-    has_media, process_media_with_vlm
+    prepare_input_async,
+    prepare_input_sync,
 )
 import logging
 import asyncio
 
-import os
 
+class LLM(BaseChatModel):
+    reasoning_llm: BaseChatModel
+    reasoning_llm_with_tools: Runnable[Any, Any]
+    vlm_client: AsyncOpenAI
+    vlm_model: str
+    vlm_model_kwargs: dict[str, Any]
+    tools: List[Any]
+    _tool_binding_kwargs: dict[str, Any]
+    logger: logging.Logger
 
-class LLM:
     def __init__(self, reasoningllm_kwargs: Optional[dict] = None, vlm_kwargs: Optional[dict] = None):
         if reasoningllm_kwargs is None:
             reasoningllm_kwargs = {}
@@ -66,34 +74,61 @@ class LLM:
             **vlm_filtered_kwargs
         }
 
-        self.reasoning_llm: BaseChatModel = init_chat_model(**reasoning_llm_config)
+        object.__setattr__(self, "reasoning_llm", init_chat_model(**reasoning_llm_config))
 
-        self.vlm_client = AsyncOpenAI(
-            api_key=vlm_config["api_key"],
-            base_url=vlm_config["base_url"],
-            timeout=vlm_config["timeout"],
-            max_retries=vlm_config["max_retries"]
+        object.__setattr__(
+            self,
+            "vlm_client",
+            AsyncOpenAI(
+                api_key=vlm_config["api_key"],
+                base_url=vlm_config["base_url"],
+                timeout=vlm_config["timeout"],
+                max_retries=vlm_config["max_retries"],
+            ),
         )
-        self.vlm_model = vlm_config["model"]
-        self.vlm_model_kwargs = {
-            # "temperature": vlm_config["temperature"],
-            # "top_p": vlm_config["top_p"],
-            # "presence_penalty": vlm_config["presence_penalty"],
-            # "extra_body":{"top_k": vlm_config["top_k"], "min_p": vlm_config["min_p"]},
-            **vlm_filtered_kwargs
-        }
-        self.tools = []
-        self.logger = logging.getLogger(__name__)
+        object.__setattr__(self, "vlm_model", vlm_config["model"])
+        object.__setattr__(self, "vlm_model_kwargs", {**vlm_filtered_kwargs})
+        object.__setattr__(self, "tools", [])
+        object.__setattr__(self, "_tool_binding_kwargs", {})
+        object.__setattr__(self, "_bound_binding", None)
+        object.__setattr__(self, "logger", logging.getLogger(__name__))
+        object.__setattr__(
+            self,
+            "reasoning_llm_with_tools",
+            cast(Runnable[Any, Any], self.reasoning_llm),
+        )
     
     def with_structured_output(
         self, schema: Union[dict, type[BaseModel]], **kwargs: Any
     ) -> 'LLM':
-        self.reasoning_llm = self.reasoning_llm.with_structured_output(
-            schema=schema, 
-            **kwargs
+        updated_reasoning_llm = self.reasoning_llm.with_structured_output(
+            schema=schema,
+            **kwargs,
         )
+        object.__setattr__(self, "reasoning_llm", updated_reasoning_llm)
+        if self.tools:
+            binding_kwargs = dict(self._tool_binding_kwargs)
+            tool_choice = binding_kwargs.pop("tool_choice", None)
+            object.__setattr__(
+                self,
+                "reasoning_llm_with_tools",
+                cast(
+                    Runnable[Any, Any],
+                    self.reasoning_llm.bind_tools(
+                        self.tools,
+                        tool_choice=tool_choice,
+                        **binding_kwargs,
+                    ),
+                ),
+            )
+        else:
+            object.__setattr__(
+                self,
+                "reasoning_llm_with_tools",
+                cast(Runnable[Any, Any], self.reasoning_llm),
+            )
         return self
-
+    
     def bind_tools(self,
         tools: Sequence[
             Union[typing.Dict[str, Any], type, Callable, BaseTool]
@@ -102,49 +137,134 @@ class LLM:
         tool_choice: Optional[Union[str]] = None,
         **kwargs: Any,
         ) -> 'LLM' :
-        self.tools = tools
-        self.reasoning_llm_with_tools = self.reasoning_llm.bind_tools(
-            tools, 
-            tool_choice=tool_choice, 
-            **kwargs
-        )
+        object.__setattr__(self, "tools", list(tools))
+        if self.tools:
+            object.__setattr__(self, "_tool_binding_kwargs", {"tool_choice": tool_choice, **kwargs})
+            binding_kwargs = dict(self._tool_binding_kwargs)
+            tool_choice_value = binding_kwargs.pop("tool_choice", None)
+            binding = self.reasoning_llm.bind_tools(
+                self.tools,
+                tool_choice=tool_choice_value,
+                **binding_kwargs,
+            )
+            object.__setattr__(self, "_bound_binding", binding)
+            object.__setattr__(
+                self,
+                "reasoning_llm_with_tools",
+                cast(Runnable[Any, Any], binding),
+            )
+        else:
+            object.__setattr__(self, "_tool_binding_kwargs", {})
+            object.__setattr__(self, "_bound_binding", None)
+            object.__setattr__(
+                self,
+                "reasoning_llm_with_tools",
+                cast(Runnable[Any, Any], self.reasoning_llm),
+            )
         return self
+
+    @property
+    def bound(self) -> Runnable[Any, Any]:
+        binding = getattr(self, "_bound_binding", None)
+        target: Runnable[Any, Any]
+        if binding is not None:
+            target = cast(Runnable[Any, Any], binding)
+        else:
+            target = self._active_llm()
+        if hasattr(target, "bound"):
+            return target
+        return RunnableBinding(bound=target)
+
+    def _active_llm(self) -> Runnable[Any, Any]:
+        return self.reasoning_llm_with_tools
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: Optional[list[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        processed_messages = prepare_input_sync(
+            messages,
+            self.vlm_client,
+            self.vlm_model,
+            self.vlm_model_kwargs,
+            logger=self.logger,
+        )
+        self.logger.info("llm.generate", extra={"message_count": len(processed_messages), "tools_bound": bool(self.tools)})
+        if self.tools:
+            response = self.reasoning_llm_with_tools.invoke(processed_messages, **kwargs)
+            generation = ChatGeneration(message=response)
+            return ChatResult(generations=[generation], llm_output=None)
+        return self.reasoning_llm._generate(processed_messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: Optional[list[str]] = None,
+        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        processed_messages = await prepare_input_async(
+            messages,
+            self.vlm_client,
+            self.vlm_model,
+            self.vlm_model_kwargs,
+        )
+        self.logger.info("llm.agenerate", extra={"message_count": len(processed_messages), "tools_bound": bool(self.tools)})
+        if self.tools:
+            response = await self.reasoning_llm_with_tools.ainvoke(processed_messages, **kwargs)
+            generation = ChatGeneration(message=response)
+            return ChatResult(generations=[generation], llm_output=None)
+        return await self.reasoning_llm._agenerate(processed_messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    @property
+    def _llm_type(self) -> str:
+        return "multi_modal_ensemble"
 
     async def ainvoke(self,
                       input: Input,
                       config: Optional[RunnableConfig] = None,
                       **kwargs: Any
                     )  -> Output :
-        if has_media(input):
-            writer = get_stream_writer()
-            writer(f"Analysing Images.....\n\n")
-            processed_messages = await process_media_with_vlm(self.vlm_client, self.vlm_model, input, **self.vlm_model_kwargs)
-        else:
-            processed_messages = input
-        # processed_messages = input
-        if self.tools:
-            return await self.reasoning_llm_with_tools.ainvoke(processed_messages, config=config, **kwargs)
-        else:
-            return await self.reasoning_llm.ainvoke(processed_messages, config=config, **kwargs)
+        processed_input = await prepare_input_async(
+            input,
+            self.vlm_client,
+            self.vlm_model,
+            self.vlm_model_kwargs,
+        )
+        target_llm = self._active_llm()
+        self.logger.info(
+            "llm.ainvoke",
+            extra={
+                "input_type": type(processed_input).__name__,
+                "tools_bound": bool(self.tools),
+            },
+        )
+        return await target_llm.ainvoke(processed_input, config=config, **kwargs)
 
     async def astream(self,
                       input: Input,
                       config: Optional[RunnableConfig] = None,
                       **kwargs: Optional[Any]
                     ) -> AsyncIterator[Output]:
-        if has_media(input):
-            writer = get_stream_writer()
-            writer(f"Analysing Images.....\n\n")
-            processed_messages = await process_media_with_vlm(self.vlm_client, self.vlm_model, input, **self.vlm_model_kwargs)
-        else:
-            processed_messages = input
-        # processed_messages = input
-        if self.tools:
-            async for chunk in self.reasoning_llm_with_tools.astream(processed_messages, config=config, **kwargs):
-                yield chunk
-        else:
-            async for chunk in self.reasoning_llm.astream(processed_messages, config=config, **kwargs):
-                yield chunk
+        processed_input = await prepare_input_async(
+            input,
+            self.vlm_client,
+            self.vlm_model,
+            self.vlm_model_kwargs,
+        )
+        target_llm = self._active_llm()
+        self.logger.info(
+            "llm.astream",
+            extra={
+                "input_type": type(processed_input).__name__,
+                "tools_bound": bool(self.tools),
+            },
+        )
+        async for chunk in target_llm.astream(processed_input, config=config, **kwargs):
+            yield chunk
 
     async def astream_events(self,
                              input: Any, 
@@ -158,41 +278,33 @@ class LLM:
                              exclude_types: Optional[Sequence[str]] = None,
                              exclude_tags: Optional[Sequence[str]] = None,
                              **kwargs: Any) -> AsyncIterator[StreamEvent] :
-        if has_media(input):
-            writer = get_stream_writer()
-            writer(f"Analysing Images.....\n\n")
-            processed_messages = await process_media_with_vlm(self.vlm_client, self.vlm_model, input, **self.vlm_model_kwargs)
-        else:
-            processed_messages = input
-        # processed_messages = input
-        if self.tools:
-            async for event in self.reasoning_llm_with_tools.astream_events(
-                processed_messages, 
-                config=config, 
-                version=version,
-                include_names=include_names,
-                include_types=include_types,
-                include_tags=include_tags,
-                exclude_names=exclude_names,
-                exclude_types=exclude_types,
-                exclude_tags=exclude_tags,
-                **kwargs
-            ):
-                yield event
-        else:
-            async for event in self.reasoning_llm.astream_events(
-                processed_messages, 
-                config=config, 
-                version=version,
-                include_names=include_names,
-                include_types=include_types,
-                include_tags=include_tags,
-                exclude_names=exclude_names,
-                exclude_types=exclude_types,
-                exclude_tags=exclude_tags,
-                **kwargs
-            ):
-                yield event
+        processed_input = await prepare_input_async(
+            input,
+            self.vlm_client,
+            self.vlm_model,
+            self.vlm_model_kwargs,
+        )
+        target_llm = self._active_llm()
+        self.logger.info(
+            "llm.astream_events",
+            extra={
+                "input_type": type(processed_input).__name__,
+                "tools_bound": bool(self.tools),
+            },
+        )
+        async for event in target_llm.astream_events(
+            processed_input, 
+            config=config, 
+            version=version,
+            include_names=include_names,
+            include_types=include_types,
+            include_tags=include_tags,
+            exclude_names=exclude_names,
+            exclude_types=exclude_types,
+            exclude_tags=exclude_tags,
+            **kwargs
+        ):
+            yield event
     
     async def abatch(self,
                      inputs: list[Input],
@@ -201,30 +313,29 @@ class LLM:
                      return_exceptions: bool = False,
                      **kwargs:  Optional[Any]) -> list[Output] :
         processed_inputs = []
-        for messages in inputs:
-            if has_media(messages):
-                writer = get_stream_writer()
-                writer(f"Analysing Images.....\n\n")                
-                processed_messages = await process_media_with_vlm(self.vlm_client, self.vlm_model, messages, **self.vlm_model_kwargs)
-            else:
-                processed_messages = messages
-            # processed_messages = messages
-            processed_inputs.append(processed_messages)
-        
-        if self.tools:
-            return await self.reasoning_llm_with_tools.abatch(
-                processed_inputs, 
-                config=config, 
-                return_exceptions=return_exceptions, 
-                **kwargs
+        for item in inputs:
+            processed_inputs.append(
+                await prepare_input_async(
+                    item,
+                    self.vlm_client,
+                    self.vlm_model,
+                    self.vlm_model_kwargs,
+                )
             )
-        else:
-            return await self.reasoning_llm.abatch(
-                processed_inputs, 
-                config=config, 
-                return_exceptions=return_exceptions, 
-                **kwargs
-            )
+        target_llm = self._active_llm()
+        self.logger.info(
+            "llm.abatch",
+            extra={
+                "batch_size": len(processed_inputs),
+                "tools_bound": bool(self.tools),
+            },
+        )
+        return await target_llm.abatch(
+            processed_inputs,
+            config=config,
+            return_exceptions=return_exceptions,
+            **kwargs
+        )
 
 llm = LLM()
 
@@ -302,4 +413,3 @@ if __name__ == "__main__":
         print(f"\nOutput saved to astream_events_output.txt ({len(output_lines)} lines)")
     
     asyncio.run(test_llm())
-

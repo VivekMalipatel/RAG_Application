@@ -14,7 +14,7 @@ class ChatAgent(BaseAgent):
                  model_kwargs: Optional[Dict[str, Any]] = None,
                  vlm_kwargs: Optional[Dict[str, Any]] = None,
                  node_kwargs: Optional[Dict[str, Any]] = None,
-                 recursion_limit: Optional[int] = 25,
+                 recursion_limit: Optional[int] = 200,
                  debug: bool = False):
                 
         if prompt is None:

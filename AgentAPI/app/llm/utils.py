@@ -1,15 +1,15 @@
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
 import asyncio
 import logging
 import yaml
 from pathlib import Path
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, SystemMessage
 from langchain_core.messages.content_blocks import is_data_content_block
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain import embeddings
 from langchain_core.embeddings import Embeddings
 from langchain_core.runnables import Runnable
 from openai import AsyncOpenAI
+from langgraph.config import get_stream_writer
 
 
 def load_media_description_prompt() -> str:
@@ -326,3 +326,68 @@ def extract_chat_context(messages: List[BaseMessage]) -> str:
 def init_embeddings(model: str)-> Union[Embeddings, Runnable[Any, list[float]]]:
     from config import config
     return embeddings.init_embeddings(model=model, provider="openai", base_url=config.OPENAI_BASE_URL, api_key=config.OPENAI_API_KEY)
+
+
+def is_message_sequence(payload: Any) -> bool:
+    return isinstance(payload, list) and all(isinstance(item, BaseMessage) for item in payload)
+
+
+def _announce_media_analysis(message: str = "Analysing Images.....\n\n") -> None:
+    writer = get_stream_writer()
+    if writer and message:
+        writer(message)
+
+
+def prepare_input_sync(
+    payload: Any,
+    vlm_client: AsyncOpenAI,
+    vlm_model: str,
+    vlm_model_kwargs: Dict[str, Any],
+    *,
+    logger: Optional[logging.Logger] = None,
+    announcement: str = "Analysing Images.....\n\n",
+) -> Any:
+    if not is_message_sequence(payload):
+        return payload
+    if not has_media(payload):
+        return payload
+
+    _announce_media_analysis(announcement)
+
+    try:
+        return asyncio.run(
+            process_media_with_vlm(
+                vlm_client,
+                vlm_model,
+                payload,
+                **vlm_model_kwargs,
+            )
+        )
+    except RuntimeError as exc:
+        if "asyncio.run() cannot be called" in str(exc):
+            if logger:
+                logger.warning("Media preprocessing skipped because event loop is running")
+            return payload
+        raise
+
+
+async def prepare_input_async(
+    payload: Any,
+    vlm_client: AsyncOpenAI,
+    vlm_model: str,
+    vlm_model_kwargs: Dict[str, Any],
+    *,
+    announcement: str = "Analysing Images.....\n\n",
+) -> Any:
+    if not is_message_sequence(payload):
+        return payload
+    if not has_media(payload):
+        return payload
+
+    _announce_media_analysis(announcement)
+    return await process_media_with_vlm(
+        vlm_client,
+        vlm_model,
+        payload,
+        **vlm_model_kwargs,
+    )

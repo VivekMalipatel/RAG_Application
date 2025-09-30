@@ -2,6 +2,7 @@ import typing
 import asyncio
 import logging
 import json
+import threading
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Sequence, Union, Optional, Callable, AsyncIterator, Literal, Awaitable
@@ -12,19 +13,24 @@ from langgraph.types import (
     Command,
 )
 from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.store.base import BaseStore, IndexConfig
 from langgraph.types import All, StreamMode, Durability
 from langgraph.cache.base import BaseCache
+from langgraph.utils.runnable import RunnableCallable
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.schema import StreamEvent
 from langchain_core.runnables.utils import Output
 from langchain_core.runnables.base import Input
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, RemoveMessage
 from langchain_core.messages.base import messages_to_dict
-from langmem import create_manage_memory_tool, create_memory_store_manager, ReflectionExecutor
+from langmem import create_manage_memory_tool, create_memory_store_manager
+from langmem.reflection import ReflectionExecutor
+from langmem.short_term import summarize_messages, RunningSummary
+from langmem.utils import NamespaceTemplate
 from openai import BaseModel
 from agents.utils import (
     _load_prompt,
@@ -43,9 +49,14 @@ from agents.utils import (
     make_profile_precontext_provider,
     make_procedural_precontext_provider,
     make_utc_datetime_precontext_provider,
+    make_summary_precontext_provider,
+    coerce_running_summary,
+    consume_summary_update,
+    count_words_in_messages,
 )
 from pathlib import Path
 from llm.llm import LLM
+from llm.utils import prepare_input_async
 from embed.embed import JinaEmbeddings
 from agents.base_agents.base_state import BaseState
 from agents.base_agents.memory.base_checkpointer import BaseMemorySaver
@@ -61,7 +72,6 @@ class AgentConfig:
     node_kwargs: dict[str, Any] = field(default_factory=dict)
     debug: bool = False
     profile_memory_enabled: bool = False
-    procedural_memory_enabled: bool = False
 
 def requires_compile(fn):
     @wraps(fn)
@@ -95,8 +105,7 @@ class BaseAgent:
                  node_kwargs: Optional[dict[str, Any]] = None,
                  recursion_limit: Optional[int] = 25,
                  debug: bool = False,
-                 enable_profile_memory: bool = False,
-                 enable_procedural_memory: bool = False):
+                 enable_profile_memory: bool = False):
         
         if not config:
             raise ValueError("Runnable Config with user_id, thread_id, org_id and/or checkpoint_id must be provided.")
@@ -107,7 +116,6 @@ class BaseAgent:
             node_kwargs=node_kwargs or {},
             debug=debug,
             profile_memory_enabled=enable_profile_memory,
-            procedural_memory_enabled=enable_procedural_memory,
         )
         
         self._compiled_graph: Optional[CompiledStateGraph] = None
@@ -133,6 +141,10 @@ class BaseAgent:
         self._procedural_reflection_executor = None
         self._procedural_manage_tool = None
         self._procedural_memory_key: Optional[str] = None
+        self._summarization_executor = None
+        self._summarization_model = None
+        self._summary_updates: dict[str, dict[str, Any]] = {}
+        self._summary_lock = threading.Lock()
         
         self._checkpointer = None
         self._store = None
@@ -260,7 +272,7 @@ class BaseAgent:
         self._procedural_manage_tool = None
         self._procedural_memory_key = None
         unregister_precontext_provider(self._precontext_providers, "procedural_context")
-        if not store or not self._config.procedural_memory_enabled:
+        if not store:
             return
         namespace = ("memories", "{org_id}", "{user_id}", "procedural")
         procedural_instructions = _load_prompt("procedural_memory_instructions", base_dir=Path(__file__).parent)
@@ -332,6 +344,86 @@ class BaseAgent:
         )
         self._memory_tools.append(self._episodic_manage_tool)
 
+    def _setup_summarizer(self, store: Optional[BaseStore]):
+        self._summarization_executor = None
+        self._summarization_model = None
+        unregister_precontext_provider(self._precontext_providers, "summary_context")
+        namespace = NamespaceTemplate(("threads", "{org_id}", "{user_id}", "summary"))
+
+        summarizer = RunnableCallable(self._execute_summarization_task)
+        summarizer.namespace = namespace
+        self._summarization_model = self._llm.bind(
+            max_tokens=envconfig.SUMMARIZATION_TARGET_TOKENS
+        )
+        self._summarization_executor = ReflectionExecutor(summarizer, store=store)
+        register_precontext_provider(
+            self._precontext_providers,
+            "summary_context",
+            make_summary_precontext_provider(),
+        )
+
+    async def _prepare_messages_for_reflection(self, messages: list[Any]) -> list[Any]:
+        vlm_client = getattr(self._llm, "vlm_client", None)
+        vlm_model = getattr(self._llm, "vlm_model", None)
+        vlm_kwargs = getattr(self._llm, "vlm_model_kwargs", None)
+        if not vlm_client or not vlm_model:
+            return messages
+        try:
+            prepared = await prepare_input_async(
+                messages,
+                vlm_client,
+                vlm_model,
+                vlm_kwargs or {},
+            )
+        except Exception as exc:
+            self._logger.warning("Reflection preprocessing failed", exc_info=exc)
+            return messages
+        return prepared
+
+    def _execute_summarization_task(self, payload: dict[str, Any]) -> None:
+        thread_id = payload.get("thread_id")
+        if not thread_id:
+            return
+        model = self._summarization_model
+        messages = list(payload.get("messages", []))
+        running_summary = coerce_running_summary(payload.get("running_summary"))
+        token_history = list(payload.get("token_usage_history", []))
+        result_messages = list(messages)
+        summary_result = running_summary
+        history_result = token_history
+        if model is None:
+            self._logger.debug("Summarization model is unavailable; skipping task")
+        else:
+            try:
+                summarization_result = summarize_messages(
+                    messages,
+                    running_summary=running_summary,
+                    model=model,
+                    max_tokens=payload.get("max_tokens", envconfig.SUMMARIZATION_TARGET_TOKENS),
+                    max_tokens_before_summary=payload.get("max_tokens_before_summary", envconfig.MAX_STATE_TOKENS),
+                    max_summary_tokens=payload.get("max_summary_tokens", envconfig.SUMMARIZATION_SUMMARY_TOKENS),
+                )
+            except Exception as exc:
+                self._logger.error("Summarization task failed", exc_info=exc)
+            else:
+                summary = summarization_result.running_summary
+                if summary:
+                    trimmed_messages = list(summarization_result.messages)
+                    if trimmed_messages and isinstance(trimmed_messages[0], SystemMessage):
+                        trimmed_messages = trimmed_messages[1:]
+                    result_messages = trimmed_messages
+                    summary_result = summary
+                    history_result = []
+                else:
+                    result_messages = list(messages)
+        update = {
+            "messages": result_messages,
+            "running_summary": summary_result,
+            "token_usage_history": history_result,
+        }
+        with self._summary_lock:
+            self._summary_updates[thread_id] = update
+
     async def _get_profile_context(self, config: Optional[RunnableConfig]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
         self._profile_memory_key = None
         if not self._profile_manager or not self._config.profile_memory_enabled or not config:
@@ -362,7 +454,7 @@ class BaseAgent:
 
     async def _get_procedural_context(self, config: Optional[RunnableConfig]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
         self._procedural_memory_key = None
-        if not self._procedural_manager or not self._config.procedural_memory_enabled or not config:
+        if not self._procedural_manager or not config:
             return None, None
         try:
             results = await self._procedural_manager.asearch(limit=envconfig.PROCEDURAL_MEMORY_QUERY_LIMIT, config=config)
@@ -381,28 +473,110 @@ class BaseAgent:
         return overview, content
 
     async def llm_node(self, state: BaseState, config: RunnableConfig):
+        run_config = config or self.config
+        configurable = run_config.get("configurable", {}) if run_config else {}
+        thread_id = configurable.get("thread_id")
+
+        summary_update = consume_summary_update(self._summary_updates, self._summary_lock, thread_id)
+        base_messages = list(state.get("messages", []))
+        existing_summary = state.get("summary_context")
+        summary_context = coerce_running_summary(existing_summary) or existing_summary
+        token_history = list(state.get("token_usage_history", []) or [])
+        summarization_pending = bool(state.get("summarization_pending"))
+
+        if summary_update:
+            base_messages = list(summary_update.get("messages", base_messages))
+            updated_summary = summary_update.get("running_summary")
+            summary_context = updated_summary if updated_summary is not None else summary_context
+            token_history = list(summary_update.get("token_usage_history", []))
+            summarization_pending = False
+
+        state_for_precontext = dict(state)
+        state_for_precontext["messages"] = base_messages
+        state_for_precontext["summary_context"] = summary_context
+        state_for_precontext["token_usage_history"] = token_history
+        state_for_precontext["summarization_pending"] = summarization_pending
+
         system_parts = await build_system_precontext(
             self.prompt,
             self._precontext_providers,
-            state,
+            state_for_precontext,
             config,
             fallback_config=self.config,
             logger=self._logger,
         )
         system_messages = [SystemMessage(content="\n\n".join(system_parts))]
-        state_messages = state["messages"]
+        messages = system_messages + base_messages
 
-        messages = system_messages + state_messages
-        
         response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
- 
+
         if self._is_structured_output:
             response = AIMessage(content=json.dumps(response))
 
-        payload_messages = [*state_messages, response]
+        messages_updates: list[Any] = []
+        if summary_update:
+            messages_updates.append(RemoveMessage(id=REMOVE_ALL_MESSAGES))
+            messages_updates.extend(base_messages)
+        messages_updates.append(response)
+
+        payload_messages = [*base_messages, response]
+        preprocess_for_background = any(
+            executor is not None
+            for executor in (
+                self._summarization_executor,
+                self._reflection_executor,
+                self._profile_reflection_executor if self._config.profile_memory_enabled else None,
+                self._procedural_reflection_executor,
+                self._episodic_reflection_executor,
+            )
+        )
+        reflection_messages = payload_messages
+        if preprocess_for_background:
+            reflection_messages = await self._prepare_messages_for_reflection(payload_messages)
+
+        usage = getattr(response, "usage_metadata", None)
+        approx_tokens = count_words_in_messages(payload_messages)
+        token_entry: dict[str, int] = {"approx_tokens": approx_tokens}
+        if isinstance(usage, dict):
+            for key, value in usage.items():
+                if isinstance(value, (int, float)):
+                    token_entry[key] = int(value)
+        token_history.append(token_entry)
+        if len(token_history) > 100:
+            token_history = token_history[-100:]
+
+        soft_limit = int(envconfig.MAX_STATE_TOKENS * envconfig.SUMMARIZATION_SOFT_LIMIT_RATIO)
+        if (
+            self._summarization_executor
+            and thread_id
+            and approx_tokens >= soft_limit
+            and not summarization_pending
+        ):
+            running_summary = coerce_running_summary(summary_context)
+            if running_summary:
+                summary_context = running_summary
+            summarization_payload = {
+                "thread_id": thread_id,
+                "messages": reflection_messages,
+                "running_summary": summary_context,
+                "token_usage_history": token_history,
+                "max_tokens": envconfig.SUMMARIZATION_TARGET_TOKENS,
+                "max_tokens_before_summary": envconfig.MAX_STATE_TOKENS,
+                "max_summary_tokens": envconfig.SUMMARIZATION_SUMMARY_TOKENS,
+            }
+            try:
+                self._summarization_executor.submit(
+                    summarization_payload,
+                    after_seconds=envconfig.SUMMARIZATION_DELAY_SECONDS,
+                    config=build_memory_config(config),
+                )
+                summarization_pending = True
+            except Exception as exc:
+                self._logger.error("Summarization submission failed", exc_info=exc)
+
         if self._reflection_executor:
             payload = {
-                "messages": payload_messages,
+                "messages": reflection_messages,
                 "max_steps": envconfig.SEMANTIC_MEMORY_MAX_UPDATES_PER_TURN,
             }
             try:
@@ -415,7 +589,7 @@ class BaseAgent:
                 self._logger.error("Semantic memory submission failed", exc_info=exc)
         if self._profile_reflection_executor and self._config.profile_memory_enabled:
             profile_payload = {
-                "messages": payload_messages,
+                "messages": reflection_messages,
                 "max_steps": envconfig.PROFILE_MEMORY_MAX_UPDATES_PER_TURN,
             }
             try:
@@ -426,9 +600,9 @@ class BaseAgent:
                 )
             except Exception as exc:
                 self._logger.error("Profile memory submission failed", exc_info=exc)
-        if self._procedural_reflection_executor and self._config.procedural_memory_enabled:
+        if self._procedural_reflection_executor:
             procedural_payload = {
-                "messages": payload_messages,
+                "messages": reflection_messages,
                 "max_steps": envconfig.PROCEDURAL_MEMORY_MAX_UPDATES_PER_TURN,
             }
             try:
@@ -441,7 +615,7 @@ class BaseAgent:
                 self._logger.error("Procedural memory submission failed", exc_info=exc)
         if self._episodic_reflection_executor:
             episodic_payload = {
-                "messages": payload_messages,
+                "messages": reflection_messages,
                 "max_steps": envconfig.EPISODIC_MEMORY_MAX_UPDATES_PER_TURN,
             }
             try:
@@ -452,8 +626,13 @@ class BaseAgent:
                 )
             except Exception as exc:
                 self._logger.error("Episodic memory submission failed", exc_info=exc)
-
-        return {"messages": [response]}
+        result: dict[str, Any] = {
+            "messages": messages_updates,
+            "token_usage_history": token_history,
+            "summarization_pending": summarization_pending,
+        }
+        result["summary_context"] = summary_context
+        return result
 
     def _compile_graph(self, has_tools: bool, **compile_kwargs) -> CompiledStateGraph[StateT, ContextT, InputT, OutputT]:
         graph_builder = StateGraph(BaseState)
@@ -511,11 +690,14 @@ class BaseAgent:
             )
             self._store = store
             await self._store.setup()
+        self._summary_updates.clear()
+        self._llm_runnable = None
         self._memory_tools = []
         self._setup_semantic_manager(self._store)
         self._setup_profile_manager(self._store)
         self._setup_procedural_manager(self._store)
         self._setup_episodic_manager(self._store)
+        self._setup_summarizer(self._store)
         self._apply_tool_binding()
 
         self._interrupt_before = interrupt_before
@@ -566,10 +748,13 @@ class BaseAgent:
         _shutdown_executor("_profile_reflection_executor")
         _shutdown_executor("_procedural_reflection_executor")
         _shutdown_executor("_episodic_reflection_executor")
+        _shutdown_executor("_summarization_executor")
 
         checkpointer, store = self._checkpointer, self._store
         self._checkpointer = None
         self._store = None
+        self._summarization_model = None
+        self._summary_updates.clear()
 
         if store is not None:
             try:
