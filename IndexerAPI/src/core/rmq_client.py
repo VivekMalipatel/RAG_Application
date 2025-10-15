@@ -34,12 +34,13 @@ async def declare_application_queues(channel: AbstractRobustChannel) -> None:
     retry_queue_name = f"{main_queue_name}.retry"
     failed_queue_name = f"{main_queue_name}.failed"
     success_queue_name = f"{main_queue_name}.success"
+    max_priority = 255
 
     main_arguments = {
         "x-max-length": 1_000_000,
         "x-overflow": "drop-head",
         "x-consumer-timeout": settings.RABBITMQ_X_CONSUMER_TIMEOUT,
-        "x-max-priority": settings.RABBITMQ_MAX_PRIORITY,
+        "x-max-priority": max_priority,
         "x-dead-letter-exchange": "",
         "x-dead-letter-routing-key": retry_queue_name,
     }
@@ -108,7 +109,8 @@ async def publish_message(payload: Dict[str, Any], routing_key: Optional[str] = 
     target_routing_key = routing_key or settings.RABBITMQ_QUEUE_NAME
     if not target_routing_key:
         raise ValueError("routing_key is required")
-    message_priority = priority if priority is not None else 0
+    requested_priority = priority if priority is not None else 0
+    message_priority = max(0, min(requested_priority, 255))
     message = Message(json.dumps(payload).encode(), delivery_mode=DeliveryMode.PERSISTENT, headers=headers or {}, priority=message_priority)
     if exchange_name:
         exchange = await _rmq_channel.get_exchange(exchange_name)

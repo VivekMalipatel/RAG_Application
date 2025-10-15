@@ -1,6 +1,7 @@
 import logging
 import asyncio
 from neo4j import AsyncGraphDatabase, basic_auth
+from neo4j.exceptions import Neo4jError, TransientError, ServiceUnavailable
 from typing import Any, Dict, List, Optional
 import json
 from core.config import settings
@@ -31,20 +32,37 @@ class Neo4jHandler:
             logger.error(f"Failed to initialize Neo4j driver: {exc}")
             raise
 
+    async def _execute_with_retry(self, operation, retries: Optional[int] = None):
+        max_attempts = max(1, retries or settings.NEO4J_MAX_TRANSACTION_RETRIES)
+        backoff = max(0.0, settings.NEO4J_RETRY_BACKOFF_SECONDS)
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await operation()
+            except (TransientError, ServiceUnavailable, Neo4jError) as exc:
+                code = getattr(exc, "code", "") or ""
+                is_transient = isinstance(exc, TransientError) or "TransientError" in code
+                if not is_transient or attempt == max_attempts:
+                    raise
+                await asyncio.sleep(backoff * attempt)
+            except Exception:
+                raise
+
     async def close(self):
         if self.driver:
             await self.driver.close()
             logger.info("Neo4j driver closed")
 
     async def test_connection(self) -> bool:
-        try:
+        async def operation():
             async with self.driver.session(database=self.database) as session:
                 result = await session.run("RETURN 1 as test")
                 record = await result.single()
                 return record["test"] == 1
+        try:
+            return await self._execute_with_retry(operation, retries=1)
         except Exception as exc:
             logger.error(f"Neo4j connection test failed: {exc}")
-            return False
+            raise
 
     async def create_indexes(self):
         try:
@@ -80,274 +98,309 @@ class Neo4jHandler:
 
     async def reset_document(self, doc_properties: Dict[str, Any]) -> None:
         internal_object_id = doc_properties["internal_object_id"]
-        async with self.driver.session(database=self.database) as session:
-            tx = await session.begin_transaction()
-            try:
-                await tx.run(
-                    """
-                    MERGE (d:Document {internal_object_id: $internal_object_id})
-                    SET d = $doc_properties
-                    """,
-                    internal_object_id=internal_object_id,
-                    doc_properties=doc_properties,
-                )
-                await tx.run(
-                    """
-                    MATCH (d:Document {internal_object_id: $internal_object_id})-[:HAS_PAGE]->(p:Page)
-                    DETACH DELETE p
-                    """,
-                    internal_object_id=internal_object_id,
-                )
-                await tx.run(
-                    """
-                    MATCH (e:Entity {document_id: $internal_object_id})
-                    DETACH DELETE e
-                    """,
-                    internal_object_id=internal_object_id,
-                )
-                await tx.run(
-                    """
-                    MATCH (c:Column {document_id: $internal_object_id})
-                    DETACH DELETE c
-                    """,
-                    internal_object_id=internal_object_id,
-                )
-                await tx.run(
-                    """
-                    MATCH (r:RowValue {document_id: $internal_object_id})
-                    DETACH DELETE r
-                    """,
-                    internal_object_id=internal_object_id,
-                )
-                await tx.commit()
-                logger.info(f"Reset document state for {internal_object_id}")
-            except Exception as exc:
-                await tx.rollback()
-                logger.error(f"Error resetting document {internal_object_id}: {exc}")
-                raise
+
+        async def operation():
+            async with self.driver.session(database=self.database) as session:
+                tx = await session.begin_transaction()
+                try:
+                    await tx.run(
+                        """
+                        MERGE (d:Document {internal_object_id: $internal_object_id})
+                        SET d = $doc_properties
+                        """,
+                        internal_object_id=internal_object_id,
+                        doc_properties=doc_properties,
+                    )
+                    await tx.run(
+                        """
+                        MATCH (d:Document {internal_object_id: $internal_object_id})-[:HAS_PAGE]->(p:Page)
+                        DETACH DELETE p
+                        """,
+                        internal_object_id=internal_object_id,
+                    )
+                    await tx.run(
+                        """
+                        MATCH (e:Entity {document_id: $internal_object_id})
+                        DETACH DELETE e
+                        """,
+                        internal_object_id=internal_object_id,
+                    )
+                    await tx.run(
+                        """
+                        MATCH (c:Column {document_id: $internal_object_id})
+                        DETACH DELETE c
+                        """,
+                        internal_object_id=internal_object_id,
+                    )
+                    await tx.run(
+                        """
+                        MATCH (r:RowValue {document_id: $internal_object_id})
+                        DETACH DELETE r
+                        """,
+                        internal_object_id=internal_object_id,
+                    )
+                    await tx.commit()
+                    logger.info(f"Reset document state for {internal_object_id}")
+                except Exception as exc:
+                    await tx.rollback()
+                    raise
+
+        try:
+            await self._execute_with_retry(operation)
+        except Exception as exc:
+            logger.error(f"Error resetting document {internal_object_id}: {exc}")
+            raise
 
     async def upsert_unstructured_page(self, document_data: Dict[str, Any], page_data: Dict[str, Any]) -> None:
         internal_object_id = document_data["internal_object_id"]
-        async with self.driver.session(database=self.database) as session:
-            tx = await session.begin_transaction()
-            try:
-                await tx.run(
-                    """
-                    MATCH (d:Document {internal_object_id: $internal_object_id})
-                    OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page {page_number: $page_number})
-                    DETACH DELETE p
-                    """,
-                    internal_object_id=internal_object_id,
-                    page_number=page_data["page_number"],
-                )
-                content = json.dumps(page_data.get("messages", []))
-                page_properties = {
-                    "internal_object_id": internal_object_id,
-                    "page_number": page_data["page_number"],
-                    "user_id": document_data["user_id"],
-                    "org_id": document_data["org_id"],
-                    "source": document_data.get("source"),
-                    "filename": document_data.get("filename"),
-                    "image_s3_url": page_data.get("image_s3_url", ""),
-                    "content": content,
-                    "task_id": page_data.get("processing_task_id"),
-                }
-                if page_data.get("embedding") is not None:
-                    page_properties["embedding"] = page_data["embedding"]
-                await tx.run(
-                    """
-                    MATCH (d:Document {internal_object_id: $internal_object_id})
-                    CREATE (p:Page $page_properties)
-                    CREATE (d)-[:HAS_PAGE]->(p)
-                    """,
-                    internal_object_id=internal_object_id,
-                    page_properties=page_properties,
-                )
-                await self._process_entities_relationships(tx, page_data, document_data)
-                await tx.commit()
-            except Exception as exc:
-                await tx.rollback()
-                logger.error(f"Error upserting unstructured page {page_data['page_number']} for {internal_object_id}: {exc}")
-                raise
+
+        async def operation():
+            async with self.driver.session(database=self.database) as session:
+                tx = await session.begin_transaction()
+                try:
+                    await tx.run(
+                        """
+                        MATCH (d:Document {internal_object_id: $internal_object_id})
+                        OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page {page_number: $page_number})
+                        DETACH DELETE p
+                        """,
+                        internal_object_id=internal_object_id,
+                        page_number=page_data["page_number"],
+                    )
+                    content = json.dumps(page_data.get("messages", []))
+                    page_properties = {
+                        "internal_object_id": internal_object_id,
+                        "page_number": page_data["page_number"],
+                        "user_id": document_data["user_id"],
+                        "org_id": document_data["org_id"],
+                        "source": document_data.get("source"),
+                        "filename": document_data.get("filename"),
+                        "image_s3_url": page_data.get("image_s3_url", ""),
+                        "content": content,
+                        "task_id": page_data.get("processing_task_id"),
+                    }
+                    if page_data.get("embedding") is not None:
+                        page_properties["embedding"] = page_data["embedding"]
+                    await tx.run(
+                        """
+                        MATCH (d:Document {internal_object_id: $internal_object_id})
+                        CREATE (p:Page $page_properties)
+                        CREATE (d)-[:HAS_PAGE]->(p)
+                        """,
+                        internal_object_id=internal_object_id,
+                        page_properties=page_properties,
+                    )
+                    await self._process_entities_relationships(tx, page_data, document_data)
+                    await tx.commit()
+                except Exception as exc:
+                    await tx.rollback()
+                    raise
+
+        try:
+            await self._execute_with_retry(operation)
+        except Exception as exc:
+            logger.error(f"Error upserting unstructured page {page_data['page_number']} for {internal_object_id}: {exc}")
+            raise
 
     async def upsert_direct_chunk(self, document_data: Dict[str, Any], chunk_data: Dict[str, Any]) -> None:
         internal_object_id = document_data["internal_object_id"]
-        async with self.driver.session(database=self.database) as session:
-            tx = await session.begin_transaction()
-            try:
-                await tx.run(
-                    """
-                    MATCH (d:Document {internal_object_id: $internal_object_id})
-                    OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page {page_number: $page_number})
-                    DETACH DELETE p
-                    """,
-                    internal_object_id=internal_object_id,
-                    page_number=chunk_data["page_number"],
-                )
-                content = json.dumps(chunk_data.get("messages", []))
-                page_properties = {
-                    "internal_object_id": internal_object_id,
-                    "page_number": chunk_data["page_number"],
-                    "user_id": document_data["user_id"],
-                    "org_id": document_data["org_id"],
-                    "source": document_data.get("source"),
-                    "filename": document_data.get("filename"),
-                    "image_s3_url": chunk_data.get("image_s3_url", ""),
-                    "content": content,
-                    "task_id": chunk_data.get("processing_task_id"),
-                }
-                if chunk_data.get("embedding") is not None:
-                    page_properties["embedding"] = chunk_data["embedding"]
-                await tx.run(
-                    """
-                    MATCH (d:Document {internal_object_id: $internal_object_id})
-                    CREATE (p:Page $page_properties)
-                    CREATE (d)-[:HAS_PAGE]->(p)
-                    """,
-                    internal_object_id=internal_object_id,
-                    page_properties=page_properties,
-                )
-                await self._process_entities_relationships(tx, chunk_data, document_data)
-                await tx.commit()
-            except Exception as exc:
-                await tx.rollback()
-                logger.error(f"Error upserting direct chunk {chunk_data['page_number']} for {internal_object_id}: {exc}")
-                raise
+
+        async def operation():
+            async with self.driver.session(database=self.database) as session:
+                tx = await session.begin_transaction()
+                try:
+                    await tx.run(
+                        """
+                        MATCH (d:Document {internal_object_id: $internal_object_id})
+                        OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page {page_number: $page_number})
+                        DETACH DELETE p
+                        """,
+                        internal_object_id=internal_object_id,
+                        page_number=chunk_data["page_number"],
+                    )
+                    content = json.dumps(chunk_data.get("messages", []))
+                    page_properties = {
+                        "internal_object_id": internal_object_id,
+                        "page_number": chunk_data["page_number"],
+                        "user_id": document_data["user_id"],
+                        "org_id": document_data["org_id"],
+                        "source": document_data.get("source"),
+                        "filename": document_data.get("filename"),
+                        "image_s3_url": chunk_data.get("image_s3_url", ""),
+                        "content": content,
+                        "task_id": chunk_data.get("processing_task_id"),
+                    }
+                    if chunk_data.get("embedding") is not None:
+                        page_properties["embedding"] = chunk_data["embedding"]
+                    await tx.run(
+                        """
+                        MATCH (d:Document {internal_object_id: $internal_object_id})
+                        CREATE (p:Page $page_properties)
+                        CREATE (d)-[:HAS_PAGE]->(p)
+                        """,
+                        internal_object_id=internal_object_id,
+                        page_properties=page_properties,
+                    )
+                    await self._process_entities_relationships(tx, chunk_data, document_data)
+                    await tx.commit()
+                except Exception as exc:
+                    await tx.rollback()
+                    raise
+
+        try:
+            await self._execute_with_retry(operation)
+        except Exception as exc:
+            logger.error(f"Error upserting direct chunk {chunk_data['page_number']} for {internal_object_id}: {exc}")
+            raise
 
     async def upsert_structured_sheet(self, document_data: Dict[str, Any], sheet_data: Dict[str, Any]) -> None:
         internal_object_id = document_data["internal_object_id"]
         sheet_name = sheet_data["sheet_name"]
-        async with self.driver.session(database=self.database) as session:
-            tx = await session.begin_transaction()
-            try:
-                await tx.run(
-                    """
-                    MATCH (d:Document {internal_object_id: $internal_object_id})
-                    OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page {sheet_name: $sheet_name})
-                    DETACH DELETE p
-                    """,
-                    internal_object_id=internal_object_id,
-                    sheet_name=sheet_name,
-                )
-                page_properties = {
-                    "internal_object_id": internal_object_id,
-                    "page_number": sheet_data.get("page_number", 1),
-                    "user_id": document_data["user_id"],
-                    "org_id": document_data["org_id"],
-                    "sheet_name": sheet_name,
-                    "summary": sheet_data.get("summary", ""),
-                    "total_rows": sheet_data.get("total_rows", 0),
-                    "total_columns": sheet_data.get("total_columns", 0),
-                    "is_tabular": True,
-                    "task_id": sheet_data.get("processing_task_id"),
-                }
-                if sheet_data.get("embedding") is not None:
-                    page_properties["embedding"] = sheet_data["embedding"]
-                await tx.run(
-                    """
-                    MATCH (d:Document {internal_object_id: $internal_object_id})
-                    CREATE (p:Page $page_properties)
-                    CREATE (d)-[:HAS_PAGE]->(p)
-                    """,
-                    internal_object_id=internal_object_id,
-                    page_properties=page_properties,
-                )
-                for column_data in sheet_data.get("column_profiles", []):
-                    col_properties = {
-                        "column_name": column_data["column_name"],
-                        "column_profile": column_data["column_profile"],
-                        "user_id": document_data["user_id"],
-                        "org_id": document_data["org_id"],
-                        "document_id": internal_object_id,
-                    }
-                    if column_data.get("embedding") is not None:
-                        col_properties["embedding"] = column_data["embedding"]
+
+        async def operation():
+            async with self.driver.session(database=self.database) as session:
+                tx = await session.begin_transaction()
+                try:
                     await tx.run(
                         """
-                        MATCH (p:Page {internal_object_id: $internal_object_id, sheet_name: $sheet_name})
-                        CREATE (c:Column $col_properties)
-                        CREATE (p)-[:MENTIONS]->(c)
+                        MATCH (d:Document {internal_object_id: $internal_object_id})
+                        OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page {sheet_name: $sheet_name})
+                        DETACH DELETE p
                         """,
                         internal_object_id=internal_object_id,
                         sheet_name=sheet_name,
-                        col_properties=col_properties,
                     )
-                for row_data in sheet_data.get("row_nodes", []):
-                    row_index = row_data["row_index"]
-                    for column_name, cell_value in row_data["row_data"].items():
-                        if not cell_value:
-                            continue
-                        row_properties = {
-                            "row_index": row_index,
-                            "column_name": column_name,
-                            "value": cell_value,
+                    page_properties = {
+                        "internal_object_id": internal_object_id,
+                        "page_number": sheet_data.get("page_number", 1),
+                        "user_id": document_data["user_id"],
+                        "org_id": document_data["org_id"],
+                        "sheet_name": sheet_name,
+                        "summary": sheet_data.get("summary", ""),
+                        "total_rows": sheet_data.get("total_rows", 0),
+                        "total_columns": sheet_data.get("total_columns", 0),
+                        "is_tabular": True,
+                        "task_id": sheet_data.get("processing_task_id"),
+                    }
+                    if sheet_data.get("embedding") is not None:
+                        page_properties["embedding"] = sheet_data["embedding"]
+                    await tx.run(
+                        """
+                        MATCH (d:Document {internal_object_id: $internal_object_id})
+                        CREATE (p:Page $page_properties)
+                        CREATE (d)-[:HAS_PAGE]->(p)
+                        """,
+                        internal_object_id=internal_object_id,
+                        page_properties=page_properties,
+                    )
+                    for column_data in sheet_data.get("column_profiles", []):
+                        col_properties = {
+                            "column_name": column_data["column_name"],
+                            "column_profile": column_data["column_profile"],
                             "user_id": document_data["user_id"],
                             "org_id": document_data["org_id"],
                             "document_id": internal_object_id,
                         }
+                        if column_data.get("embedding") is not None:
+                            col_properties["embedding"] = column_data["embedding"]
                         await tx.run(
                             """
-                            MATCH (c:Column {column_name: $column_name, document_id: $internal_object_id})
-                            CREATE (r:RowValue $row_properties)
-                            CREATE (c)-[:HAS_VALUE]->(r)
+                            MATCH (p:Page {internal_object_id: $internal_object_id, sheet_name: $sheet_name})
+                            CREATE (c:Column $col_properties)
+                            CREATE (p)-[:MENTIONS]->(c)
                             """,
-                            column_name=column_name,
                             internal_object_id=internal_object_id,
-                            row_properties=row_properties,
+                            sheet_name=sheet_name,
+                            col_properties=col_properties,
                         )
-                await tx.commit()
-            except Exception as exc:
-                await tx.rollback()
-                logger.error(f"Error upserting structured sheet {sheet_name} for {internal_object_id}: {exc}")
-                raise
+                    for row_data in sheet_data.get("row_nodes", []):
+                        row_index = row_data["row_index"]
+                        for column_name, cell_value in row_data["row_data"].items():
+                            if not cell_value:
+                                continue
+                            row_properties = {
+                                "row_index": row_index,
+                                "column_name": column_name,
+                                "value": cell_value,
+                                "user_id": document_data["user_id"],
+                                "org_id": document_data["org_id"],
+                                "document_id": internal_object_id,
+                            }
+                            await tx.run(
+                                """
+                                MATCH (c:Column {column_name: $column_name, document_id: $internal_object_id})
+                                CREATE (r:RowValue $row_properties)
+                                CREATE (c)-[:HAS_VALUE]->(r)
+                                """,
+                                column_name=column_name,
+                                internal_object_id=internal_object_id,
+                                row_properties=row_properties,
+                            )
+                    await tx.commit()
+                except Exception as exc:
+                    await tx.rollback()
+                    raise
+
+        try:
+            await self._execute_with_retry(operation)
+        except Exception as exc:
+            logger.error(f"Error upserting structured sheet {sheet_name} for {internal_object_id}: {exc}")
+            raise
 
     async def upsert_structured_text_chunk(self, document_data: Dict[str, Any], sheet_name: str, chunk_data: Dict[str, Any]) -> None:
         internal_object_id = document_data["internal_object_id"]
         page_number = chunk_data["page_number"]
-        async with self.driver.session(database=self.database) as session:
-            tx = await session.begin_transaction()
-            try:
-                await tx.run(
-                    """
-                    MATCH (d:Document {internal_object_id: $internal_object_id})
-                    OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page {sheet_name: $sheet_name, page_number: $page_number})
-                    DETACH DELETE p
-                    """,
-                    internal_object_id=internal_object_id,
-                    sheet_name=sheet_name,
-                    page_number=page_number,
-                )
-                content = json.dumps(chunk_data.get("messages", []))
-                page_properties = {
-                    "internal_object_id": internal_object_id,
-                    "page_number": page_number,
-                    "user_id": document_data["user_id"],
-                    "org_id": document_data["org_id"],
-                    "sheet_name": sheet_name,
-                    "is_tabular": False,
-                    "content": content,
-                    "task_id": chunk_data.get("processing_task_id"),
-                }
-                if chunk_data.get("embedding") is not None:
-                    page_properties["embedding"] = chunk_data["embedding"]
-                await tx.run(
-                    """
-                    MATCH (d:Document {internal_object_id: $internal_object_id})
-                    CREATE (p:Page $page_properties)
-                    CREATE (d)-[:HAS_PAGE]->(p)
-                    """,
-                    internal_object_id=internal_object_id,
-                    page_properties=page_properties,
-                )
-                await self._process_entities_relationships(tx, chunk_data, document_data)
-                await tx.commit()
-            except Exception as exc:
-                await tx.rollback()
-                logger.error(f"Error upserting structured text chunk {page_number} for {internal_object_id}: {exc}")
-                raise
+
+        async def operation():
+            async with self.driver.session(database=self.database) as session:
+                tx = await session.begin_transaction()
+                try:
+                    await tx.run(
+                        """
+                        MATCH (d:Document {internal_object_id: $internal_object_id})
+                        OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page {sheet_name: $sheet_name, page_number: $page_number})
+                        DETACH DELETE p
+                        """,
+                        internal_object_id=internal_object_id,
+                        sheet_name=sheet_name,
+                        page_number=page_number,
+                    )
+                    content = json.dumps(chunk_data.get("messages", []))
+                    page_properties = {
+                        "internal_object_id": internal_object_id,
+                        "page_number": page_number,
+                        "user_id": document_data["user_id"],
+                        "org_id": document_data["org_id"],
+                        "sheet_name": sheet_name,
+                        "is_tabular": False,
+                        "content": content,
+                        "task_id": chunk_data.get("processing_task_id"),
+                    }
+                    if chunk_data.get("embedding") is not None:
+                        page_properties["embedding"] = chunk_data["embedding"]
+                    await tx.run(
+                        """
+                        MATCH (d:Document {internal_object_id: $internal_object_id})
+                        CREATE (p:Page $page_properties)
+                        CREATE (d)-[:HAS_PAGE]->(p)
+                        """,
+                        internal_object_id=internal_object_id,
+                        page_properties=page_properties,
+                    )
+                    await self._process_entities_relationships(tx, chunk_data, document_data)
+                    await tx.commit()
+                except Exception as exc:
+                    await tx.rollback()
+                    raise
+
+        try:
+            await self._execute_with_retry(operation)
+        except Exception as exc:
+            logger.error(f"Error upserting structured text chunk {page_number} for {internal_object_id}: {exc}")
+            raise
 
     async def store_unstructured_document(self, document_data: Dict[str, Any]) -> bool:
-        try:
+        async def operation():
             async with self.driver.session(database=self.database) as session:
                 tx = await session.begin_transaction()
                 try:
@@ -382,6 +435,7 @@ class Neo4jHandler:
                         internal_object_id=document_data["internal_object_id"],
                         doc_properties=doc_properties,
                     )
+
                     async def process_page_data(page_data):
                         page_properties = {
                             "page_number": page_data["page_number"],
@@ -404,6 +458,7 @@ class Neo4jHandler:
                             page_properties=page_properties,
                         )
                         await self._process_entities_relationships(tx, page_data, document_data)
+
                     for page_data in document_data.get("data", []):
                         await process_page_data(page_data)
                     await tx.commit()
@@ -413,13 +468,16 @@ class Neo4jHandler:
                     return True
                 except Exception as exc:
                     await tx.rollback()
-                    raise exc
+                    raise
+
+        try:
+            return await self._execute_with_retry(operation)
         except Exception as exc:
             logger.error(f"Error storing unstructured document: {exc}")
-            return False
+            raise
 
     async def store_structured_document(self, document_data: Dict[str, Any]) -> bool:
-        try:
+        async def operation():
             async with self.driver.session(database=self.database) as session:
                 tx = await session.begin_transaction()
                 try:
@@ -455,6 +513,7 @@ class Neo4jHandler:
                         internal_object_id=document_data["internal_object_id"],
                         doc_properties=doc_properties,
                     )
+
                     async def process_sheet_data(sheet_data):
                         if sheet_data.get("is_tabular", False):
                             page_properties = {
@@ -582,6 +641,7 @@ class Neo4jHandler:
                                 await self._process_entities_relationships(
                                     tx, chunk_data, document_data
                                 )
+
                     for sheet_data in document_data.get("data", []):
                         await process_sheet_data(sheet_data)
                     await tx.commit()
@@ -591,13 +651,16 @@ class Neo4jHandler:
                     return True
                 except Exception as exc:
                     await tx.rollback()
-                    raise exc
+                    raise
+
+        try:
+            return await self._execute_with_retry(operation)
         except Exception as exc:
             logger.error(f"Error storing structured document: {exc}")
-            return False
+            raise
 
     async def store_direct_document(self, document_data: Dict[str, Any]) -> bool:
-        try:
+        async def operation():
             async with self.driver.session(database=self.database) as session:
                 tx = await session.begin_transaction()
                 try:
@@ -631,6 +694,7 @@ class Neo4jHandler:
                         internal_object_id=document_data["internal_object_id"],
                         doc_properties=doc_properties,
                     )
+
                     async def process_chunk_data(chunk_data):
                         page_properties = {
                             "page_number": chunk_data["page_number"],
@@ -656,6 +720,7 @@ class Neo4jHandler:
                         await self._process_entities_relationships(
                             tx, chunk_data, document_data
                         )
+
                     for chunk_data in document_data.get("data", []):
                         await process_chunk_data(chunk_data)
                     await tx.commit()
@@ -665,10 +730,13 @@ class Neo4jHandler:
                     return True
                 except Exception as exc:
                     await tx.rollback()
-                    raise exc
+                    raise
+
+        try:
+            return await self._execute_with_retry(operation)
         except Exception as exc:
             logger.error(f"Error storing direct document: {exc}")
-            return False
+            raise
 
     async def _process_entities_relationships(
         self, tx, chunk_data: Dict[str, Any], document_data: Dict[str, Any]
@@ -736,13 +804,300 @@ class Neo4jHandler:
                 return records
         except Exception as exc:
             logger.error(f"Error executing Cypher query: {exc}")
-            raise exc
+            raise
+
+    async def search_across_spaces(
+        self, query_embedding: List[float], top_k: int, user_id: str, org_id: str
+    ) -> List[Dict[str, Any]]:
+        limit = max(1, top_k)
+        tasks = [
+            self._search_pages(query_embedding, limit, user_id, org_id),
+            self._search_entities(query_embedding, limit, user_id, org_id),
+            self._search_columns(query_embedding, limit, user_id, org_id),
+            self._search_relationships(query_embedding, limit, user_id, org_id),
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        aggregated: List[Dict[str, Any]] = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning(f"Vector search warning: {result}")
+                continue
+            aggregated.extend(result)
+        aggregated.sort(key=lambda item: item["score"], reverse=True)
+        return aggregated[:limit]
+
+    async def _search_pages(
+        self, query_embedding: List[float], top_k: int, user_id: str, org_id: str
+    ) -> List[Dict[str, Any]]:
+        query = (
+            "CALL db.index.vector.queryNodes($index_name, $top_k, $embedding) "
+            "YIELD node, score "
+            "WITH node, score WHERE node.user_id = $user_id AND node.org_id = $org_id "
+            "RETURN node, score"
+        )
+        records = await self._run_vector_query(
+            query,
+            {
+                "index_name": "page_embedding_index",
+                "top_k": top_k,
+                "embedding": query_embedding,
+                "user_id": user_id,
+                "org_id": org_id,
+            },
+        )
+        results: List[Dict[str, Any]] = []
+        for record in records:
+            node = record.get("node")
+            if not node:
+                continue
+            node_props = dict(node)
+            node_props.pop("embedding", None)
+            content = node_props.pop("content", None)
+            snippet = self._extract_text_snippet(content)
+            item: Dict[str, Any] = {
+                "space": "page",
+                "score": self._parse_score(record.get("score")),
+            }
+            document_id = node_props.get("internal_object_id")
+            if document_id:
+                item["document_id"] = document_id
+            page_number = node_props.get("page_number")
+            if page_number is not None:
+                item["page_number"] = page_number
+            sheet_name = node_props.get("sheet_name")
+            if sheet_name:
+                item["sheet_name"] = sheet_name
+            filename = node_props.get("filename")
+            if filename:
+                item["filename"] = filename
+            summary = node_props.get("summary")
+            if summary:
+                item["summary"] = self._truncate_text(summary)
+            if snippet:
+                item["snippet"] = snippet
+            user_id = node_props.get("user_id")
+            if user_id:
+                item["user_id"] = user_id
+            org_id = node_props.get("org_id")
+            if org_id:
+                item["org_id"] = org_id
+            results.append(item)
+        return results
+
+    async def _search_entities(
+        self, query_embedding: List[float], top_k: int, user_id: str, org_id: str
+    ) -> List[Dict[str, Any]]:
+        query = (
+            "CALL db.index.vector.queryNodes($index_name, $top_k, $embedding) "
+            "YIELD node, score "
+            "WITH node, score WHERE node.user_id = $user_id AND node.org_id = $org_id "
+            "RETURN node, score"
+        )
+        records = await self._run_vector_query(
+            query,
+            {
+                "index_name": "entity_embedding_index",
+                "top_k": top_k,
+                "embedding": query_embedding,
+                "user_id": user_id,
+                "org_id": org_id,
+            },
+        )
+        results: List[Dict[str, Any]] = []
+        for record in records:
+            node = record.get("node")
+            if not node:
+                continue
+            node_props = dict(node)
+            node_props.pop("embedding", None)
+            item: Dict[str, Any] = {
+                "space": "entity",
+                "score": self._parse_score(record.get("score")),
+            }
+            document_id = node_props.get("document_id")
+            if document_id:
+                item["document_id"] = document_id
+            entity_id = node_props.get("id")
+            if entity_id:
+                item["entity_id"] = entity_id
+            entity_type = node_props.get("entity_type")
+            if entity_type:
+                item["entity_type"] = entity_type
+            entity_profile = node_props.get("entity_profile")
+            if entity_profile:
+                item["entity_profile"] = self._truncate_text(entity_profile)
+                item["snippet"] = self._truncate_text(entity_profile)
+            user_id = node_props.get("user_id")
+            if user_id:
+                item["user_id"] = user_id
+            org_id = node_props.get("org_id")
+            if org_id:
+                item["org_id"] = org_id
+            results.append(item)
+        return results
+
+    async def _search_columns(
+        self, query_embedding: List[float], top_k: int, user_id: str, org_id: str
+    ) -> List[Dict[str, Any]]:
+        query = (
+            "CALL db.index.vector.queryNodes($index_name, $top_k, $embedding) "
+            "YIELD node, score "
+            "WITH node, score WHERE node.user_id = $user_id AND node.org_id = $org_id "
+            "RETURN node, score"
+        )
+        records = await self._run_vector_query(
+            query,
+            {
+                "index_name": "column_embedding_index",
+                "top_k": top_k,
+                "embedding": query_embedding,
+                "user_id": user_id,
+                "org_id": org_id,
+            },
+        )
+        results: List[Dict[str, Any]] = []
+        for record in records:
+            node = record.get("node")
+            if not node:
+                continue
+            node_props = dict(node)
+            node_props.pop("embedding", None)
+            item: Dict[str, Any] = {
+                "space": "column",
+                "score": self._parse_score(record.get("score")),
+            }
+            document_id = node_props.get("document_id") or node_props.get("internal_object_id")
+            if document_id:
+                item["document_id"] = document_id
+            column_name = node_props.get("column_name")
+            if column_name:
+                item["column_name"] = column_name
+            sheet_name = node_props.get("sheet_name")
+            if sheet_name:
+                item["sheet_name"] = sheet_name
+            column_profile = node_props.get("column_profile")
+            if column_profile:
+                item["column_profile"] = self._truncate_text(column_profile)
+                item["snippet"] = self._truncate_text(column_profile)
+            user_id = node_props.get("user_id")
+            if user_id:
+                item["user_id"] = user_id
+            org_id = node_props.get("org_id")
+            if org_id:
+                item["org_id"] = org_id
+            results.append(item)
+        return results
+
+    async def _search_relationships(
+        self, query_embedding: List[float], top_k: int, user_id: str, org_id: str
+    ) -> List[Dict[str, Any]]:
+        query = (
+            "CALL db.index.vector.queryRelationships($index_name, $top_k, $embedding) "
+            "YIELD relationship, score "
+            "MATCH (source)-[rel]->(target) WHERE rel = relationship "
+            "WHERE rel.user_id = $user_id AND rel.org_id = $org_id "
+            "AND source.user_id = $user_id AND source.org_id = $org_id "
+            "AND target.user_id = $user_id AND target.org_id = $org_id "
+            "RETURN rel AS relationship, score, source.id AS source_id, target.id AS target_id"
+        )
+        records = await self._run_vector_query(
+            query,
+            {
+                "index_name": "relationship_embedding_index",
+                "top_k": top_k,
+                "embedding": query_embedding,
+                "user_id": user_id,
+                "org_id": org_id,
+            },
+        )
+        results: List[Dict[str, Any]] = []
+        for record in records:
+            relationship = record.get("relationship")
+            if not relationship:
+                continue
+            rel_props = dict(relationship)
+            rel_props.pop("embedding", None)
+            item: Dict[str, Any] = {
+                "space": "relationship",
+                "score": self._parse_score(record.get("score")),
+            }
+            document_id = rel_props.get("document_id")
+            if document_id:
+                item["document_id"] = document_id
+            relation_type = rel_props.get("relation_type")
+            if relation_type:
+                item["relation_type"] = relation_type
+            relation_profile = rel_props.get("relation_profile")
+            if relation_profile:
+                item["relation_profile"] = self._truncate_text(relation_profile)
+                item["snippet"] = self._truncate_text(relation_profile)
+            user_id = rel_props.get("user_id")
+            if user_id:
+                item["user_id"] = user_id
+            org_id = rel_props.get("org_id")
+            if org_id:
+                item["org_id"] = org_id
+            source_id = record.get("source_id")
+            if source_id:
+                item["source_entity_id"] = source_id
+            target_id = record.get("target_id")
+            if target_id:
+                item["target_entity_id"] = target_id
+            results.append(item)
+        return results
+
+    async def _run_vector_query(
+        self, query: str, parameters: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(query, parameters)
+            return await result.data()
+
+    def _extract_text_snippet(self, raw_content: Any) -> Optional[str]:
+        if not raw_content:
+            return None
+        if isinstance(raw_content, str):
+            try:
+                parsed = json.loads(raw_content)
+            except Exception:
+                parsed = None
+        else:
+            parsed = raw_content
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, dict):
+                    content = item.get("content")
+                    if isinstance(content, list):
+                        for chunk in content:
+                            if isinstance(chunk, dict):
+                                text_value = chunk.get("text")
+                                if text_value:
+                                    return self._truncate_text(text_value)
+                    if isinstance(content, str) and content:
+                        return self._truncate_text(content)
+        if isinstance(raw_content, str):
+            return self._truncate_text(raw_content)
+        return None
+
+    def _truncate_text(self, value: Optional[str], limit: int = 200) -> Optional[str]:
+        if not value:
+            return None
+        text = value.strip()
+        if len(text) > limit:
+            return text[:limit]
+        return text
+
+    def _parse_score(self, raw_score: Any) -> float:
+        try:
+            return float(raw_score)
+        except (TypeError, ValueError):
+            return 0.0
 
     async def delete_document(
         self, user_id: str, org_id: str, source: str, filename: str
     ) -> bool:
         internal_object_id = f"{org_id}_{user_id}_{source}_{filename}"
-        try:
+        async def operation():
             async with self.driver.session(database=self.database) as session:
                 query = """
                 MATCH (d:Document {user_id: $user_id, org_id: $org_id, internal_object_id: $internal_object_id})
@@ -762,9 +1117,12 @@ class Neo4jHandler:
                 )
                 logger.info(f"Deleted document: {internal_object_id}")
                 return True
+
+        try:
+            return await self._execute_with_retry(operation)
         except Exception as exc:
             logger.error(f"Error deleting document: {exc}")
-            return False
+            raise
 
 _neo4j_handler: Optional[Neo4jHandler] = None
 

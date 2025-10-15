@@ -2,6 +2,7 @@ import asyncio
 import io
 import logging
 import os
+import sys
 import uuid
 import pandas as pd
 import pypdf
@@ -16,6 +17,17 @@ from core.queue.rabbitmq_handler import rabbitmq_handler
 from core.config import settings
 
 logger = logging.getLogger(__name__)
+
+_REQUIRED_RECURSION_LIMIT = 10000
+if sys.getrecursionlimit() < _REQUIRED_RECURSION_LIMIT:
+    sys.setrecursionlimit(_REQUIRED_RECURSION_LIMIT)
+
+def _extract_page_bytes(reader: pypdf.PdfReader, index: int) -> bytes:
+    writer = pypdf.PdfWriter()
+    writer.add_page(reader.pages[index])
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
 
 class FileProcessor(BaseProcessor):
     def __init__(self):
@@ -144,26 +156,34 @@ class FileProcessor(BaseProcessor):
         s3_handler = await get_global_s3_handler()
         s3_base_path = context["s3_base_path"]
         document = context["document"]
+        fanout_limit = settings.UNSTRUCTURED_FANOUT_CONCURRENCY or settings.MAX_DEQUEUE_CONCURRENCY
+        semaphore = asyncio.Semaphore(max(1, fanout_limit))
 
         async def process_page(index: int):
-            writer = pypdf.PdfWriter()
-            writer.add_page(reader.pages[index])
-            buffer = io.BytesIO()
-            writer.write(buffer)
-            page_bytes = buffer.getvalue()
-            page_key = f"{s3_base_path}/pages/page_{index + 1}.pdf"
-            await s3_handler.upload_bytes(page_bytes, page_key)
-            chunk_payload = {
-                "document": document,
-                "page_number": index + 1,
-                "page_s3_key": page_key,
-                "total_pages": total_pages,
-                "s3_base_path": s3_base_path,
-            }
-            chunk_task = TaskMessage(task_id=str(uuid.uuid4()), task_type=TaskType.UNSTRUCTURED_PAGE, payload=chunk_payload)
-            await rabbitmq_handler.enqueue_task(chunk_task)
+            async with semaphore:
+                try:
+                    page_bytes = await asyncio.to_thread(_extract_page_bytes, reader, index)
+                except RecursionError as exc:
+                    raise RuntimeError(f"Failed to split page {index + 1}: recursion depth exceeded") from exc
 
-        await asyncio.gather(*[process_page(i) for i in range(total_pages)])
+                page_key = f"{s3_base_path}/pages/page_{index + 1}.pdf"
+                await s3_handler.upload_bytes(page_bytes, page_key)
+                chunk_payload = {
+                    "document": document,
+                    "page_number": index + 1,
+                    "page_s3_key": page_key,
+                    "total_pages": total_pages,
+                    "s3_base_path": s3_base_path,
+                }
+                chunk_task = TaskMessage(task_id=str(uuid.uuid4()), task_type=TaskType.UNSTRUCTURED_PAGE, payload=chunk_payload)
+                await rabbitmq_handler.enqueue_task(chunk_task)
+
+        async with asyncio.TaskGroup() as task_group:
+            for page_index in range(total_pages):
+                task_group.create_task(process_page(page_index))
+        logger.info(
+            f"Queued {total_pages} unstructured pages for {document['internal_object_id']}"
+        )
 
     async def _fan_out_structured(self, context: dict, file_data: bytes, file_type: str) -> None:
         s3_handler = await get_global_s3_handler()

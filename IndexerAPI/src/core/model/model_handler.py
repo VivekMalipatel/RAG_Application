@@ -181,6 +181,109 @@ class ModelHandler:
         5. Handle coreference resolution (he/she -> actual name)
         6. Extract document structure and content elements
         7. For images, consider visual entities, charts, diagrams, and relationships
+            
+        JSON SCHEMA DESCRIPTION:
+        Your response must be a JSON object containing two main arrays:
+        - "entities": An array of entity objects, each representing a distinct person, place, thing, concept, or identifier found in the content
+        - "relationships": An array of relationship objects, each describing how two entities are connected or related
+        
+        Each entity object must contain:
+        - "id": A unique identifier in lowercase with underscores (e.g., "john_smith", "acme_corporation")
+        - "text": The original text as it appears in the document
+        - "entity_type": The category of entity from the predefined types
+        - "entity_profile": A detailed description of the entity's role, context, and significance
+        
+        Each relationship object must contain:
+        - "source": The ID of the first entity in the relationship
+        - "target": The ID of the second entity in the relationship
+        - "relation_type": The type of relationship from the predefined types
+        - "relation_profile": A detailed description of how and why these entities are related
+
+        COMPREHENSIVE ENTITY TYPES:
+        - PERSON: Individuals, authors, speakers, contacts, stakeholders, customers, family members
+        - ORGANIZATION: Companies, institutions, groups, teams, departments, agencies
+        - LOCATION: Places, addresses, cities, countries, regions, facilities, venues
+        - DOCUMENT: Files, reports, articles, books, papers, presentations, manuals
+        - IDENTIFIER: IDs, codes, numbers, references, accounts, serial numbers
+        - CONCEPT: Ideas, topics, subjects, themes, methodologies, principles
+        - FINANCIAL: Money, costs, prices, budgets, investments, transactions
+        - DATE_TIME: Dates, times, deadlines, schedules, periods, durations
+        - REQUIREMENT: Goals, objectives, specifications, criteria, standards
+        - POSITION_TITLE: Job titles, roles, positions, responsibilities
+        - CONTACT_INFO: Phone numbers, emails, addresses, social media
+        - ASSET: Equipment, tools, resources, technology, systems
+        - PROCESS: Procedures, workflows, methods, operations, activities
+        - CLASSIFICATION: Categories, types, levels, priorities, statuses
+        - PRODUCT_SERVICE: Products, services, offerings, solutions
+        - METRIC: Measurements, statistics, performance indicators, benchmarks
+
+        COMPREHENSIVE RELATIONSHIP TYPES:
+        - WORKS_FOR: Employment or service relationship
+        - MANAGES: Management or supervisory relationship
+        - REPORTS_TO: Hierarchical reporting structure
+        - COLLABORATES_WITH: Working partnership or cooperation
+        - ASSOCIATED_WITH: General association or connection
+        - LOCATED_AT: Physical or logical location
+        - VALID_FROM/UNTIL: Temporal validity and duration
+        - RESPONSIBLE_FOR: Accountability and ownership
+        - AUTHORED_BY: Creation or authorship
+        - REFERENCES: Citations, mentions, cross-references
+        - CONTAINS: Structural containment or inclusion
+        - PARTICIPATES_IN: Involvement or engagement
+        - RELATED_TO: General relationship or connection
+        - DEPENDS_ON: Dependencies and prerequisites
+        - ASSIGNED_TO: Task or responsibility assignment
+        - DESCRIBES: Descriptive or explanatory relationship
+        - BELONGS_TO: Ownership or membership
+        - COMMUNICATES_WITH: Communication or interaction
+
+        DOCUMENT STRUCTURE EXTRACTION:
+        - Document title, subtitle, and purpose
+        - Section headings and organization
+        - Document type and category
+        - Version information and dates
+        - Author and contributor information
+        - Key topics and themes
+        - Important data and statistics
+        - Contact information and references
+
+        TABULAR DATA EXTRACTION:
+        - Extract structured data from tables and charts
+        - Identify headers, columns, and data relationships
+        - Capture numerical data and statistics
+        - Extract schedules and timeline information
+        - Process organizational charts and diagrams
+        - Extract performance metrics and data
+
+        GENERAL DOCUMENT EXTRACTION:
+        - Main topics and themes
+        - Key concepts and ideas
+        - Important facts and information
+        - Procedures and instructions
+        - Recommendations and conclusions
+        - Contact information and references
+        - Dates and temporal information
+        - Quantitative data and measurements
+
+        The goal is to provide comprehensive document intelligence with entities (Maximum of 50 top most entities) and relationships extraction for any general or personal context, capturing every significant detail relevant for understanding, analysis, and knowledge management.
+        
+        Output Schema:
+
+        class EntitySchema(BaseModel):
+            id: str
+            text: str 
+            entity_type: str
+            entity_profile: str
+
+        class RelationSchema(BaseModel):
+            source: str 
+            target: str 
+            relation_type: str
+            relation_profile: str 
+
+        class EntityRelationSchema(BaseModel):
+            entities: List[EntitySchema]
+            relationships: List[RelationSchema]
         """
         system_message = {"role": "system", "content": extraction_prompt}
         has_image = len(messages[0]["content"]) > 1

@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 RUN python3 -c "import sys; sys.path.append('/usr/lib/python3/dist-packages'); import uno; print('UNO library successfully imported')" || echo "UNO library not found, but continuing..."
 
-COPY app/ ./
+COPY src/ ./src/
 COPY supervisord.conf /etc/supervisord.conf
 
 ENV PORT=8009

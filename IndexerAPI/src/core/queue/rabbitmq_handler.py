@@ -29,7 +29,7 @@ def _failed_queue_name() -> str:
 
 
 def _max_priority() -> int:
-    return max(1, settings.RABBITMQ_MAX_PRIORITY)
+    return 255
 
 
 def _calculate_task_priority(task_message: TaskMessage) -> int:
