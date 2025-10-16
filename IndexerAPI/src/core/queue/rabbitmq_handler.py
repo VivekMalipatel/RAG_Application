@@ -53,20 +53,29 @@ async def _send_to_success_queue(task_message: TaskMessage, processing_time: flo
 
 
 async def _send_to_failed_queue(task_message: Optional[TaskMessage], error_message: str, stack_trace: str, attempt: int, original_body: bytes) -> None:
-    payload: Dict[str, Any] = {
+    headers: Dict[str, Any] = {
+        "failure_reason": error_message,
+        "failure_attempt": attempt,
+        "failure_timestamp": datetime.now().isoformat(),
+    }
+    if task_message is not None:
+        payload = task_message.to_dict()
+        priority = _calculate_task_priority(task_message)
+        headers["task_type"] = task_message.task_type.value
+        await publish_message(payload, routing_key=_failed_queue_name(), headers=headers, priority=priority)
+        return
+
+    metadata_payload: Dict[str, Any] = {
         "error": error_message,
         "stack_trace": stack_trace,
         "attempt": attempt,
         "failed_at": datetime.now().isoformat(),
     }
-    if task_message:
-        payload["task"] = task_message.to_dict()
-    else:
-        try:
-            payload["raw_body"] = json.loads(original_body.decode())
-        except Exception:
-            payload["raw_body"] = original_body.decode(errors="replace")
-    await publish_message(payload, routing_key=_failed_queue_name())
+    try:
+        metadata_payload["raw_body"] = json.loads(original_body.decode())
+    except Exception:
+        metadata_payload["raw_body"] = original_body.decode(errors="replace")
+    logger.warning("Dropping invalid task payload after failure: %s", metadata_payload)
 
 class TaskQueueConsumer(BaseConsumer):
     def __init__(self, orchestrator):

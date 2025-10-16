@@ -113,6 +113,50 @@ class S3Handler:
             objects = [item["Key"] for item in response["Contents"]]
         return objects
 
+    async def delete_prefix(self, prefix: str):
+        if not prefix:
+            return True
+        if not self._initialized:
+            await self.initialize()
+        try:
+            async with await self._get_s3_client() as client:
+                continuation_token = None
+                deleted_any = False
+                while True:
+                    list_kwargs = {
+                        "Bucket": self.bucket_name,
+                        "Prefix": prefix,
+                    }
+                    if continuation_token:
+                        list_kwargs["ContinuationToken"] = continuation_token
+                    response = await client.list_objects_v2(**list_kwargs)
+                    contents = response.get("Contents", [])
+                    if not contents:
+                        break
+                    delete_payload = {
+                        "Bucket": self.bucket_name,
+                        "Delete": {
+                            "Objects": [{"Key": item["Key"]} for item in contents],
+                            "Quiet": True,
+                        },
+                    }
+                    await client.delete_objects(**delete_payload)
+                    deleted_any = True
+                    continuation_token = response.get("NextContinuationToken")
+                    if not response.get("IsTruncated") or not continuation_token:
+                        break
+                if deleted_any:
+                    logger.info(f"Deleted objects with prefix {prefix}")
+                else:
+                    logger.info(f"No objects found for prefix {prefix}")
+                return True
+        except ClientError as exc:
+            logger.error(f"Error deleting objects with prefix {prefix}: {str(exc)}")
+            return False
+        except Exception as exc:
+            logger.error(f"Unexpected error deleting objects with prefix {prefix}: {str(exc)}")
+            return False
+
     async def upload_file(self, local_file_path, object_key):
         if not self._initialized:
             await self.initialize()
@@ -201,3 +245,10 @@ async def cleanup_global_s3_handler():
     global _global_s3_handler, _global_s3_session
     _global_s3_handler = None
     _global_s3_session = None
+
+def build_document_s3_base_path(org_id: str, user_id: str, source: str, filename: str) -> str:
+    base_filename = os.path.splitext(filename or "")[0]
+    sanitized = "".join(c if c.isalnum() or c in ["-", "_"] else "_" for c in base_filename)
+    if not sanitized:
+        sanitized = "document"
+    return f"{org_id}/{user_id}/{source}/{sanitized}"

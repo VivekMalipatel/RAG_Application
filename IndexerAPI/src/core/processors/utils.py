@@ -34,24 +34,30 @@ async def convert_to_pdf(file_data: bytes, file_type: str) -> bytes:
             temp_output_path = f"/tmp/{identifier}_output_document.pdf"
             with open(temp_input_path, "wb") as temp_file:
                 temp_file.write(input_bytes.getvalue())
+            host = settings.UNOSERVER_HOST
+            port = settings.UNOSERVER_PORT
+            if host is None or port is None:
+                raise ValueError("Unoconvert host or port not configured")
             cmd = [
                 "unoconvert",
                 "--host-location",
                 "remote",
                 "--host",
-                settings.UNOSERVER_HOST,
+                str(host),
                 "--port",
-                settings.UNOSERVER_PORT,
+                str(port),
                 temp_input_path,
                 temp_output_path,
             ]
-            subprocess.run(cmd, capture_output=True, text=True, check=True)
-            with open(temp_output_path, "rb") as output_file:
-                pdf_data = output_file.read()
-            if os.path.exists(temp_input_path):
-                os.remove(temp_input_path)
-            if os.path.exists(temp_output_path):
-                os.remove(temp_output_path)
+            try:
+                subprocess.run(cmd, capture_output=True, text=True, check=True)
+                with open(temp_output_path, "rb") as output_file:
+                    pdf_data = output_file.read()
+            finally:
+                if os.path.exists(temp_input_path):
+                    os.remove(temp_input_path)
+                if os.path.exists(temp_output_path):
+                    os.remove(temp_output_path)
             return pdf_data
         return await loop.run_in_executor(None, _convert_pdf)
     except Exception as exc:

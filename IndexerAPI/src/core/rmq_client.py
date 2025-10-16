@@ -35,6 +35,8 @@ async def declare_application_queues(channel: AbstractRobustChannel) -> None:
     failed_queue_name = f"{main_queue_name}.failed"
     success_queue_name = f"{main_queue_name}.success"
     max_priority = 255
+    retry_ttl_ms = max(settings.RABBITMQ_RETRY_DELAY_MS, 300000)
+    failed_ttl_ms = max(settings.RABBITMQ_FAILED_TTL_MS, retry_ttl_ms)
 
     main_arguments = {
         "x-max-length": 1_000_000,
@@ -54,7 +56,7 @@ async def declare_application_queues(channel: AbstractRobustChannel) -> None:
     retry_arguments = {
         "x-max-length": 1_000_000,
         "x-overflow": "drop-head",
-        "x-message-ttl": settings.RABBITMQ_RETRY_DELAY_MS,
+        "x-message-ttl": retry_ttl_ms,
         "x-dead-letter-exchange": "",
         "x-dead-letter-routing-key": main_queue_name,
     }
@@ -64,7 +66,13 @@ async def declare_application_queues(channel: AbstractRobustChannel) -> None:
         arguments=retry_arguments,
     )
 
-    failed_arguments = {"x-max-length": 1_000_000, "x-overflow": "drop-head"}
+    failed_arguments = {
+        "x-max-length": 1_000_000,
+        "x-overflow": "drop-head",
+        "x-message-ttl": failed_ttl_ms,
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": main_queue_name,
+    }
     await channel.declare_queue(
         failed_queue_name,
         durable=True,

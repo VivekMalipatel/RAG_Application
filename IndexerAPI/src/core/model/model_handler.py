@@ -181,6 +181,7 @@ class ModelHandler:
         5. Handle coreference resolution (he/she -> actual name)
         6. Extract document structure and content elements
         7. For images, consider visual entities, charts, diagrams, and relationships
+        8. If There are no entities or relationships, return empty arrays
             
         JSON SCHEMA DESCRIPTION:
         Your response must be a JSON object containing two main arrays:

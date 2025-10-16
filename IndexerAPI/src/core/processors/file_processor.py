@@ -1,7 +1,6 @@
 import asyncio
 import io
 import logging
-import os
 import sys
 import uuid
 import pandas as pd
@@ -11,7 +10,7 @@ from core.processors.base_processor import BaseProcessor
 from core.processors.utils import detect_file_type, download_file_from_s3_url, convert_to_pdf
 from core.markitdown.markdown_handler import MarkDown
 from core.storage.neo4j_handler import get_neo4j_handler
-from core.storage.s3_handler import get_global_s3_handler
+from core.storage.s3_handler import build_document_s3_base_path, get_global_s3_handler
 from core.queue.task_types import TaskMessage, TaskType
 from core.queue.rabbitmq_handler import rabbitmq_handler
 from core.config import settings
@@ -85,8 +84,7 @@ class FileProcessor(BaseProcessor):
         metadata = payload.get("metadata", {})
         filename = metadata.get("filename", f"file_{uuid.uuid1()}")
         internal_object_id = f"{org_id}_{user_id}_{source}_{filename}"
-        base_filename = os.path.splitext(filename)[0]
-        s3_base_path = f"{org_id}/{user_id}/{source}/{self._safe_filename(base_filename)}"
+        s3_base_path = build_document_s3_base_path(org_id, user_id, source, filename)
         document = {
             "internal_object_id": internal_object_id,
             "user_id": user_id,
