@@ -321,7 +321,7 @@ class ModelHandler:
                         model=settings.VLM_MODEL,
                         messages=[system_message] + image_messages,
                         response_format=EntityRelationSchema,
-                        max_completion_tokens=settings.VLM_MAX_TOKENS,
+                        #max_completion_tokens=settings.VLM_MAX_TOKENS,
                     )
                     parsed = response.choices[0].message.parsed
                     entities = [entity.model_dump() for entity in parsed.entities]
@@ -343,7 +343,7 @@ class ModelHandler:
             model=settings.REASONING_MODEL,
             messages=[system_message] + text_messages,
             response_format=EntityRelationSchema,
-            max_completion_tokens=settings.REASONING_MAX_TOKENS,
+            #max_completion_tokens=settings.REASONING_MAX_TOKENS,
         )
         try:
             parsed = response.choices[0].message.parsed
@@ -395,7 +395,7 @@ class ModelHandler:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_completion_tokens=settings.REASONING_MAX_TOKENS,
+            #max_completion_tokens=settings.REASONING_MAX_TOKENS,
         )
         try:
             content = response.choices[0].message.content
@@ -435,7 +435,7 @@ class ModelHandler:
                 {"role": "user", "content": user_prompt},
             ],
             response_format=ColumnProfilesSchema,
-            max_completion_tokens=settings.REASONING_MAX_TOKENS,
+            #max_completion_tokens=settings.REASONING_MAX_TOKENS,
         )
         try:
             parsed_result = response.choices[0].message.parsed
