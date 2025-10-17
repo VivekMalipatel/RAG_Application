@@ -24,10 +24,9 @@ COPY supervisord.conf /etc/supervisord.conf
 
 ENV PORT=8009
 ENV WORKERS=1
-ENV UNOSERVER_HOST=localhost
 ENV UNOSERVER_PORT=2003
 ENV UNO_PATH="/usr/lib/python3/dist-packages"
 EXPOSE ${PORT}
-EXPOSE 2003
+EXPOSE ${UNOSERVER_PORT}
 
 CMD ["supervisord", "-c", "/etc/supervisord.conf"]

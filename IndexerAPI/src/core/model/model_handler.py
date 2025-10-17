@@ -173,15 +173,18 @@ class ModelHandler:
 
     async def extract_entities_relationships(self, messages: List[dict]) -> Dict[str, Any]:
         extraction_prompt = """
+        You are an expert knowledge graph extraction system specialized in identifying entities and relationships from multimodal documents. Your task is to analyze text and visual content to extract structured information that will be used for graph-based knowledge retrieval.
+        
         CRITICAL EXTRACTION REQUIREMENTS:
         1. Extract all identifiable information with high precision for general use cases
-        2. Create entity IDs using lowercase with underscores: "John Smith" -> "john_smith"
+        2. Create entity IDs using lowercase with underscores
         3. Extract relationships with contextual information
         4. Provide detailed entity profiles with roles, descriptions, and contextual standing
         5. Handle coreference resolution (he/she -> actual name)
         6. Extract document structure and content elements
         7. For images, consider visual entities, charts, diagrams, and relationships
-        8. If There are no entities or relationships, return empty arrays
+        
+        If There are no entities or relationships, return empty arrays
             
         JSON SCHEMA DESCRIPTION:
         Your response must be a JSON object containing two main arrays:
@@ -189,7 +192,7 @@ class ModelHandler:
         - "relationships": An array of relationship objects, each describing how two entities are connected or related
         
         Each entity object must contain:
-        - "id": A unique identifier in lowercase with underscores (e.g., "john_smith", "acme_corporation")
+        - "id": A unique identifier in lowercase with underscores
         - "text": The original text as it appears in the document
         - "entity_type": The category of entity from the predefined types
         - "entity_profile": A detailed description of the entity's role, context, and significance
@@ -266,7 +269,7 @@ class ModelHandler:
         - Dates and temporal information
         - Quantitative data and measurements
 
-        The goal is to provide comprehensive document intelligence with entities (Maximum of 50 top most entities) and relationships extraction for any general or personal context, capturing every significant detail relevant for understanding, analysis, and knowledge management.
+        The goal is to provide comprehensive document intelligence with entities and relationships extraction for any general or personal context, capturing every significant detail relevant for understanding, analysis, and knowledge management.
         
         Output Schema:
 
@@ -393,9 +396,6 @@ class ModelHandler:
                 {"role": "user", "content": user_prompt},
             ],
             max_completion_tokens=settings.REASONING_MAX_TOKENS,
-            temperature=0.5,
-            top_p=0.2,
-            frequency_penalty=0.5,
         )
         try:
             content = response.choices[0].message.content
