@@ -4,7 +4,28 @@ from typing import Optional, Dict, Any
 from langchain_core.runnables import RunnableConfig
 
 from agents.base_agents.base_agent import BaseAgent
-from tools.core_tools.knowledge_search.knowledge_search_tool import knowledge_search_tool
+from tools.core_tools.knowledge_search import (
+    search_documents,
+    get_document_details,
+    search_pages_by_content,
+    search_pages_in_document,
+    get_page_details,
+    search_entities_by_semantic,
+    search_entities_by_type,
+    search_entities_by_text,
+    get_entity_details,
+    find_entity_relationships,
+    search_relationships_by_type,
+    search_relationships_semantic,
+    traverse_entity_graph,
+    search_columns,
+    get_column_values,
+    search_row_values,
+    query_tabular_data,
+    hybrid_search,
+    breadth_first_search,
+    get_entity_context,
+)
 from agents.utils import _load_prompt
 
 class KnowledgeSearchAgent(BaseAgent):
@@ -33,7 +54,28 @@ class KnowledgeSearchAgent(BaseAgent):
             debug=debug
         )
         
-        self.bind_tools([knowledge_search_tool])
+        self.bind_tools([
+            search_documents,
+            get_document_details,
+            search_pages_by_content,
+            search_pages_in_document,
+            get_page_details,
+            search_entities_by_semantic,
+            search_entities_by_type,
+            search_entities_by_text,
+            get_entity_details,
+            find_entity_relationships,
+            search_relationships_by_type,
+            search_relationships_semantic,
+            traverse_entity_graph,
+            search_columns,
+            get_column_values,
+            search_row_values,
+            query_tabular_data,
+            hybrid_search,
+            breadth_first_search,
+            get_entity_context,
+        ])
     
 
 if __name__ == "__main__":

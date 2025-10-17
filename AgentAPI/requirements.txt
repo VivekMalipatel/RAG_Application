@@ -12,7 +12,10 @@ redisvl
 langmem
 langgraph-checkpoint
 langchain-community
+langchain-litellm
 langgraph-checkpoint-redis
 scrapegraphai
 langchain_mcp_adapters
 tiktoken
+copilotkit
+litellm

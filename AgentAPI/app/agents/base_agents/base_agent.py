@@ -184,6 +184,13 @@ class BaseAgent:
         self._needs_compilation = True
         return self
 
+    def _register_memory_tool(self, tool: Optional[BaseTool], name: str) -> None:
+        if tool is None:
+            return
+        if hasattr(tool, "name"):
+            tool.name = name
+        self._memory_tools.append(tool)
+
     def _setup_semantic_manager(self, store: Optional[BaseStore]):
         self._semantic_manager = None
         self._reflection_executor = None
@@ -203,7 +210,7 @@ class BaseAgent:
             query_limit=envconfig.SEMANTIC_MEMORY_QUERY_LIMIT,
         )
         self._reflection_executor = ReflectionExecutor(self._semantic_manager, store=store)
-        self._memory_tools.append(self._semantic_manager.search_tool)
+        self._register_memory_tool(self._semantic_manager.search_tool, "search_semantic_memory")
         self._semantic_manage_tool = create_manage_memory_tool(
             namespace=namespace,
             instructions=(
@@ -241,7 +248,7 @@ class BaseAgent:
             query_limit=envconfig.PROFILE_MEMORY_QUERY_LIMIT,
         )
         self._profile_reflection_executor = ReflectionExecutor(self._profile_manager, store=store)
-        self._memory_tools.append(self._profile_manager.search_tool)
+        self._register_memory_tool(self._profile_manager.search_tool, "search_profile_memory")
         self._profile_manage_tool = create_manage_memory_tool(
             namespace=namespace,
             instructions=(
@@ -286,7 +293,7 @@ class BaseAgent:
             query_limit=envconfig.PROCEDURAL_MEMORY_QUERY_LIMIT,
         )
         self._procedural_reflection_executor = ReflectionExecutor(self._procedural_manager, store=store)
-        self._memory_tools.append(self._procedural_manager.search_tool)
+        self._register_memory_tool(self._procedural_manager.search_tool, "search_procedural_memory")
         self._procedural_manage_tool = create_manage_memory_tool(
             namespace=namespace,
             instructions=(
@@ -328,7 +335,7 @@ class BaseAgent:
             query_limit=envconfig.EPISODIC_MEMORY_QUERY_LIMIT,
         )
         self._episodic_reflection_executor = ReflectionExecutor(self._episodic_manager, store=store)
-        self._memory_tools.append(self._episodic_manager.search_tool)
+        self._register_memory_tool(self._episodic_manager.search_tool, "search_episodic_memory")
         self._episodic_manage_tool = create_manage_memory_tool(
             namespace=namespace,
             instructions=(

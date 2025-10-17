@@ -1,0 +1,16 @@
+quotes_table_tool: |
+  Interact with the quotes table via the 3YA API. Use action "get_by_id" to fetch
+  a specific quote or "list_by_user" to retrieve paginated quotes for a user.
+
+parts_table_tool: |
+  Interact with the parts table via the 3YA API. Use action "get_by_id" to fetch
+  details for a specific part identifier.
+
+configurations_table_tool: |
+  Interact with the configurations table via the 3YA API. Supports common
+  operations like create, query, update, and delete by specifying the action and
+  accompanying parameters.
+
+profiles_table_tool: |
+  Interact with the profiles table via the 3YA API. Use action "list_by_user" to
+  retrieve the profile data for the specified user identifier.

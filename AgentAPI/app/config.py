@@ -27,10 +27,10 @@ class Config:
     REASONING_LLM_TOP_K: int = int(os.getenv("REASONING_LLM_TOP_K", 20))
     REASONING_LLM_MIN_P: int = int(os.getenv("REASONING_LLM_MIN_P", 0))
 
-    VLM_LLM_TEMPERATURE: float = float(os.getenv("VLM_LLM_TEMPERATURE", 0.1))
+    VLM_LLM_TEMPERATURE: float = float(os.getenv("VLM_LLM_TEMPERATURE", 1.0))
     VLM_LLM_TOP_P: float = float(os.getenv("VLM_LLM_TOP_P", 0.95))
-    VLM_LLM_REPETITION_PENALTY: float = float(os.getenv("VLM_LLM_REPETITION_PENALTY", 1.05))
-    VLM_LLM_PRESENCE_PENALTY: float = float(os.getenv("VLM_LLM_PRESENCE_PENALTY", 1.5))
+    VLM_LLM_REPETITION_PENALTY: float = float(os.getenv("VLM_LLM_REPETITION_PENALTY", 1.0))
+    VLM_LLM_PRESENCE_PENALTY: float = float(os.getenv("VLM_LLM_PRESENCE_PENALTY", 0.0))
     VLM_LLM_TOP_K: int = int(os.getenv("REASONING_LLM_TOP_K", 20))
     VLM_LLM_MIN_P: int = int(os.getenv("REASONING_LLM_MIN_P", 0))
 
@@ -63,7 +63,8 @@ class Config:
     # Searx Configuration
     SEARX_URL: str = "https://websearch.gauravshivaprasad.com"
     # State Management
-    MAX_STATE_TOKENS: int = int(os.getenv("MAX_STATE_TOKENS", 32000))
+    MAX_STATE_TOKENS: int = int(os.getenv("MAX_STATE_TOKENS", 32768))
+    ENABLE_VLM_PREPROCESSING: bool = os.getenv("ENABLE_VLM_PREPROCESSING", "true").lower() in ("true", "yes")
     
     # MCP Server Configuration
     MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://10.9.0.5:8082/mcp")
@@ -72,5 +73,8 @@ class Config:
         os.path.join(BASE_DIR, "tools/core_tools/mcp/mcp.json")
     )
 
+    V3YA_API_BASE_URL: str = os.getenv("V3YA_API_BASE_URL")
+    V3YA_CLIENT_ID: str = os.getenv("V3YA_CLIENT_ID")
+    V3YA_CLIENT_SECRET: str = os.getenv("V3YA_CLIENT_SECRET")
 
 config = Config()

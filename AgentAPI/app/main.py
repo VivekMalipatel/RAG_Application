@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from api.routes import chat, models, tools
+from api.routes import chat, copilotkit, models, tools
 from db.redis import redis
 
 @asynccontextmanager
@@ -23,6 +23,7 @@ app.add_middleware(
 
 
 app.include_router(chat.router)
+app.include_router(copilotkit.router)
 app.include_router(models.router)
 app.include_router(tools.router)
 

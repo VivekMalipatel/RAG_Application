@@ -1,6 +1,7 @@
 from typing import Any, Sequence, Literal, Union, Optional, Callable, AsyncIterator, List, cast
 import typing
 from langchain.chat_models import init_chat_model
+from langchain_litellm import ChatLiteLLM
 from langchain_core.tools import BaseTool
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, BaseMessage
@@ -50,9 +51,9 @@ class LLM(BaseChatModel):
             "api_key": reasoningllm_kwargs.get("api_key", config.OPENAI_API_KEY),
             "timeout": reasoningllm_kwargs.get("timeout", config.LLM_TIMEOUT),
             "max_retries": reasoningllm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
-            "temperature": reasoningllm_kwargs.get("temperature", config.REASONING_LLM_TEMPERATURE),
-            "top_p": reasoningllm_kwargs.get("top_p", config.REASONING_LLM_TOP_P),
-            "presence_penalty": reasoningllm_kwargs.get("presence_penalty", config.REASONING_LLM_PRESENCE_PENALTY),
+            # "temperature": reasoningllm_kwargs.get("temperature", config.REASONING_LLM_TEMPERATURE),
+            # "top_p": reasoningllm_kwargs.get("top_p", config.REASONING_LLM_TOP_P),
+            # "presence_penalty": reasoningllm_kwargs.get("presence_penalty", config.REASONING_LLM_PRESENCE_PENALTY),
             **reasoning_llm_filtered_kwargs
         }
         
@@ -65,29 +66,37 @@ class LLM(BaseChatModel):
             "api_key": vlm_kwargs.get("api_key", config.OPENAI_API_KEY),
             "timeout": vlm_kwargs.get("timeout", config.LLM_TIMEOUT),
             "max_retries": vlm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
-            "temperature": vlm_kwargs.get("temperature", config.VLM_LLM_TEMPERATURE),
-            "top_p": vlm_kwargs.get("top_p", config.VLM_LLM_TOP_P),
-            "top_k": vlm_kwargs.get("top_k", config.VLM_LLM_TOP_K),
-            "min_p": vlm_kwargs.get("min_p", config.VLM_LLM_MIN_P),
-            "repetition_penalty": vlm_kwargs.get("repetition_penalty", config.VLM_LLM_REPETITION_PENALTY),
-            "presence_penalty": vlm_kwargs.get("presence_penalty", config.VLM_LLM_PRESENCE_PENALTY),
+            # "temperature": vlm_kwargs.get("temperature", config.VLM_LLM_TEMPERATURE),
+            # "top_p": vlm_kwargs.get("top_p", config.VLM_LLM_TOP_P),
+            # "top_k": vlm_kwargs.get("top_k", config.VLM_LLM_TOP_K),
+            # "min_p": vlm_kwargs.get("min_p", config.VLM_LLM_MIN_P),
+            # "repetition_penalty": vlm_kwargs.get("repetition_penalty", config.VLM_LLM_REPETITION_PENALTY),
+            # "presence_penalty": vlm_kwargs.get("presence_penalty", config.VLM_LLM_PRESENCE_PENALTY),
             **vlm_filtered_kwargs
         }
+        
+        # object.__setattr__(self, "reasoning_llm", init_chat_model(**reasoning_llm_config))
+        lite_llm = ChatLiteLLM(model="bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+        object.__setattr__(self, "llm", lite_llm)
+        object.__setattr__(self, "reasoning_llm", lite_llm)
 
-        object.__setattr__(self, "reasoning_llm", init_chat_model(**reasoning_llm_config))
-
-        object.__setattr__(
-            self,
-            "vlm_client",
-            AsyncOpenAI(
-                api_key=vlm_config["api_key"],
-                base_url=vlm_config["base_url"],
-                timeout=vlm_config["timeout"],
-                max_retries=vlm_config["max_retries"],
-            ),
-        )
-        object.__setattr__(self, "vlm_model", vlm_config["model"])
-        object.__setattr__(self, "vlm_model_kwargs", {**vlm_filtered_kwargs})
+        if config.ENABLE_VLM_PREPROCESSING:
+            object.__setattr__(
+                self,
+                "vlm_client",
+                AsyncOpenAI(
+                    api_key=vlm_config["api_key"],
+                    base_url=vlm_config["base_url"],
+                    timeout=vlm_config["timeout"],
+                    max_retries=vlm_config["max_retries"],
+                ),
+            )
+            object.__setattr__(self, "vlm_model", vlm_config["model"])
+            object.__setattr__(self, "vlm_model_kwargs", {**vlm_filtered_kwargs})
+        else:
+            object.__setattr__(self, "vlm_client", None)
+            object.__setattr__(self, "vlm_model", None)
+            object.__setattr__(self, "vlm_model_kwargs", {})
         object.__setattr__(self, "tools", [])
         object.__setattr__(self, "_tool_binding_kwargs", {})
         object.__setattr__(self, "_bound_binding", None)
@@ -99,10 +108,15 @@ class LLM(BaseChatModel):
         )
     
     def with_structured_output(
-        self, schema: Union[dict, type[BaseModel]], **kwargs: Any
+        self,
+        schema: Union[typing.Dict, type],
+        *,
+        include_raw: bool = False,
+        **kwargs: Any,
     ) -> 'LLM':
         updated_reasoning_llm = self.reasoning_llm.with_structured_output(
             schema=schema,
+            include_raw=include_raw,
             **kwargs,
         )
         object.__setattr__(self, "reasoning_llm", updated_reasoning_llm)

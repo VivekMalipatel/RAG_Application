@@ -347,6 +347,8 @@ def prepare_input_sync(
     logger: Optional[logging.Logger] = None,
     announcement: str = "Analysing Images.....\n\n",
 ) -> Any:
+    if vlm_client is None or not vlm_model:
+        return payload
     if not is_message_sequence(payload):
         return payload
     if not has_media(payload):
@@ -379,6 +381,8 @@ async def prepare_input_async(
     *,
     announcement: str = "Analysing Images.....\n\n",
 ) -> Any:
+    if vlm_client is None or not vlm_model:
+        return payload
     if not is_message_sequence(payload):
         return payload
     if not has_media(payload):
