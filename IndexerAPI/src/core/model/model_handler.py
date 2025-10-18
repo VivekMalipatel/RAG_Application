@@ -137,7 +137,9 @@ class ModelHandler:
         )
         try:
             content = response.choices[0].message.content
+            logger.info(f"Generated text description response: {response.choices[0].message}")
             if not content:
+                logger.error(f"Empty content from LLM. Full response: {response}")
                 raise ValueError("Empty text description content")
             return content.strip()
         except Exception as exc:
