@@ -5,7 +5,6 @@ from langchain_core.runnables import RunnableConfig
 
 from agents.base_agents.base_agent import BaseAgent
 from agents.utils import _load_prompt
-from tools.core_tools.knowledge_search.knowledge_search_tool import knowledge_search_tool
 from .waiter_tools import (
     browse_menu_api,
     check_item_availability_api,

@@ -2,7 +2,7 @@ import base64
 import logging
 from typing import Any, Dict, List, Optional
 import json
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, AsyncAzureOpenAI
 import aiohttp
 import asyncio
 from pydantic import BaseModel
@@ -40,20 +40,49 @@ class ModelHandler:
     def __init__(self, api_key: str | None = None, api_base: str | None = None):
         self.embedding_api_key = api_key or settings.EMBEDDING_API_KEY
         self.embedding_api_base = api_base or settings.EMBEDDING_API_BASE
-        self.inference_api_key = api_key or settings.INFERENCE_API_KEY
-        self.inference_api_base = api_base or settings.INFERENCE_API_BASE
-        self.embedding_client = AsyncOpenAI(
-            api_key=self.embedding_api_key,
-            base_url=self.embedding_api_base,
-            timeout=settings.EMBEDDING_CLIENT_TIMEOUT,
+        
+        # Azure OpenAI LLM Configuration
+        self.azure_endpoint = settings.AZURE_OPENAI_ENDPOINT
+        self.azure_api_key = settings.AZURE_OPENAI_API_KEY
+        self.azure_api_version = settings.AZURE_OPENAI_API_VERSION
+        
+        self.llm_client = AsyncAzureOpenAI(
+            api_key=self.azure_api_key,
+            azure_endpoint=self.azure_endpoint,
+            api_version=self.azure_api_version,
+            timeout=settings.LLM_CLIENT_TIMEOUT,
             max_retries=settings.RETRIES,
         )
-        self.inference_client = AsyncOpenAI(
-            api_key=self.inference_api_key,
-            base_url=self.inference_api_base,
-            timeout=settings.EMBEDDING_CLIENT_TIMEOUT,
-            max_retries=settings.RETRIES,
-        )
+        
+        # Azure OpenAI Configuration (all commented out - switch to this for full Azure)
+        # self.azure_endpoint = settings.AZURE_OPENAI_ENDPOINT
+        # self.azure_api_key = settings.AZURE_OPENAI_API_KEY
+        # self.azure_api_version = settings.AZURE_OPENAI_API_VERSION
+        # self.embedding_client = AsyncAzureOpenAI(
+        #     api_key=self.azure_api_key,
+        #     azure_endpoint=self.azure_endpoint,
+        #     api_version=self.azure_api_version,
+        #     timeout=settings.EMBEDDING_CLIENT_TIMEOUT,
+        #     max_retries=settings.RETRIES,
+        # )
+        # self.llm_client = AsyncAzureOpenAI(
+        #     api_key=self.azure_api_key,
+        #     azure_endpoint=self.azure_endpoint,
+        #     api_version=self.azure_api_version,
+        #     timeout=settings.LLM_CLIENT_TIMEOUT,
+        #     max_retries=settings.RETRIES,
+        # )
+        
+        # OpenAI LLM Configuration (commented out - uncomment for full OpenAI)
+        # self.llm_api_key = api_key or settings.LLM_API_KEY
+        # self.llm_api_base = api_base or settings.LLM_API_BASE
+        # self.llm_client = AsyncOpenAI(
+        #     api_key=self.llm_api_key,
+        #     base_url=self.llm_api_base,
+        #     timeout=settings.LLM_CLIENT_TIMEOUT,
+        #     max_retries=settings.RETRIES,
+        # )
+        
         self._closed = False
 
     async def __aenter__(self):
@@ -65,8 +94,7 @@ class ModelHandler:
     async def shutdown(self):
         if self._closed:
             return
-        await self.embedding_client.close()
-        await self.inference_client.close()
+        await self.llm_client.close()
         self._closed = True
 
     async def generate_text_description(self, image_base64: str) -> str:
@@ -84,7 +112,7 @@ class ModelHandler:
         if not image_base64:
             raise ValueError("Empty image_base64 provided for text generation")
         response: ChatCompletion = await self.chat_completion(
-            model=settings.VLM_MODEL,
+            model=settings.AZURE_OPENAI_DEPLOYMENT_LLM,
             messages=[
                 {
                     "role": "system",
@@ -143,6 +171,7 @@ class ModelHandler:
                         response.raise_for_status()
                         data = await response.json()
                         embeddings = [item["embedding"] for item in data["data"]]
+                        logger.info(f"Successfully generated {len(embeddings)} image embeddings")
                         return embeddings
             except Exception as exc:
                 if attempt == settings.RETRIES - 1:
@@ -156,20 +185,38 @@ class ModelHandler:
                 await asyncio.sleep(settings.RETRY_DELAY)
 
     async def chat_completion(self, **kwargs):
-        return await self.inference_client.chat.completions.create(**kwargs)
+        return await self.llm_client.chat.completions.create(**kwargs)
 
     async def structured_chat_completion(self, **kwargs):
-        return await self.inference_client.beta.chat.completions.parse(**kwargs)
+        return await self.llm_client.beta.chat.completions.parse(**kwargs)
 
     async def embed_text(self, texts: List[str]) -> List[List[float]]:
-        response = await self.embedding_client.embeddings.create(
-            input=texts,
-            model=settings.EMBEDDING_MODEL,
-            encoding_format="float",
-        )
-        embeddings = [item.embedding for item in response.data]
-        logger.info(f"Successfully generated {len(embeddings)} text embeddings")
-        return embeddings
+        url = f"{self.embedding_api_base}/embeddings"
+        headers = {
+            "Authorization": "Bearer " + self.embedding_api_key,
+            "Content-Type": "application/json",
+        }
+        try:
+            async with aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=settings.EMBEDDING_CLIENT_TIMEOUT)
+            ) as session:
+                async with session.post(
+                    url,
+                    headers=headers,
+                    json={
+                        "model": settings.EMBEDDING_MODEL,
+                        "input": texts,
+                        "encoding_format": "float",
+                    },
+                ) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+                    embeddings = [item["embedding"] for item in data["data"]]
+                    logger.info(f"Successfully generated {len(embeddings)} text embeddings")
+                    return embeddings
+        except Exception as exc:
+            logger.error(f"Error generating text embeddings: {exc}")
+            raise
 
     async def extract_entities_relationships(self, messages: List[dict]) -> Dict[str, Any]:
         extraction_prompt = """
@@ -290,69 +337,28 @@ class ModelHandler:
             relationships: List[RelationSchema]
         """
         system_message = {"role": "system", "content": extraction_prompt}
-        has_image = len(messages[0]["content"]) > 1
-        if has_image:
-            image_messages = [
-                {
-                    "role": "user",
-                    "content": [messages[0]["content"][0]],
-                }
-            ]
-            text_messages = [
-                {
-                    "role": "user",
-                    "content": [messages[0]["content"][1]],
-                }
-            ]
-        else:
-            image_messages = []
-            text_messages = [
-                {
-                    "role": "user",
-                    "content": [messages[0]["content"][0]],
-                }
-            ]
         retries = max(1, settings.RETRIES)
-
-        if has_image:
-            for attempt in range(retries):
-                try:
-                    response = await self.structured_chat_completion(
-                        model=settings.VLM_MODEL,
-                        messages=[system_message] + image_messages,
-                        response_format=EntityRelationSchema,
-                        #max_completion_tokens=settings.VLM_MAX_TOKENS,
+        for attempt in range(retries):
+            try:
+                response = await self.structured_chat_completion(
+                    model=settings.AZURE_OPENAI_DEPLOYMENT_LLM,
+                    messages=[system_message] + messages,
+                    response_format=EntityRelationSchema,
+                )
+                parsed = response.choices[0].message.parsed
+                entities = [entity.model_dump() for entity in parsed.entities]
+                relationships = [rel.model_dump() for rel in parsed.relationships]
+                return {"entities": entities, "relationships": relationships}
+            except Exception as exc:
+                if attempt == retries - 1:
+                    logger.error(
+                        f"Entity extraction failed after {retries} attempts: {exc}"
                     )
-                    parsed = response.choices[0].message.parsed
-                    entities = [entity.model_dump() for entity in parsed.entities]
-                    relationships = [rel.model_dump() for rel in parsed.relationships]
-                    return {"entities": entities, "relationships": relationships}
-                except Exception as exc:
-                    if attempt == retries - 1:
-                        logger.error(
-                            f"Image-based entity extraction failed after {retries} attempts: {exc}"
-                        )
-                        raise
-                    logger.warning(
-                        f"Attempt {attempt + 1}: image-based entity extraction failed: {exc}. Retrying..."
-                    )
-                if attempt != retries - 1:
-                    await asyncio.sleep(settings.RETRY_DELAY)
-
-        response = await self.structured_chat_completion(
-            model=settings.REASONING_MODEL,
-            messages=[system_message] + text_messages,
-            response_format=EntityRelationSchema,
-            #max_completion_tokens=settings.REASONING_MAX_TOKENS,
-        )
-        try:
-            parsed = response.choices[0].message.parsed
-            entities = [entity.model_dump() for entity in parsed.entities]
-            relationships = [rel.model_dump() for rel in parsed.relationships]
-            return {"entities": entities, "relationships": relationships}
-        except Exception as exc:
-            logger.error(f"Failed to extract entities via text pathway: {exc}")
-            raise
+                    raise
+                logger.warning(
+                    f"Attempt {attempt + 1}: entity extraction failed: {exc}. Retrying..."
+                )
+                await asyncio.sleep(settings.RETRY_DELAY)
 
     async def embed_entity_relationship_profiles(
         self,
@@ -387,15 +393,14 @@ class ModelHandler:
         Keep the summary concise but comprehensive, suitable for embedding and retrieval."""
         user_prompt = (
             "Analyze this structured dataset and provide a comprehensive summary:\n\n"
-            f"{dataframe_text[: settings.REASONING_MAX_TOKENS - 10000]}"
+            f"{dataframe_text}"
         )
         response: ChatCompletion = await self.chat_completion(
-            model=settings.REASONING_MODEL,
+            model=settings.AZURE_OPENAI_DEPLOYMENT_LLM,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            #max_completion_tokens=settings.REASONING_MAX_TOKENS,
         )
         try:
             content = response.choices[0].message.content
@@ -424,18 +429,17 @@ class ModelHandler:
         Extract ALL columns present in the dataset and provide thorough analysis for each."""
         user_prompt = (
             "Analyze each column in this dataset and provide detailed profiles:\n\n"
-            f"{dataframe_text[: settings.REASONING_MAX_TOKENS - 10000]}"
+            f"{dataframe_text}"
         )
         response: ParsedChatCompletion[
             ColumnProfilesSchema
         ] = await self.structured_chat_completion(
-            model=settings.REASONING_MODEL,
+            model=settings.AZURE_OPENAI_DEPLOYMENT_LLM,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             response_format=ColumnProfilesSchema,
-            #max_completion_tokens=settings.REASONING_MAX_TOKENS,
         )
         try:
             parsed_result = response.choices[0].message.parsed
