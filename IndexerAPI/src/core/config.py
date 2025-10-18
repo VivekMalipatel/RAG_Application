@@ -20,21 +20,28 @@ class Settings:
     API_VERSION: str = os.getenv("API_VERSION", "0.1.0")
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     DB_URL: str | None = os.getenv("DB_URL")
-    UNOSERVER_HOST: str | None = os.getenv("UNOSERVER_HOST")
-    UNOSERVER_PORT: int | None = int(os.getenv("UNOSERVER_PORT", "0")) or None
-    INFERENCE_API_KEY: str | None = os.getenv("INFERENCE_API_KEY")
-    INFERENCE_API_BASE: str | None = os.getenv("INFERENCE_API_BASE")
+    UNOSERVER_HOST: str = "0.0.0.0"
+    UNOSERVER_PORT: int | None = int(os.getenv("UNOSERVER_PORT", "2003")) or None
+    
+    # OpenAI Embedding Configuration (for multimodal embeddings)
     EMBEDDING_API_KEY: str | None = os.getenv("EMBEDDING_API_KEY")
     EMBEDDING_API_BASE: str | None = os.getenv("EMBEDDING_API_BASE")
-    VLM_MODEL: str = os.getenv("VLM_MODEL", "gpt-4o")
-    REASONING_MODEL: str = os.getenv("REASONING_MODEL", "o3")
     EMBEDDING_MODEL: str | None = os.getenv("EMBEDDING_MODEL")
+    
+    # Azure OpenAI LLM Configuration
+    AZURE_OPENAI_ENDPOINT: str | None = os.getenv("AZURE_OPENAI_ENDPOINT")
+    AZURE_OPENAI_API_KEY: str | None = os.getenv("AZURE_OPENAI_API_KEY")
+    AZURE_OPENAI_API_VERSION: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+    AZURE_OPENAI_DEPLOYMENT_LLM: str = os.getenv("AZURE_OPENAI_DEPLOYMENT_LLM", "gpt-5-mini")
+    
+    # OpenAI LLM Configuration (commented out - uncomment for full OpenAI)
+    # LLM_API_KEY: str | None = os.getenv("LLM_API_KEY")
+    # LLM_API_BASE: str | None = os.getenv("LLM_API_BASE")
+    # LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o")
+    
     EMBEDDING_DIMENSIONS: int = int(os.getenv("EMBEDDING_DIMENSIONS", "2048"))
-    VLM_MAX_TOKENS: int = int(os.getenv("VLM_MAX_TOKENS", "8192"))
-    REASONING_MAX_TOKENS: int = int(os.getenv("REASONING_MAX_TOKENS", "32768"))
-    EMBEDDING_MAX_TOKENS: int = int(os.getenv("EMBEDDING_MAX_TOKENS", "8192"))
-    EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "240"))
-    INFERENCE_CLIENT_TIMEOUT: float = float(os.getenv("INFERENCE_CLIENT_TIMEOUT", "240"))
+    EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "3600"))
+    LLM_CLIENT_TIMEOUT: float = float(os.getenv("LLM_CLIENT_TIMEOUT", "3600"))
     RETRIES: int = int(os.getenv("RETRIES", "3"))
     RETRY_DELAY: int = int(os.getenv("RETRY_DELAY", "2"))
     MINIO_ENDPOINT_URL: str | None = os.getenv("MINIO_ENDPOINT_URL")
@@ -58,7 +65,7 @@ class Settings:
     NEO4J_USERNAME: str | None = os.getenv("NEO4J_USERNAME")
     NEO4J_PASSWORD: str | None = os.getenv("NEO4J_PASSWORD")
     NEO4J_DATABASE: str | None = os.getenv("NEO4J_DATABASE")
-    PDF_IMAGE_DPI: int = int(os.getenv("PDF_IMAGE_DPI", "150"))
+    PDF_IMAGE_DPI: int = int(os.getenv("PDF_IMAGE_DPI", "100"))
     NEO4J_MAX_TRANSACTION_RETRIES: int = int(os.getenv("NEO4J_MAX_TRANSACTION_RETRIES", "5"))
     NEO4J_RETRY_BACKOFF_SECONDS: float = float(os.getenv("NEO4J_RETRY_BACKOFF_SECONDS", "0.5"))
 
