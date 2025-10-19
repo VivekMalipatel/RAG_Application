@@ -1124,6 +1124,50 @@ class Neo4jHandler:
             logger.error(f"Error deleting document: {exc}")
             raise
 
+    async def get_document(
+        self,
+        org_id: str,
+        source: str,
+        filename: str,
+        user_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        async def operation():
+            async with self.driver.session(database=self.database) as session:
+                if user_id:
+                    query = """
+                    MATCH (d:Document {org_id: $org_id, source: $source, filename: $filename, user_id: $user_id})
+                    RETURN d
+                    LIMIT 1
+                    """
+                    result = await session.run(
+                        query,
+                        org_id=org_id,
+                        source=source,
+                        filename=filename,
+                        user_id=user_id,
+                    )
+                else:
+                    query = """
+                    MATCH (d:Document {org_id: $org_id, source: $source, filename: $filename})
+                    RETURN d
+                    ORDER BY d.task_id DESC
+                    LIMIT 1
+                    """
+                    result = await session.run(
+                        query,
+                        org_id=org_id,
+                        source=source,
+                        filename=filename,
+                    )
+                record = await result.single()
+                return dict(record["d"]._properties) if record else None
+
+        try:
+            return await self._execute_with_retry(operation)
+        except Exception as exc:
+            logger.error(f"Error fetching document: {exc}")
+            raise
+
 _neo4j_handler: Optional[Neo4jHandler] = None
 
 def get_neo4j_handler() -> Neo4jHandler:

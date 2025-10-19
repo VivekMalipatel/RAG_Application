@@ -33,11 +33,11 @@ class Settings:
     AZURE_OPENAI_API_KEY: str | None = os.getenv("AZURE_OPENAI_API_KEY")
     AZURE_OPENAI_API_VERSION: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
     AZURE_OPENAI_DEPLOYMENT_LLM: str = os.getenv("AZURE_OPENAI_DEPLOYMENT_LLM", "gpt-5-mini")
-    
-    # OpenAI LLM Configuration (commented out - uncomment for full OpenAI)
-    # LLM_API_KEY: str | None = os.getenv("LLM_API_KEY")
-    # LLM_API_BASE: str | None = os.getenv("LLM_API_BASE")
-    # LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o")
+
+    # OpenAI LLM Configuration
+    LLM_API_KEY: str | None = os.getenv("LLM_API_KEY")
+    LLM_API_BASE: str | None = os.getenv("LLM_API_BASE")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o")
     
     EMBEDDING_DIMENSIONS: int = int(os.getenv("EMBEDDING_DIMENSIONS", "2048"))
     EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "3600"))
