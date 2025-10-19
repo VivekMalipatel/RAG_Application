@@ -8,7 +8,6 @@ from core.markitdown.markdown_handler import MarkDown
 from core.model.model_handler import get_global_model_handler
 from core.storage.s3_handler import get_global_s3_handler
 from core.storage.neo4j_handler import get_neo4j_handler
-from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +65,7 @@ class StructuredProcessor(BaseProcessor):
                     ],
                 }
             ]
-            summary_embedding_task = self.model_handler.embed_text([
-                summary[: settings.EMBEDDING_MAX_TOKENS - 1000]
-            ])
+            summary_embedding_task = self.model_handler.embed_text([summary])
             column_embeddings_task = self.model_handler.embed_text(
                 [profile["column_profile"] for profile in column_profiles]
             )
@@ -108,20 +105,7 @@ class StructuredProcessor(BaseProcessor):
             }
         except Exception as exc:
             logger.error(f"Error processing tabular sheet {sheet_name}: {exc}")
-            return {
-                "sheet_name": sheet_name,
-                "page_number": 1,
-                "messages": f"Error processing sheet: {str(exc)}",
-                "image_s3_url": "",
-                "embedding": None,
-                "summary": f"Error processing sheet: {str(exc)}",
-                "column_profiles": [],
-                "row_nodes": [],
-                "dataframe_sample": "",
-                "total_rows": 0,
-                "total_columns": 0,
-                "is_tabular": False,
-            }
+            raise
 
     async def process_sheet_as_text(self, dataframe: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
         logger.info(f"Starting text processing for sheet '{sheet_name}' with {len(dataframe)} rows")
@@ -169,20 +153,7 @@ class StructuredProcessor(BaseProcessor):
             return {"sheet_name": sheet_name, "data": chunks_with_entities, "is_tabular": False}
         except Exception as exc:
             logger.error(f"Error processing sheet as text {sheet_name}: {exc}")
-            return {
-                "sheet_name": sheet_name,
-                "data": [
-                    {
-                        "page_number": 1,
-                        "messages": f"Error processing sheet: {str(exc)}",
-                        "entities": [],
-                        "relationships": [],
-                        "image_s3_url": "",
-                        "embedding": None,
-                    }
-                ],
-                "is_tabular": False,
-            }
+            raise
 
     def is_proper_table_structure(self, dataframe: pd.DataFrame) -> bool:
         logger.debug(f"Analyzing table structure for DataFrame with shape {dataframe.shape}")

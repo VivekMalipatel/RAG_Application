@@ -32,6 +32,7 @@ from core.knowledge_search.queries import (
     execute_hybrid_search,
     execute_breadth_first_search,
     execute_get_entity_context,
+    execute_raw_cypher,
 )
 
 def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml") -> str:
@@ -1189,3 +1190,41 @@ async def get_entity_context(
     except Exception as e:
         log_tool_error("get_entity_context", e, user_id, org_id)
         return [{"type": "text", "text": f"Error executing get_entity_context: {str(e)}"}]
+
+class RawCypherQuerySchema(BaseModel):
+    cypher_query: str = Field(description="Cypher query to execute against the knowledge graph")
+    parameters: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Parameter map for the Cypher query")
+
+@tool(
+    name_or_callable="execute_raw_cypher_query",
+    description=get_tool_description("execute_raw_cypher_query"),
+    args_schema=RawCypherQuerySchema,
+    response_format="content"
+)
+async def execute_raw_cypher_query(
+    cypher_query: str,
+    parameters: Optional[Dict[str, Any]] = None,
+    config: RunnableConfig = None
+) -> List[Dict[str, Any]]:
+    user_id = config.get("configurable", {}).get("user_id")
+    org_id = config.get("configurable", {}).get("org_id")
+    if not user_id or not org_id:
+        error_msg = "Error: user_id and org_id are required in config"
+        logger.error(f"[TOOL_ERROR] execute_raw_cypher_query | Missing credentials")
+        return [{"type": "text", "text": error_msg}]
+    log_tool_call("execute_raw_cypher_query", {"cypher_query": cypher_query[:200], "parameters": parameters}, user_id, org_id)
+    try:
+        writer = get_stream_writer()
+        writer(f"execute_raw_cypher_query: {cypher_query[:80]}")
+        results = await execute_raw_cypher(
+            user_id=user_id,
+            org_id=org_id,
+            cypher_query=cypher_query,
+            parameters=parameters or {}
+        )
+        formatted_results = await format_neo4j_results(results)
+        log_tool_success("execute_raw_cypher_query", len(results), user_id, org_id)
+        return formatted_results
+    except Exception as e:
+        log_tool_error("execute_raw_cypher_query", e, user_id, org_id)
+        return [{"type": "text", "text": f"Error executing execute_raw_cypher_query: {str(e)}"}]

@@ -48,7 +48,7 @@ class FileProcessor(BaseProcessor):
             "jpg",
             "png",
         ]
-        self.structured_docs = ["csv", "xls", "xlsx"]
+        self.structured_docs = ["csv", "xls", "xlsx", "xlsb", "xlsm"]
         self.direct_processing_docs = [
             "txt",
             "markdown",
@@ -188,13 +188,13 @@ class FileProcessor(BaseProcessor):
         document = context["document"]
         s3_base_path = context["s3_base_path"]
         sheets: Dict[str, pd.DataFrame]
-        if file_type in ["xls", "xlsx"]:
+        if file_type in ["xls", "xlsx", "xlsm"]:
             sheets = pd.read_excel(io.BytesIO(file_data), sheet_name=None)
         else:
             dataframe = pd.read_csv(io.BytesIO(file_data))
             sheets = {"Sheet1": dataframe}
 
-        async def process_sheet(name: str, dataframe: pd.DataFrame):
+        async def process_sheet(index: int, name: str, dataframe: pd.DataFrame):
             sheet_key = f"{s3_base_path}/structured/{self._safe_filename(name)}.csv"
             csv_bytes = dataframe.to_csv(index=False).encode("utf-8")
             await s3_handler.upload_bytes(csv_bytes, sheet_key)
@@ -203,11 +203,12 @@ class FileProcessor(BaseProcessor):
                 "sheet_name": name,
                 "sheet_s3_key": sheet_key,
                 "s3_base_path": s3_base_path,
+                "chunk_index": index,
             }
             chunk_task = TaskMessage(task_id=str(uuid.uuid4()), task_type=TaskType.STRUCTURED_CHUNK, payload=chunk_payload)
             await rabbitmq_handler.enqueue_task(chunk_task)
-
-        await asyncio.gather(*[process_sheet(name, df) for name, df in sheets.items()])
+        tasks = [process_sheet(index, name, df) for index, (name, df) in enumerate(sheets.items(), start=1)]
+        await asyncio.gather(*tasks)
 
     async def _fan_out_direct(self, context: dict, file_data: bytes) -> None:
         document = context["document"]

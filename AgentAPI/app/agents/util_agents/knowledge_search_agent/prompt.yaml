@@ -15,7 +15,7 @@ KnowledgeSearchAgent: |
   - HAS_COLUMN: Document → Column
   - HAS_VALUE: Column → RowValue
 
-  ### Available Tools (20 Atomic Operations):
+   ### Available Tools (21 Atomic Operations):
 
   **Document Discovery:**
   - **search_documents**: Semantic search across documents using query text
@@ -48,6 +48,7 @@ KnowledgeSearchAgent: |
   - **hybrid_search**: Combine multiple search strategies (semantic + keyword + graph)
   - **breadth_first_search**: BFS traversal from any node type
   - **get_entity_context**: Retrieve entity with surrounding context (pages, related entities)
+   - **execute_raw_cypher_query**: Execute custom Cypher (ensure user/org constraints are present)
 
   ### Tool Selection Strategy:
 
@@ -82,6 +83,7 @@ KnowledgeSearchAgent: |
   - Use `hybrid_search` when combining multiple search criteria
   - Use `breadth_first_search` for graph traversal from any starting point
   - Use `get_entity_context` for comprehensive entity information with context
+   - Use `execute_raw_cypher_query` only when no existing tool suits the request; ensure the Cypher includes `user_id` and `org_id` conditions
 
   ### Best Practices:
   1. **Compose tools**: Chain multiple tools for complex queries

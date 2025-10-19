@@ -35,17 +35,29 @@ def _max_priority() -> int:
 def _calculate_task_priority(task_message: TaskMessage) -> int:
     max_priority = _max_priority()
     task_type = task_message.task_type
+    payload = task_message.payload or {}
     if task_type in {TaskType.FILE, TaskType.URL, TaskType.TEXT}:
         return max_priority
     if task_type == TaskType.UNSTRUCTURED_PAGE:
-        page_number = task_message.payload.get("page_number")
-        if isinstance(page_number, int) and page_number > 0:
-            highest_page_priority = max_priority - 1 if max_priority > 1 else 0
-            priority_offset = page_number - 1
-            calculated_priority = highest_page_priority - priority_offset
-            return max(0, calculated_priority)
-        return max(0, max_priority - 1)
+        page_number = payload.get("page_number")
+        base_priority = max_priority - 50 if max_priority > 50 else max_priority
+        return _priority_from_index(base_priority, page_number)
+    if task_type == TaskType.STRUCTURED_CHUNK:
+        chunk_index = payload.get("chunk_index")
+        base_priority = max_priority - 5 if max_priority > 5 else max_priority
+        return _priority_from_index(base_priority, chunk_index)
+    if task_type == TaskType.DIRECT_CHUNK:
+        chunk_index = payload.get("chunk_index")
+        base_priority = max_priority - 25 if max_priority > 25 else max_priority
+        return _priority_from_index(base_priority, chunk_index)
     return 1
+
+
+def _priority_from_index(base_priority: int, index: Any) -> int:
+    if isinstance(index, int) and index > 0:
+        adjusted = base_priority - (index - 1)
+        return max(0, adjusted)
+    return max(0, base_priority)
 
 async def _send_to_success_queue(task_message: TaskMessage, processing_time: float) -> None:
     payload = {**task_message.to_dict(), "completed_at": datetime.now().isoformat(), "processing_time_seconds": processing_time, "status": "completed", "original_queue": settings.RABBITMQ_QUEUE_NAME}
@@ -76,6 +88,19 @@ async def _send_to_failed_queue(task_message: Optional[TaskMessage], error_messa
     except Exception:
         metadata_payload["raw_body"] = original_body.decode(errors="replace")
     logger.warning("Dropping invalid task payload after failure: %s", metadata_payload)
+
+async def _send_to_retry_queue(task_message: TaskMessage, error_message: str, attempt: int, original_headers: Optional[Dict[str, Any]]) -> None:
+    headers: Dict[str, Any] = dict(original_headers or {})
+    headers.update({
+        "failure_reason": error_message,
+        "failure_attempt": attempt,
+        "failure_timestamp": datetime.now().isoformat(),
+        "original_queue": settings.RABBITMQ_QUEUE_NAME,
+        "task_type": task_message.task_type.value,
+    })
+    payload = task_message.to_dict()
+    priority = _calculate_task_priority(task_message)
+    await publish_message(payload, routing_key=_retry_queue_name(), headers=headers, priority=priority)
 
 class TaskQueueConsumer(BaseConsumer):
     def __init__(self, orchestrator):
@@ -132,10 +157,16 @@ class TaskQueueConsumer(BaseConsumer):
                 f"Task {task_message.task_id} failed in {elapsed:.2f}s on attempt {attempt}: {exc}"
             )
             if self._calculate_retry_decision(attempt):
-                await message.reject(requeue=False)
-                logger.info(
-                    f"Task {task_message.task_id} scheduled for retry via {_retry_queue_name()} (attempt {attempt})"
-                )
+                try:
+                    await _send_to_retry_queue(task_message, str(exc), attempt, message.headers)
+                    await message.ack()
+                    logger.info(
+                        f"Task {task_message.task_id} forwarded to {_retry_queue_name()} (attempt {attempt})"
+                    )
+                except Exception as retry_error:
+                    logger.error(f"Failed to forward task {task_message.task_id} to retry queue: {retry_error}")
+                    await _send_to_failed_queue(task_message, str(exc), stack_trace, attempt, message.body)
+                    await message.ack()
             else:
                 await _send_to_failed_queue(task_message, str(exc), stack_trace, attempt, message.body)
                 await message.ack()

@@ -19,6 +19,7 @@ from .knowledge_search_tool import (
     hybrid_search,
     breadth_first_search,
     get_entity_context,
+    execute_raw_cypher_query,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "hybrid_search",
     "breadth_first_search",
     "get_entity_context",
+    "execute_raw_cypher_query",
 ]

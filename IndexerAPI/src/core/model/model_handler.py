@@ -40,48 +40,30 @@ class ModelHandler:
     def __init__(self, api_key: str | None = None, api_base: str | None = None):
         self.embedding_api_key = api_key or settings.EMBEDDING_API_KEY
         self.embedding_api_base = api_base or settings.EMBEDDING_API_BASE
-        
-        # Azure OpenAI LLM Configuration
-        self.azure_endpoint = settings.AZURE_OPENAI_ENDPOINT
-        self.azure_api_key = settings.AZURE_OPENAI_API_KEY
-        self.azure_api_version = settings.AZURE_OPENAI_API_VERSION
-        
-        self.llm_client = AsyncAzureOpenAI(
-            api_key=self.azure_api_key,
-            azure_endpoint=self.azure_endpoint,
-            api_version=self.azure_api_version,
-            timeout=settings.LLM_CLIENT_TIMEOUT,
-            max_retries=settings.RETRIES,
-        )
-        
-        # Azure OpenAI Configuration (all commented out - switch to this for full Azure)
-        # self.azure_endpoint = settings.AZURE_OPENAI_ENDPOINT
-        # self.azure_api_key = settings.AZURE_OPENAI_API_KEY
-        # self.azure_api_version = settings.AZURE_OPENAI_API_VERSION
-        # self.embedding_client = AsyncAzureOpenAI(
-        #     api_key=self.azure_api_key,
-        #     azure_endpoint=self.azure_endpoint,
-        #     api_version=self.azure_api_version,
-        #     timeout=settings.EMBEDDING_CLIENT_TIMEOUT,
-        #     max_retries=settings.RETRIES,
-        # )
-        # self.llm_client = AsyncAzureOpenAI(
-        #     api_key=self.azure_api_key,
-        #     azure_endpoint=self.azure_endpoint,
-        #     api_version=self.azure_api_version,
-        #     timeout=settings.LLM_CLIENT_TIMEOUT,
-        #     max_retries=settings.RETRIES,
-        # )
-        
-        # OpenAI LLM Configuration (commented out - uncomment for full OpenAI)
-        # self.llm_api_key = api_key or settings.LLM_API_KEY
-        # self.llm_api_base = api_base or settings.LLM_API_BASE
-        # self.llm_client = AsyncOpenAI(
-        #     api_key=self.llm_api_key,
-        #     base_url=self.llm_api_base,
-        #     timeout=settings.LLM_CLIENT_TIMEOUT,
-        #     max_retries=settings.RETRIES,
-        # )
+        self.llm_api_key = api_key or settings.LLM_API_KEY
+        self.llm_api_base = api_base or settings.LLM_API_BASE
+        self.llm_provider = settings.LLM_PROVIDER
+        if self.llm_provider == "azure":
+            if not settings.AZURE_OPENAI_API_KEY or not settings.AZURE_OPENAI_ENDPOINT:
+                raise ValueError("Azure OpenAI configuration missing")
+            self.llm_client = AsyncAzureOpenAI(
+                api_key=settings.AZURE_OPENAI_API_KEY,
+                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                api_version=settings.AZURE_OPENAI_API_VERSION,
+                timeout=settings.LLM_CLIENT_TIMEOUT,
+                max_retries=settings.RETRIES,
+            )
+            self.llm_model_name = settings.AZURE_OPENAI_DEPLOYMENT_LLM
+        else:
+            if not self.llm_api_key:
+                raise ValueError("OpenAI configuration missing")
+            self.llm_client = AsyncOpenAI(
+                api_key=self.llm_api_key,
+                base_url=self.llm_api_base,
+                timeout=settings.LLM_CLIENT_TIMEOUT,
+                max_retries=settings.RETRIES,
+            )
+            self.llm_model_name = settings.LLM_MODEL
         
         self._closed = False
 
@@ -107,12 +89,12 @@ class ModelHandler:
 
         Note: The provided image can be a screenshot of a webpage, a PDF page, or any other image format. Your task is to generate text that accurately describes the content of the document.
 
-        Your text will be attached to each document before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively.
+        Your text will be attached to each document before indexing, ensuring that the multimodal retrieval system can leverage both visual and textual cues effectively. Make it as descriptive and informative as possible, focusing on the unique aspects of the document presented in the image.
         """
         if not image_base64:
             raise ValueError("Empty image_base64 provided for text generation")
         response: ChatCompletion = await self.chat_completion(
-            model=settings.AZURE_OPENAI_DEPLOYMENT_LLM,
+            model=self.llm_model_name,
             messages=[
                 {
                     "role": "system",
@@ -232,6 +214,7 @@ class ModelHandler:
         5. Handle coreference resolution (he/she -> actual name)
         6. Extract document structure and content elements
         7. For images, consider visual entities, charts, diagrams, and relationships
+        9. Mainly focus on specifics of the document that defines its content and makes the document searchable in a RAG Space (like numbers, names, content type, unique information) rather than generic knowledge.
         
         If There are no entities or relationships, return empty arrays
             
@@ -343,13 +326,16 @@ class ModelHandler:
         for attempt in range(retries):
             try:
                 response = await self.structured_chat_completion(
-                    model=settings.AZURE_OPENAI_DEPLOYMENT_LLM,
+                    model=self.llm_model_name,
                     messages=[system_message] + messages,
                     response_format=EntityRelationSchema,
                 )
                 parsed = response.choices[0].message.parsed
                 entities = [entity.model_dump() for entity in parsed.entities]
                 relationships = [rel.model_dump() for rel in parsed.relationships]
+                logger.info(f"Extracted {len(entities)} entities and {len(relationships)} relationships")
+                logger.info(f"Entities: {entities}")
+                logger.info(f"Relationships: {relationships}")
                 return {"entities": entities, "relationships": relationships}
             except Exception as exc:
                 if attempt == retries - 1:
@@ -398,7 +384,7 @@ class ModelHandler:
             f"{dataframe_text}"
         )
         response: ChatCompletion = await self.chat_completion(
-            model=settings.AZURE_OPENAI_DEPLOYMENT_LLM,
+            model=self.llm_model_name,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -436,7 +422,7 @@ class ModelHandler:
         response: ParsedChatCompletion[
             ColumnProfilesSchema
         ] = await self.structured_chat_completion(
-            model=settings.AZURE_OPENAI_DEPLOYMENT_LLM,
+            model=self.llm_model_name,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

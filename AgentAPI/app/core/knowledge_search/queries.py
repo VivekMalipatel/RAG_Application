@@ -8,6 +8,19 @@ logger = logging.getLogger(__name__)
 
 _embeddings_client = None
 
+def _validate_cypher_guardrails(cypher_query: str) -> None:
+    lowered_query = (cypher_query or "").lower()
+    missing_tokens: list[str] = []
+    for token in ("user_id", "org_id"):
+        if token not in lowered_query:
+            missing_tokens.append(token)
+    if missing_tokens:
+        raise ValueError(
+            "Cypher query must reference user-specific scopes (missing: "
+            + ", ".join(missing_tokens)
+            + ")"
+        )
+
 def _get_embeddings_client() -> JinaEmbeddings:
     global _embeddings_client
     if _embeddings_client is None:
@@ -443,6 +456,18 @@ async def execute_search_columns(
         }
     
     return await _execute_cypher(cypher, parameters, user_id, org_id)
+
+async def execute_raw_cypher(
+    user_id: str,
+    org_id: str,
+    cypher_query: str,
+    parameters: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    if not cypher_query or not cypher_query.strip():
+        raise ValueError("Cypher query cannot be empty")
+    _validate_cypher_guardrails(cypher_query)
+    parameter_values = dict(parameters or {})
+    return await _execute_cypher(cypher_query, parameter_values, user_id, org_id)
 
 async def execute_get_column_values(
     user_id: str,

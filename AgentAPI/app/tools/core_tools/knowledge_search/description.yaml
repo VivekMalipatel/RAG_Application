@@ -211,3 +211,14 @@ get_entity_context: |
   - Configurable: include_pages, include_related_entities, include_document
   
   Returns: Entity + pages + related entities + document context
+
+execute_raw_cypher_query: |
+  Execute a custom Cypher query against the knowledge graph with optional parameters. Provides maximum flexibility for advanced graph exploration.
+  
+  Use this when:
+  - A bespoke query is required beyond the predefined tools
+  - Inspecting or debugging graph structures
+  - Retrieving complex projections from the graph
+  - The Cypher already includes user_id and org_id filters in the query text
+  
+  Returns: Records returned by the Cypher query with embeddings removed. Queries missing user_id or org_id constraints will be rejected.

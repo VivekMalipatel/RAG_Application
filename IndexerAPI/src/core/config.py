@@ -38,6 +38,7 @@ class Settings:
     LLM_API_KEY: str | None = os.getenv("LLM_API_KEY")
     LLM_API_BASE: str | None = os.getenv("LLM_API_BASE")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o")
+    LLM_PROVIDER: str = (os.getenv("LLM_PROVIDER", "openai") or "openai").lower()
     
     EMBEDDING_DIMENSIONS: int = int(os.getenv("EMBEDDING_DIMENSIONS", "2048"))
     EMBEDDING_CLIENT_TIMEOUT: float = float(os.getenv("EMBEDDING_CLIENT_TIMEOUT", "3600"))

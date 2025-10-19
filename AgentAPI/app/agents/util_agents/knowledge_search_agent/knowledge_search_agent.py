@@ -25,6 +25,7 @@ from tools.core_tools.knowledge_search import (
     hybrid_search,
     breadth_first_search,
     get_entity_context,
+    execute_raw_cypher_query,
 )
 from agents.utils import _load_prompt
 
@@ -75,6 +76,7 @@ class KnowledgeSearchAgent(BaseAgent):
             hybrid_search,
             breadth_first_search,
             get_entity_context,
+            execute_raw_cypher_query,
         ])
     
 
