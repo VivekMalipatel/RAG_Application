@@ -1,0 +1,500 @@
+---
+title: Context engineering in agents
+sidebarTitle: Context engineering
+---
+
+import StableCalloutPy from '/snippets/stable-lc-callout-py.mdx';
+import StableCalloutJS from '/snippets/stable-lc-callout-js.mdx';
+
+:::python
+<StableCalloutPy />
+:::
+:::js
+<StableCalloutJS />
+:::
+
+The hard part of building agents (or any LLM application) is making them reliable enough.
+While they may work for a prototype, they often mess up in more real world and widespread use cases.
+
+Why do they mess up?
+
+When agents mess up, it is because the LLM call inside the agent messes up.
+When LLMs mess up, they mess up for one of two reasons:
+
+1. The underlying LLM is just not good enough
+2. The "right" context was not passed to the LLM
+
+More often than not - it is actually the second reason that causes agents to not be reliable.
+
+Context engineering is building dynamic systems to provide the right information and tools in the right format such that the LLM can plausibly accomplish the task.
+This is the number one job of AI Engineers (or anyone working on AI systems).
+This lack of "right" context is the number one blocker for more reliable agents, and as such LangChain's agent abstractions are uniquely designed to facilitate context engineering.
+
+## The core agent loop
+
+It's important to understand the core agent loop to understand where context should be accessed and/or updated from.
+
+The core agent loop is quite simple:
+1. Get user input
+2. Call LLM, asking it to either respond or call tools
+3. If it decides to call tools - then go and execute those tools
+4. Repeat steps 2 and 3 until it decides to finish
+
+The agent may have access to a lot of different context throughout this loop.
+What ultimately matters is the context that is ultimately passed to the LLM.
+This consists of the final prompt (or list of messages) and the tools it has access to.
+
+## The model
+
+The model (including specific model parameters) that you use is a key part of the agent loop.
+It drives the whole agent's reasoning logic.
+
+One reason the agent could mess up is the model you are using is just not good enough.
+In order to build reliable agents, you have to have access to all the possible models.
+LangChain, with its standard model interfaces, supports this - we have over 50 different provider integrations.
+
+Model choice is also related to context engineering, in two ways.
+
+First, the way you pass the context to the LLM may depend on what LLM you are using.
+Some model providers are better at JSON, some at XML.
+The context engineering you do may be specific to the model choice.
+
+Second, the right model to use in the agent loop may depend on the context you want to pass it.
+As an obvious example - some models have different context windows.
+If the context in an agent builds up, you may want to use one model provider while the context is small, and then once it gets too large for that model's context window you may want to switch to another model.
+
+## Types of context
+
+There are a few different types of context that can be used to construct the context that is ultimately passed to the LLM.
+
+**Instructions:** Base instructions from the developer, commonly referred to as the system prompt.
+This may be static or dynamic.
+
+**Tools:** What tools the agent has access to.
+The names and descriptions and arguments of these are just as important as the text in the prompt.
+
+**Structured output:** What format the agent should respond in.
+The name and description and arguments of these are just as important as the text in the prompt.
+
+
+**Session context:** We also call this "short term memory" in the docs.
+In the context of a conversation, this is most easily thought of the list of messages that make up the conversation.
+But there can often be other, more structured information that you may want the agent to access or update throughout the session.
+The agent can read and write this context.
+This context is often put directly into the context that is passed to the LLM.
+Examples include: messages, files.
+
+**Long term memory:** This is information that should persist across sessions (conversations).
+Examples include: extracted preferences
+
+**Runtime configuration context:** This is context that is not the "state" or "memory" of the agent, but rather configuration for a given agent run.
+This is not modified by the agent, and typically isn't passed into the LLM, but is used to guide the agent's behavior or look up other context.
+Examples include: user ID, DB connections
+
+
+## Context engineering with LangChain
+
+Now we understand the basic agent loop, the importance of the model you use, and the different types of context that exist.
+Let's explore the concrete patterns LangChain provides for context engineering.
+
+### Managing instructions (system prompts)
+
+#### Static instructions
+
+For fixed instructions that don't change, use the @[`system_prompt`] parameter:
+
+:::python
+```python
+from langchain.agents import create_agent
+
+agent = create_agent(
+    model="openai:gpt-4o",
+    tools=[...],
+    system_prompt="You are a customer support agent. Be helpful, concise, and professional."
+)
+```
+:::
+
+:::js
+```typescript
+import { createAgent } from "langchain";
+
+const agent = createAgent({
+  model: "openai:gpt-4o",
+  tools: [...],
+  systemPrompt: "You are a customer support agent. Be helpful, concise, and professional.",
+});
+```
+:::
+
+#### Dynamic instructions
+
+For instructions that depend on context (user profile, preferences, session data), use the @[`@dynamic_prompt`] middleware:
+
+:::python
+```python
+from dataclasses import dataclass
+from langchain.agents import create_agent
+from langchain.agents.middleware import dynamic_prompt, ModelRequest
+
+
+@dataclass
+class Context:
+    user_id: str
+
+@dynamic_prompt
+def personalized_prompt(request: ModelRequest) -> str:
+    # Access runtime context
+    user_id = request.runtime.context.user_id
+
+    # Look up user preferences from long-term memory
+    store = request.runtime.store
+    user_prefs = store.get(("users",), user_id)
+
+    # Access session state
+    message_count = len(request.state["messages"])
+
+    base = "You are a helpful assistant."
+
+    if user_prefs:
+        style = user_prefs.value.get("communication_style", "balanced")
+        base += f"\nUser prefers {style} responses."
+
+    if message_count > 10:
+        base += "\nThis is a long conversation - be extra concise."
+
+    return base
+
+agent = create_agent(
+    model="openai:gpt-4o",
+    tools=[...],
+    middleware=[personalized_prompt],
+    context_schema=Context
+)
+
+# Use the agent with context
+result = agent.invoke(
+    {"messages": [{"role": "user", "content": "Help me debug this code"}]},
+    context=Context(user_id="user_123")
+)
+```
+:::
+
+:::js
+```typescript
+import * as z from "zod";
+import { createAgent, dynamicSystemPromptMiddleware } from "langchain";
+
+const contextSchema = z.object({
+  userId: z.string(),
+});
+
+const agent = createAgent({
+  model: "openai:gpt-4o",
+  tools: [...],
+  contextSchema,
+  middleware: [
+    dynamicSystemPromptMiddleware((state, runtime) => {
+      const userId = runtime.context.userId;
+      const messageCount = state.messages.length;
+
+      let base = "You are a helpful assistant.";
+
+      // Add context-specific instructions
+      if (messageCount > 10) {
+        base += "\nThis is a long conversation - be extra concise.";
+      }
+
+      return base;
+    }),
+  ],
+});
+
+// Use the agent with context
+const result = await agent.invoke(
+  { messages: [{ role: "user", content: "Help me debug this code" }] },
+  { context: { userId: "user_123" } }
+);
+```
+:::
+
+<Tip>
+**When to use each:**
+- **Static prompts**: Base instructions that never change
+- **Dynamic prompts**: Personalization, A/B testing, context-dependent behavior
+</Tip>
+
+### Managing conversation context (messages)
+
+Long conversations can exceed context windows or degrade model performance. Use middleware to manage conversation history:
+
+#### Trimming messages
+
+:::python
+```python
+from langchain.agents import create_agent
+from langchain.agents.middleware import before_model, AgentState
+from langchain.messages import RemoveMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langgraph.runtime import Runtime
+
+
+@before_model
+def trim_messages(state: AgentState, runtime: Runtime) -> dict | None:
+    """Keep only the most recent messages to stay within context window."""
+    messages = state["messages"]
+
+    if len(messages) <= 10:
+        return None  # No trimming needed
+
+    # Keep system message + last 8 messages
+    return {
+        "messages": [
+            RemoveMessage(id=REMOVE_ALL_MESSAGES),
+            messages[0],  # System message
+            *messages[-8:]  # Recent messages
+        ]
+    }
+
+agent = create_agent(
+    model="openai:gpt-4o",
+    tools=[...],
+    middleware=[trim_messages]
+)
+```
+:::
+
+:::js
+```typescript
+import { createMiddleware, RemoveMessage } from "langchain";
+import { REMOVE_ALL_MESSAGES } from "@langchain/langgraph";
+
+const trimMessages = createMiddleware({
+  name: "TrimMessages",
+  beforeModel: (state) => {
+    const messages = state.messages;
+
+    if (messages.length <= 10) {
+      return;  // No trimming needed
+    }
+
+    // Keep system message + last 8 messages
+    return {
+      messages: [
+        new RemoveMessage({ id: REMOVE_ALL_MESSAGES }),
+        messages[0],  // System message
+        ...messages.slice(-8)  // Recent messages
+      ]
+    };
+  },
+});
+
+const agent = createAgent({
+  model: "openai:gpt-4o",
+  tools: [...],
+  middleware: [trimMessages],
+});
+```
+:::
+
+For more sophisticated message management, use the built-in [`SummarizationMiddleware`](/oss/langchain/middleware#summarization) which automatically summarizes old messages when approaching token limits.
+
+See [Before model hook](/oss/langchain/agents#before-model-hook) for more examples.
+
+### Contextual tool execution
+
+Tools can access runtime context, session state, and long-term memory to make context-aware decisions:
+
+:::python
+```python
+from dataclasses import dataclass
+from langchain.tools import tool, ToolRuntime
+from langchain.agents import create_agent
+
+
+@dataclass
+class Context:
+    user_id: str
+    api_key: str
+
+@tool
+def search_documents(
+    query: str,
+    runtime: ToolRuntime[Context]
+) -> str:
+    """Search through documents."""
+    # Access runtime context for user-specific configuration
+    user_id = runtime.context.user_id
+
+    # Access long-term memory for user preferences
+    store = runtime.store
+    search_prefs = store.get(("preferences", user_id), "search")
+
+    # Access session state
+    conversation_history = runtime.state["messages"]
+
+    # Use all context to perform a better search
+    results = perform_search(query, user_id, search_prefs, conversation_history)
+    return f"Found {len(results)} results: {results}"
+
+agent = create_agent(
+    model="openai:gpt-4o",
+    tools=[search_documents],
+    context_schema=Context
+)
+```
+:::
+
+See [Tools](/oss/langchain/tools) for comprehensive examples of accessing state, context, and memory in tools.
+
+### Dynamic tool selection
+
+Control which tools the agent can access based on context, state, or user permissions:
+
+:::python
+```python
+from langchain.agents import create_agent
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
+from typing import Callable
+
+
+@wrap_model_call
+def permission_based_tools(
+    request: ModelRequest,
+    handler: Callable[[ModelRequest], ModelResponse]
+) -> ModelResponse:
+    """Filter tools based on user permissions."""
+    user_role = request.runtime.context.get("user_role", "viewer")
+
+    if user_role == "admin":
+        # Admins get all tools
+        pass
+    elif user_role == "editor":
+        # Editors can't delete
+        request.tools = [t for t in request.tools if t.name != "delete_data"]
+    else:
+        # Viewers get read-only tools
+        request.tools = [t for t in request.tools if t.name.startswith("read_")]
+
+    return handler(request)
+
+agent = create_agent(
+    model="openai:gpt-4o",
+    tools=[read_data, write_data, delete_data],
+    middleware=[permission_based_tools]
+)
+```
+:::
+
+:::js
+```typescript
+import { createMiddleware } from "langchain";
+
+const permissionBasedTools = createMiddleware({
+  name: "PermissionBasedTools",
+  wrapModelCall: (request, handler) => {
+    const userRole = request.runtime.context.userRole || "viewer";
+    let filteredTools = request.tools;
+
+    if (userRole === "admin") {
+      // Admins get all tools
+    } else if (userRole === "editor") {
+      // Editors can't delete
+      filteredTools = request.tools.filter(t => t.name !== "delete_data");
+    } else {
+      // Viewers get read-only tools
+      filteredTools = request.tools.filter(t => t.name.startsWith("read_"));
+    }
+
+    return handler({ ...request, tools: filteredTools });
+  },
+});
+```
+:::
+
+See [Dynamically selecting tools](/oss/langchain/middleware#dynamically-selecting-tools) for more examples.
+
+### Dynamic model selection
+
+Switch models based on conversation complexity, context window needs, or cost optimization:
+
+:::python
+```python
+from langchain.agents import create_agent
+from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse
+from langchain.chat_models import init_chat_model
+from typing import Callable
+
+
+@wrap_model_call
+def adaptive_model(
+    request: ModelRequest,
+    handler: Callable[[ModelRequest], ModelResponse]
+) -> ModelResponse:
+    """Use different models based on conversation length."""
+    message_count = len(request.messages)
+
+    if message_count > 20:
+        # Long conversation - use model with larger context window
+        request.model = init_chat_model("anthropic:claude-sonnet-4-5")
+    elif message_count > 10:
+        # Medium conversation - use mid-tier model
+        request.model = init_chat_model("openai:gpt-4o")
+    else:
+        # Short conversation - use efficient model
+        request.model = init_chat_model("openai:gpt-4o-mini")
+
+    return handler(request)
+
+agent = create_agent(
+    model="openai:gpt-4o-mini",  # Default model
+    tools=[...],
+    middleware=[adaptive_model]
+)
+```
+:::
+
+:::js
+```typescript
+import { createMiddleware, initChatModel } from "langchain";
+
+const adaptiveModel = createMiddleware({
+  name: "AdaptiveModel",
+  wrapModelCall: (request, handler) => {
+    const messageCount = request.messages.length;
+    let model;
+
+    if (messageCount > 20) {
+      // Long conversation - use model with larger context window
+      model = initChatModel("anthropic:claude-sonnet-4-5");
+    } else if (messageCount > 10) {
+      // Medium conversation - use mid-tier model
+      model = initChatModel("openai:gpt-4o");
+    } else {
+      // Short conversation - use efficient model
+      model = initChatModel("openai:gpt-4o-mini");
+    }
+
+    return handler({ ...request, model });
+  },
+});
+```
+:::
+
+See [Dynamic model](/oss/langchain/agents#dynamic-model) for more examples.
+
+## Best practices
+
+1. **Start simple** - Begin with static prompts and tools, add dynamics only when needed
+2. **Test incrementally** - Add one context engineering feature at a time
+3. **Monitor performance** - Track model calls, token usage, and latency
+4. **Use built-in middleware** - Leverage [`SummarizationMiddleware`](/oss/langchain/middleware#summarization), [`LLMToolSelectorMiddleware`](/oss/langchain/middleware#llm-tool-selector), etc.
+5. **Document your context strategy** - Make it clear what context is being passed and why
+
+## Related resources
+
+- [Middleware](/oss/langchain/middleware) - Complete middleware guide
+- [Tools](/oss/langchain/tools) - Tool creation and context access
+- [Memory](/oss/concepts/memory) - Short-term and long-term memory patterns
+- [Agents](/oss/langchain/agents) - Core agent concepts
+
