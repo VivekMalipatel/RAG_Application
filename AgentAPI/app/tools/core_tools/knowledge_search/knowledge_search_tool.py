@@ -51,120 +51,324 @@ def log_tool_error(tool_name: str, error: Exception, user_id: str, org_id: str):
     logger.error(f"[TOOL_ERROR] {tool_name} | user_id={user_id} | org_id={org_id} | error={str(error)}", exc_info=True)
 
 def _ensure_image_payload(image_value: Any) -> Optional[Dict[str, Any]]:
-    """Normalize assorted image payloads into the OpenAI image_url form."""
     if image_value is None:
         return None
-
-    if isinstance(image_value, str):
-        return {"url": image_value}
-
     if isinstance(image_value, dict):
-        # Some payloads already provide the expected structure, while others
-        # might nest the final URL under alternative keys.
-        if "url" in image_value:
-            return {"url": image_value["url"], **{k: v for k, v in image_value.items() if k != "url"}}
-        if "image_url" in image_value and isinstance(image_value["image_url"], str):
-            return {"url": image_value["image_url"]}
-        return image_value
-
-    return {"url": str(image_value)}
+        url = image_value.get("url")
+        if isinstance(url, str) and url.strip():
+            return {"url": url.strip()}
+        return None
+    if isinstance(image_value, str) and image_value.strip():
+        return {"url": image_value.strip()}
+    return None
 
 
-def _extract_message_content(content_data: Any) -> List[Dict[str, Any]]:
-    """Recursively flatten content into OpenAI message blocks."""
-    extracted: List[Dict[str, Any]] = []
-
-    if isinstance(content_data, list):
-        for item in content_data:
-            extracted.extend(_extract_message_content(item))
-        return extracted
-
-    if isinstance(content_data, dict):
-        content_type = content_data.get("type")
-
-        if "role" in content_data and "content" in content_data:
-            extracted.extend(_extract_message_content(content_data.get("content")))
-            return extracted
-
-        if content_type in {"text", "input_text"}:
-            text_value = content_data.get("text") or content_data.get("value") or content_data.get("content")
-            if text_value is not None:
-                extracted.append({"type": "text", "text": str(text_value)})
-            return extracted
-
-        if content_type in {"image_url", "input_image"}:
-            image_payload = _ensure_image_payload(content_data.get("image_url"))
-            if image_payload:
-                extracted.append({"type": "image_url", "image_url": image_payload})
-            return extracted
-
-        # Fallback: dive deeper into nested structures.
-        for value in content_data.values():
-            if isinstance(value, (dict, list)):
-                extracted.extend(_extract_message_content(value))
-        return extracted
-
-    if content_data not in (None, ""):
-        extracted.append({"type": "text", "text": str(content_data)})
-
-    return extracted
+def _safe_json_loads(value: str) -> Optional[Any]:
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return None
 
 
-def format_content_field(content_value: Any) -> List[Dict[str, Any]]:
-    if isinstance(content_value, (dict, list)):
-        return _extract_message_content(content_value)
+def _convert_content_block(block: Any) -> List[Dict[str, Any]]:
+    if block is None:
+        return []
 
-    if isinstance(content_value, str):
-        try:
-            parsed = json.loads(content_value)
-        except (json.JSONDecodeError, TypeError):
-            return [{"type": "text", "text": content_value}]
-        return _extract_message_content(parsed)
+    if isinstance(block, dict):
+        block_type = block.get("type")
+        if block_type in {"text", "input_text"}:
+            text_value = block.get("text") or block.get("value") or block.get("content")
+            if isinstance(text_value, str) and text_value.strip():
+                return [{"type": "text", "text": text_value.strip()}]
+        if block_type in {"image_url", "input_image"}:
+            image_value = block.get("image_url") or block.get("image") or block.get("content")
+            payload = _ensure_image_payload(image_value)
+            if payload:
+                return [{"type": "image_url", "image_url": payload}]
+        if block_type == "file":
+            name = block.get("name") or block.get("filename") or "file"
+            return [{"type": "text", "text": f"[file attachment: {name}]"}]
+        if block_type in {"audio_url", "input_audio", "video_url", "input_video"}:
+            descriptor = block_type.replace("_", " ")
+            return [{"type": "text", "text": f"[{descriptor} content omitted]"}]
 
-    return [{"type": "text", "text": str(content_value)}]
+    if isinstance(block, str) and block.strip():
+        return [{"type": "text", "text": block.strip()}]
+
+    return []
+
+
+def _collect_blocks_from_message(message: Any) -> List[Dict[str, Any]]:
+    if not isinstance(message, dict):
+        return []
+
+    content = message.get("content")
+    if isinstance(content, list):
+        blocks: List[Dict[str, Any]] = []
+        for block in content:
+            blocks.extend(_convert_content_block(block))
+        return blocks
+
+    if isinstance(content, str) and content.strip():
+        return [{"type": "text", "text": content.strip()}]
+
+    return []
+
+
+def _format_messages_payload(payload: Any) -> List[Dict[str, Any]]:
+    if payload is None:
+        return []
+
+    parsed_payload = payload
+    if isinstance(payload, str):
+        parsed = _safe_json_loads(payload)
+        if parsed is None:
+            text = payload.strip()
+            return ([{"type": "text", "text": text}] if text else [])
+        parsed_payload = parsed
+
+    if isinstance(parsed_payload, list):
+        if parsed_payload and isinstance(parsed_payload[0], dict) and "role" in parsed_payload[0]:
+            blocks: List[Dict[str, Any]] = []
+            for message in parsed_payload:
+                blocks.extend(_collect_blocks_from_message(message))
+            return blocks
+
+        blocks: List[Dict[str, Any]] = []
+        for item in parsed_payload:
+            blocks.extend(_convert_content_block(item))
+        return blocks
+
+    if isinstance(parsed_payload, dict):
+        return _collect_blocks_from_message(parsed_payload)
+
+    return []
+
+
+def _append_metadata_block(blocks: List[Dict[str, Any]], label: str, metadata: Dict[str, Any]) -> None:
+    parts = []
+    for key, value in metadata.items():
+        if value in (None, "", [], {}):
+            continue
+        parts.append(f"{key}: {value}")
+    if parts:
+        blocks.append({"type": "text", "text": f"[{label}] {' | '.join(parts)}"})
+
+
+def _format_document_node(document: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not isinstance(document, dict):
+        return []
+
+    blocks: List[Dict[str, Any]] = []
+    for key in ("summary", "description", "notes"):
+        value = document.get(key)
+        if isinstance(value, str) and value.strip():
+            blocks.append({"type": "text", "text": value.strip()})
+
+    metadata = {
+        "filename": document.get("filename"),
+        "source": document.get("source"),
+        "category": document.get("category"),
+        "file_type": document.get("file_type"),
+        "internal_object_id": document.get("internal_object_id"),
+        "task_id": document.get("task_id"),
+    }
+    _append_metadata_block(blocks, "DOCUMENT METADATA", metadata)
+    return blocks
+
+
+def _format_page_node(page: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not isinstance(page, dict):
+        return []
+
+    blocks: List[Dict[str, Any]] = []
+    blocks.extend(_format_messages_payload(page.get("content")))
+
+    summary = page.get("summary")
+    if not blocks and isinstance(summary, str) and summary.strip():
+        blocks.append({"type": "text", "text": summary.strip()})
+
+    metadata = {
+        "page_number": page.get("page_number"),
+        "sheet_name": page.get("sheet_name"),
+        "image_s3_url": page.get("image_s3_url"),
+        "total_rows": page.get("total_rows"),
+        "total_columns": page.get("total_columns"),
+        "is_tabular": page.get("is_tabular"),
+    }
+    _append_metadata_block(blocks, "PAGE METADATA", metadata)
+    return blocks
+
+
+def _format_entity_node(entity: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not isinstance(entity, dict):
+        return []
+
+    blocks: List[Dict[str, Any]] = []
+    profile = entity.get("entity_profile")
+    if isinstance(profile, str) and profile.strip():
+        blocks.append({"type": "text", "text": profile.strip()})
+
+    text_value = entity.get("text")
+    if isinstance(text_value, str) and text_value.strip():
+        blocks.append({"type": "text", "text": text_value.strip()})
+
+    metadata = {
+        "entity_id": entity.get("id"),
+        "entity_type": entity.get("entity_type"),
+        "document_id": entity.get("document_id"),
+    }
+    _append_metadata_block(blocks, "ENTITY METADATA", metadata)
+    return blocks
+
+
+def _format_relationship_edge(relationship: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not isinstance(relationship, dict):
+        return []
+
+    blocks: List[Dict[str, Any]] = []
+    profile = relationship.get("relation_profile")
+    if isinstance(profile, str) and profile.strip():
+        blocks.append({"type": "text", "text": profile.strip()})
+
+    metadata = {
+        "relation_type": relationship.get("relation_type"),
+    }
+    _append_metadata_block(blocks, "RELATIONSHIP METADATA", metadata)
+    return blocks
+
+
+def _format_column_node(column: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not isinstance(column, dict):
+        return []
+
+    blocks: List[Dict[str, Any]] = []
+    profile = column.get("column_profile")
+    if isinstance(profile, str) and profile.strip():
+        blocks.append({"type": "text", "text": profile.strip()})
+
+    metadata = {
+        "column_name": column.get("column_name"),
+    }
+    _append_metadata_block(blocks, "COLUMN METADATA", metadata)
+    return blocks
+
+
+def _format_row_value_node(row_value: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not isinstance(row_value, dict):
+        return []
+
+    blocks: List[Dict[str, Any]] = []
+    value = row_value.get("value")
+    if value not in (None, ""):
+        blocks.append({"type": "text", "text": str(value)})
+
+    metadata = {
+        "row_index": row_value.get("row_index"),
+        "column_name": row_value.get("column_name"),
+    }
+    _append_metadata_block(blocks, "ROW VALUE METADATA", metadata)
+    return blocks
+
+
+def _format_generic_metadata(key: str, value: Any) -> List[str]:
+    if value in (None, "", [], {}):
+        return []
+    if isinstance(value, (dict, list)):
+        return []
+    return [f"{key}: {value}"]
+
 
 async def process_single_record(record: Dict[str, Any]) -> List[Dict[str, Any]]:
-    content_found = False
-    final_content = []
-    metadata_parts = []
-    
+    blocks: List[Dict[str, Any]] = []
+    metadata_entries: List[str] = []
+
     for key, value in record.items():
-        if key == "content" and value is not None:
-            content_items = format_content_field(value)
-            final_content.extend(content_items)
-            content_found = True
-        elif isinstance(value, dict):
-            content_key_found = None
-            for nested_key in value.keys():
-                if nested_key == "content" and value[nested_key] is not None:
-                    content_key_found = nested_key
-                    break
-            
-            if content_key_found:
-                content_items = format_content_field(value[content_key_found])
-                final_content.extend(content_items)
-                content_found = True
-                
-                for nested_key, nested_value in value.items():
-                    if nested_key != content_key_found and nested_value is not None:
-                        metadata_parts.append(f"{nested_key}: {nested_value}")
-        else:
-            if isinstance(value, dict):
-                nested_parts = []
-                for nested_key, nested_value in value.items():
-                    if nested_value is not None:
-                        nested_parts.append(f"{nested_key}: {nested_value}")
-                if nested_parts:
-                    metadata_parts.append(f"{key}: {{{', '.join(nested_parts)}}}")
-            elif value is not None:
-                metadata_parts.append(f"{key}: {value}")
-    
-    if content_found and metadata_parts:
-        final_content.append({"type": "text", "text": f"[METADATA] {' | '.join(metadata_parts)}"})
-    elif not content_found:
-        final_content.append({"type": "text", "text": json.dumps(record, indent=2)})
-    
-    return final_content
+        if key in {"content", "messages"}:
+            blocks.extend(_format_messages_payload(value))
+            continue
+
+        if key in {"document", "d"}:
+            blocks.extend(_format_document_node(value))
+            continue
+
+        if key in {"page", "p"}:
+            blocks.extend(_format_page_node(value))
+            continue
+
+        if key == "pages" and isinstance(value, list):
+            for page in value:
+                blocks.extend(_format_page_node(page))
+            continue
+
+        if key in {"entity", "e"}:
+            blocks.extend(_format_entity_node(value))
+            continue
+
+        if key in {"entities", "related_entities"} and isinstance(value, list):
+            for entity in value:
+                blocks.extend(_format_entity_node(entity))
+            continue
+
+        if key in {"source", "target", "start", "connected"}:
+            blocks.extend(_format_entity_node(value))
+            continue
+
+        if key == "related" and isinstance(value, list):
+            for entry in value:
+                if not isinstance(entry, dict):
+                    continue
+                related_entity = entry.get("entity") or entry.get("related")
+                relationship = entry.get("relationship")
+                if related_entity:
+                    blocks.extend(_format_entity_node(related_entity))
+                if relationship:
+                    blocks.extend(_format_relationship_edge(relationship))
+            continue
+
+        if key in {"relationship", "relationships", "rels", "r"}:
+            relationships = value if isinstance(value, list) else [value]
+            for relationship_entry in relationships:
+                if isinstance(relationship_entry, dict) and (
+                    "relationship" in relationship_entry or "connected_entity" in relationship_entry
+                ):
+                    relation = relationship_entry.get("relationship") or relationship_entry.get("r")
+                    if relation:
+                        blocks.extend(_format_relationship_edge(relation))
+                    connected_entity = (
+                        relationship_entry.get("connected_entity")
+                        or relationship_entry.get("entity")
+                        or relationship_entry.get("target")
+                        or relationship_entry.get("source")
+                    )
+                    if connected_entity:
+                        blocks.extend(_format_entity_node(connected_entity))
+                    continue
+
+                blocks.extend(_format_relationship_edge(relationship_entry))
+            continue
+
+        if key in {"column", "columns"}:
+            columns = value if isinstance(value, list) else [value]
+            for column in columns:
+                blocks.extend(_format_column_node(column))
+            continue
+
+        if key in {"row", "rows", "row_values"}:
+            rows = value if isinstance(value, list) else [value]
+            for row_value in rows:
+                blocks.extend(_format_row_value_node(row_value))
+            continue
+
+        metadata_entries.extend(_format_generic_metadata(key, value))
+
+    if metadata_entries:
+        blocks.append({"type": "text", "text": f"[RECORD METADATA] {' | '.join(metadata_entries)}"})
+
+    if not blocks:
+        blocks.append({"type": "text", "text": json.dumps(record, indent=2, default=str)})
+
+    return blocks
 
 async def format_neo4j_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not results:
