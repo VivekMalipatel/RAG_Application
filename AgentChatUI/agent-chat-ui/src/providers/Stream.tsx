@@ -4,9 +4,13 @@ import React, {
   ReactNode,
   useState,
   useEffect,
+  useMemo,
+  useRef,
+  useCallback,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
+import { v4 as uuidv4 } from "uuid";
 import {
   uiMessageReducer,
   isUIMessage,
@@ -14,7 +18,7 @@ import {
   type UIMessage,
   type RemoveUIMessage,
 } from "@langchain/langgraph-sdk/react-ui";
-import { useQueryState } from "nuqs";
+import { useQueryState, parseAsBoolean } from "nuqs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { LangGraphLogoSVG } from "@/components/icons/langgraph";
@@ -24,6 +28,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
+import { validate } from "uuid";
 
 export type StateType = { messages: Message[]; ui?: UIMessage[] };
 
@@ -71,14 +76,42 @@ const StreamSession = ({
   apiKey,
   apiUrl,
   assistantId,
+  orgId,
+  userId,
+  enableKnowledgeSearch,
 }: {
   children: ReactNode;
   apiKey: string | null;
   apiUrl: string;
   assistantId: string;
+  orgId: string;
+  userId: string;
+  enableKnowledgeSearch: boolean;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
+  const threadIdRef = useRef<string | null>(null);
+  const configBase = useMemo(
+    () => ({
+      org_id: orgId,
+      user_id: userId,
+      enable_knowledge_search: enableKnowledgeSearch,
+    }),
+    [orgId, userId, enableKnowledgeSearch],
+  );
+  const metadataBase = useMemo(() => {
+    const metadata: Record<string, string> = validate(assistantId)
+      ? { assistant_id: assistantId }
+      : { graph_id: assistantId };
+    if (orgId) metadata.org_id = orgId;
+    if (userId) metadata.user_id = userId;
+    return metadata;
+  }, [assistantId, orgId, userId]);
+  useEffect(() => {
+    if (!threadId) {
+      threadIdRef.current = null;
+    }
+  }, [threadId]);
   const streamValue = useTypedStream({
     apiUrl,
     apiKey: apiKey ?? undefined,
@@ -94,12 +127,68 @@ const StreamSession = ({
       }
     },
     onThreadId: (id) => {
-      setThreadId(id);
+      if (id) {
+        threadIdRef.current = id;
+      }
+      if (id && id !== threadId) {
+        setThreadId(id);
+      }
       // Refetch threads list when thread ID changes.
       // Wait for some seconds before fetching so we're able to get the new thread that was created.
       sleep().then(() => getThreads().then(setThreads).catch(console.error));
     },
   });
+  const ensureThreadId = useCallback(() => {
+    if (threadIdRef.current) {
+      return threadIdRef.current;
+    }
+    if (threadId) {
+      threadIdRef.current = threadId;
+      return threadId;
+    }
+    const generatedId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : uuidv4();
+    threadIdRef.current = generatedId;
+    setThreadId(generatedId);
+    return generatedId;
+  }, [threadId, setThreadId]);
+  const submit = useCallback(
+    (
+      input: Parameters<typeof streamValue.submit>[0],
+      options?: Parameters<typeof streamValue.submit>[1],
+    ) => {
+      const resolvedThreadId = options?.threadId ?? ensureThreadId();
+      const mergedConfigurable = {
+        ...configBase,
+        thread_id: resolvedThreadId,
+        ...(options?.config?.configurable ?? {}),
+      };
+      const mergedMetadata = {
+        ...metadataBase,
+        thread_id: resolvedThreadId,
+        ...(options?.metadata ?? {}),
+      };
+      return streamValue.submit(input, {
+        ...options,
+        threadId: resolvedThreadId,
+        config: {
+          ...(options?.config ?? {}),
+          configurable: mergedConfigurable,
+        },
+        metadata: mergedMetadata,
+      });
+    },
+    [streamValue, ensureThreadId, configBase, metadataBase],
+  );
+  const streamContextValue = useMemo(
+    () => ({
+      ...streamValue,
+      submit,
+    }),
+    [streamValue, submit],
+  );
 
   useEffect(() => {
     checkGraphStatus(apiUrl, apiKey).then((ok) => {
@@ -120,15 +209,17 @@ const StreamSession = ({
   }, [apiKey, apiUrl]);
 
   return (
-    <StreamContext.Provider value={streamValue}>
+    <StreamContext.Provider value={streamContextValue}>
       {children}
     </StreamContext.Provider>
   );
 };
 
 // Default values for the form
-const DEFAULT_API_URL = "http://localhost:2024";
-const DEFAULT_ASSISTANT_ID = "agent";
+const DEFAULT_API_URL = "http://localhost:8123";
+const DEFAULT_ASSISTANT_ID = "chat_agent";
+const DEFAULT_ORG_ID = "local-org";
+const DEFAULT_USER_ID = "local-user";
 
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   children,
@@ -137,6 +228,10 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
   const envAssistantId: string | undefined =
     process.env.NEXT_PUBLIC_ASSISTANT_ID;
+  const envOrgId: string | undefined = process.env.NEXT_PUBLIC_ORG_ID;
+  const envUserId: string | undefined = process.env.NEXT_PUBLIC_USER_ID;
+  const envEnableKnowledgeSearch =
+    process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_SEARCH === "true";
 
   // Use URL params with env var fallbacks
   const [apiUrl, setApiUrl] = useQueryState("apiUrl", {
@@ -145,6 +240,16 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [assistantId, setAssistantId] = useQueryState("assistantId", {
     defaultValue: envAssistantId || "",
   });
+  const [orgId, setOrgId] = useQueryState("orgId", {
+    defaultValue: envOrgId || "",
+  });
+  const [userId, setUserId] = useQueryState("userId", {
+    defaultValue: envUserId || "",
+  });
+  const [enableKnowledgeSearch, setEnableKnowledgeSearch] = useQueryState(
+    "enableKnowledgeSearch",
+    parseAsBoolean.withDefault(envEnableKnowledgeSearch),
+  );
 
   // For API key, use localStorage with env var fallback
   const [apiKey, _setApiKey] = useState(() => {
@@ -160,9 +265,12 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   // Determine final values to use, prioritizing URL params then env vars
   const finalApiUrl = apiUrl || envApiUrl;
   const finalAssistantId = assistantId || envAssistantId;
+  const finalOrgId = orgId || envOrgId;
+  const finalUserId = userId || envUserId;
+  const finalEnableKnowledgeSearch = enableKnowledgeSearch;
 
   // Show the form if we: don't have an API URL, or don't have an assistant ID
-  if (!finalApiUrl || !finalAssistantId) {
+  if (!finalApiUrl || !finalAssistantId || !finalOrgId || !finalUserId) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
         <div className="animate-in fade-in-0 zoom-in-95 bg-background flex max-w-3xl flex-col rounded-lg border shadow-lg">
@@ -187,10 +295,13 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
               const apiUrl = formData.get("apiUrl") as string;
               const assistantId = formData.get("assistantId") as string;
               const apiKey = formData.get("apiKey") as string;
-
+              const orgId = formData.get("orgId") as string;
+              const userId = formData.get("userId") as string;
               setApiUrl(apiUrl);
               setApiKey(apiKey);
               setAssistantId(assistantId);
+              setOrgId(orgId);
+              setUserId(userId);
 
               form.reset();
             }}
@@ -208,7 +319,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 id="apiUrl"
                 name="apiUrl"
                 className="bg-background"
-                defaultValue={apiUrl || DEFAULT_API_URL}
+                defaultValue={apiUrl || envApiUrl || DEFAULT_API_URL}
                 required
               />
             </div>
@@ -226,7 +337,41 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 id="assistantId"
                 name="assistantId"
                 className="bg-background"
-                defaultValue={assistantId || DEFAULT_ASSISTANT_ID}
+                defaultValue={
+                  assistantId || envAssistantId || DEFAULT_ASSISTANT_ID
+                }
+                required
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="orgId">
+                Organization ID<span className="text-rose-500">*</span>
+              </Label>
+              <p className="text-muted-foreground text-sm">
+                Threads and knowledge lookups are scoped to this organization.
+              </p>
+              <Input
+                id="orgId"
+                name="orgId"
+                className="bg-background"
+                defaultValue={orgId || envOrgId || DEFAULT_ORG_ID}
+                required
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="userId">
+                User ID<span className="text-rose-500">*</span>
+              </Label>
+              <p className="text-muted-foreground text-sm">
+                The chat session will be attributed to this user.
+              </p>
+              <Input
+                id="userId"
+                name="userId"
+                className="bg-background"
+                defaultValue={userId || envUserId || DEFAULT_USER_ID}
                 required
               />
             </div>
@@ -247,7 +392,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 placeholder="lsv2_pt_..."
               />
             </div>
-
             <div className="mt-2 flex justify-end">
               <Button
                 type="submit"
@@ -266,8 +410,11 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   return (
     <StreamSession
       apiKey={apiKey}
-      apiUrl={apiUrl}
-      assistantId={assistantId}
+      apiUrl={finalApiUrl!}
+      assistantId={finalAssistantId!}
+      orgId={finalOrgId!}
+      userId={finalUserId!}
+      enableKnowledgeSearch={finalEnableKnowledgeSearch}
     >
       {children}
     </StreamSession>

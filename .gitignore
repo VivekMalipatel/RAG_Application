@@ -36,3 +36,4 @@ AgentAPI/.agent
 AgentAPI/agent.db
 AgentAPI/.github/prompts/.langgraph.md
 AgentAPI/.github/prompts/.prompt.md
+AgentChatUI/agent-chat-ui/node_modules

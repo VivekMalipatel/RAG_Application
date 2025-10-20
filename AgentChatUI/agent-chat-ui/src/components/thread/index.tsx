@@ -124,6 +124,12 @@ export function Thread() {
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
   );
+  const knowledgeSearchDefault =
+    process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_SEARCH === "true";
+  const [enableKnowledgeSearch, setEnableKnowledgeSearch] = useQueryState(
+    "enableKnowledgeSearch",
+    parseAsBoolean.withDefault(knowledgeSearchDefault),
+  );
   const [input, setInput] = useState("");
   const {
     contentBlocks,
@@ -496,6 +502,21 @@ export function Thread() {
                               className="text-sm text-gray-600"
                             >
                               Hide Tool Calls
+                            </Label>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <Switch
+                              id="enable-knowledge-search"
+                              checked={enableKnowledgeSearch ?? false}
+                              onCheckedChange={setEnableKnowledgeSearch}
+                            />
+                            <Label
+                              htmlFor="enable-knowledge-search"
+                              className="text-sm text-gray-600"
+                            >
+                              Knowledge Search
                             </Label>
                           </div>
                         </div>

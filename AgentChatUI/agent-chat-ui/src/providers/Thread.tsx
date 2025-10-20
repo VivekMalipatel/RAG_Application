@@ -36,6 +36,7 @@ function getThreadSearchMetadata(
 export function ThreadProvider({ children }: { children: ReactNode }) {
   const [apiUrl] = useQueryState("apiUrl");
   const [assistantId] = useQueryState("assistantId");
+  const [orgId] = useQueryState("orgId");
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
 
@@ -43,15 +44,21 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     if (!apiUrl || !assistantId) return [];
     const client = createClient(apiUrl, getApiKey() ?? undefined);
 
+    const metadata: Record<string, string> = {
+      ...getThreadSearchMetadata(assistantId),
+    };
+    const effectiveOrgId = orgId || process.env.NEXT_PUBLIC_ORG_ID;
+    if (effectiveOrgId) {
+      metadata.org_id = effectiveOrgId;
+    }
+
     const threads = await client.threads.search({
-      metadata: {
-        ...getThreadSearchMetadata(assistantId),
-      },
+      metadata,
       limit: 100,
     });
 
     return threads;
-  }, [apiUrl, assistantId]);
+  }, [apiUrl, assistantId, orgId]);
 
   const value = {
     getThreads,
