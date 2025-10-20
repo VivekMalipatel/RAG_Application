@@ -1,0 +1,107 @@
+/* Light mode CSS variables */
+:root {
+  /* Light Mode Colors - Figma Design Tokens */
+  --bg-primary: #ffffff;
+  --bg-tertiary: #f4f4f5;
+  --text-primary-900: #101828;
+  --text-secondary-700: #3f3f46;
+  --text-tertiary-600: #51525c;
+  --text-quaternary-500: #70707b;
+  --border-primary: #d1d1d6;
+  --border-secondary: #e4e4e7;
+  --border-tertiary: #f4f4f5;
+  --brand-600: #2f6868;
+  --brand-100: #d9eeec;
+  --fg-primary-900: #1a1a1e;
+
+  /* Typography - Figma Tokens */
+  --font-family: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+/* Dark Mode Colors */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #1a1a1e;
+    --bg-tertiary: #2a2a2e;
+    --text-primary-900: #ffffff;
+    --text-secondary-700: #d1d1d6;
+    --text-tertiary-600: #a1a1aa;
+    --text-quaternary-500: #8a8a95;
+    --border-primary: #3f3f46;
+    --border-secondary: #2a2a2e;
+    --border-tertiary: #1f1f23;
+    --brand-600: #2f6868;
+    --brand-100: #1a2c2a;
+    --fg-primary-900: #ffffff;
+  }
+}
+
+
+/* Hide arrow in topbar CTA button */
+#topbar-cta-button svg,
+#topbar-cta-button svg path {
+  display: none !important;
+}
+
+#banner {
+  max-width: 100% !important;
+  color: var(--brand-600) !important; /* Use the dark green brand color */
+}
+
+/* Ensure callout links and lists match callout text formatting */
+.callout a,
+[class*="callout"] a {
+  font-size: inherit !important; /* Match callout text size */
+  color: inherit !important; /* Match callout text color */
+  text-decoration: inherit !important; /* Inherit callout text decoration */
+}
+
+.callout ul,
+.callout ol,
+.callout li,
+[class*="callout"] ul,
+[class*="callout"] ol,
+[class*="callout"] li {
+  font-size: inherit !important; /* Match callout text size */
+  color: inherit !important; /* Match callout text color */
+  line-height: inherit !important; /* Match callout line height */
+}
+
+.callout p,
+[class*="callout"] p {
+  font-size: inherit !important; /* Match callout text size */
+  color: inherit !important; /* Match callout text color */
+}
+
+/* Ensure bold and italic text inherit callout formatting */
+.callout strong,
+.callout b,
+.callout em,
+.callout i,
+[class*="callout"] strong,
+[class*="callout"] b,
+[class*="callout"] em,
+[class*="callout"] i {
+  font-size: inherit !important; /* Match callout text size */
+  color: inherit !important; /* Match callout text color */
+}
+
+/* Ensure mermaid diagrams are centered */
+.mermaid {
+    text-align: center;
+    display: flex;
+    justify-content: center;
+  }
+
+
+/* Fix vertical alignment in table cells with mixed content (text and images) */
+.prose table td, article table td, .markdown table td, .content table td, [class*="prose"] table td,
+.prose table th, article table th, .markdown table th, .content table th, [class*="prose"] table th {
+  vertical-align: middle !important; /* Center align content vertically */
+  line-height: 1.5 !important; /* Consistent line height */
+}
+
+/* Hide pagination */
+#pagination {
+    display: none;
+  }

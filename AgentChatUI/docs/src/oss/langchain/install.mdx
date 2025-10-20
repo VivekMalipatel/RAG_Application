@@ -1,0 +1,106 @@
+---
+title: Install LangChain
+sidebarTitle: Install
+---
+
+import StableCalloutPy from '/snippets/stable-lc-callout-py.mdx';
+import StableCalloutJS from '/snippets/stable-lc-callout-js.mdx';
+
+:::python
+<StableCalloutPy />
+:::
+:::js
+<StableCalloutJS />
+:::
+
+To install the LangChain package:
+
+:::python
+<CodeGroup>
+    ```bash pip
+    pip install -U langchain
+    ```
+
+    ```bash uv
+    uv add langchain
+    ```
+</CodeGroup>
+:::
+
+:::js
+    <CodeGroup>
+    ```bash npm
+    npm install langchain @langchain/core
+    ```
+
+    ```bash pnpm
+    pnpm add langchain @langchain/core
+    ```
+
+    ```bash yarn
+    yarn add langchain @langchain/core
+    ```
+
+    ```bash bun
+    bun add langchain @langchain/core
+    ```
+    </CodeGroup>
+:::
+
+LangChain provides integrations to hundreds of LLMs and thousands of other integrations. These live in independent provider packages. For example:
+
+:::python
+<CodeGroup>
+    ```bash pip
+    # Installing the OpenAI integration
+    pip install -U langchain-openai
+
+    # Installing the Anthropic integration
+    pip install -U langchain-anthropic
+    ```
+    ```bash uv
+    # Installing the OpenAI integration
+    uv add langchain-openai
+
+    # Installing the Anthropic integration
+    uv add langchain-anthropic
+    ```
+</CodeGroup>
+
+:::
+
+:::js
+<CodeGroup>
+    ```bash npm
+    # Installing the OpenAI integration
+    npm install @langchain/openai
+    # Installing the Anthropic integration
+    npm install @langchain/anthropic
+    ```
+
+    ```bash pnpm
+    # Installing the OpenAI integration
+    pnpm install @langchain/openai
+    # Installing the Anthropic integration
+    pnpm install @langchain/anthropic
+    ```
+
+    ```bash yarn
+    # Installing the OpenAI integration
+    yarn add @langchain/openai
+    # Installing the Anthropic integration
+    yarn add @langchain/anthropic
+    ```
+
+    ```bash bun
+    # Installing the OpenAI integration
+    bun add @langchain/openai
+    # Installing the Anthropic integration
+    bun add @langchain/anthropic
+    ```
+</CodeGroup>
+:::
+
+<Tip>
+See the [Integrations tab](/oss/integrations/providers/overview) for a full list of available integrations.
+</Tip>
