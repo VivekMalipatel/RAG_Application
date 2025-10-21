@@ -4,9 +4,9 @@ import { InboxItemInput } from "./inbox-item-input";
 import useInterruptedActions from "../hooks/use-interrupted-actions";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { useQueryState } from "nuqs";
 import { constructOpenInStudioURL } from "../utils";
 import { HumanInterrupt } from "@langchain/langgraph/prebuilt";
+import { useChatRuntime } from "@/providers/ChatRuntime";
 
 interface ThreadActionsViewProps {
   interrupt: HumanInterrupt;
@@ -60,7 +60,7 @@ export function ThreadActionsView({
   showDescription,
   showState,
 }: ThreadActionsViewProps) {
-  const [threadId] = useQueryState("threadId");
+  const { threadId, apiUrl } = useChatRuntime();
   const {
     acceptAllowed,
     hasEdited,
@@ -81,7 +81,6 @@ export function ThreadActionsView({
   } = useInterruptedActions({
     interrupt,
   });
-  const [apiUrl] = useQueryState("apiUrl");
 
   const handleOpenInStudio = () => {
     if (!apiUrl) {

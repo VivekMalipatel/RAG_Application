@@ -1,0 +1,63 @@
+main-app.js?v=1761027326638:2314 Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+Stream.tsx:193 [stream] event {type: 'metadata', payload: {…}, id: 'audit-1-1aadaf64-3d89-44ef-9581-91378ceb2844', timestamp: 1761027332954, sequence: 1}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-2-4ddd8d96-13ed-4f02-81c4-887f022cbb0a', timestamp: 1761027333003, sequence: 2}
+Stream.tsx:193 [stream] event {type: 'checkpoints', namespace: undefined, payload: {…}, id: 'audit-3-e523be55-f9ba-4d7b-afbb-8ee7138772e7', timestamp: 1761027333003, …}
+Stream.tsx:193 [stream] event {type: 'debug', namespace: undefined, payload: {…}, id: 'audit-4-233d75dc-e2a4-4827-84f4-267c6b219f7e', timestamp: 1761027333003, …}
+Stream.tsx:193 [stream] event {type: 'checkpoints', namespace: undefined, payload: {…}, id: 'audit-5-c25ccab9-769d-44e9-9ffb-63f0030392fe', timestamp: 1761027333035, …}
+Stream.tsx:193 [stream] event {type: 'debug', namespace: undefined, payload: {…}, id: 'audit-6-b3b76a63-fb36-4dbc-a01e-e0b2434622e9', timestamp: 1761027333035, …}
+Stream.tsx:193 [stream] event {type: 'tasks', namespace: undefined, payload: {…}, id: 'audit-7-b8349403-b894-4507-bf8e-b95ae7615025', timestamp: 1761027333035, …}
+Stream.tsx:193 [stream] event {type: 'debug', namespace: undefined, payload: {…}, id: 'audit-8-d377c317-d2ad-486a-b7f1-119ca9d3b855', timestamp: 1761027333036, …}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-9-526671a8-5adc-417f-afc9-3a558b65de2b', timestamp: 1761027333036, sequence: 9}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-10-cefdf161-c3f9-413d-aebc-935a14fb2727', timestamp: 1761027333036, sequence: 10}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-11-9e75c77f-7406-4dd3-989f-aafc09bded58', timestamp: 1761027333036, sequence: 11}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-12-8fa2057d-a68a-46e3-840a-24dec0f6a95b', timestamp: 1761027333036, sequence: 12}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-13-b95e7565-74da-484f-8920-84755499cb12', timestamp: 1761027333036, sequence: 13}
+Stream.tsx:193 [stream] event {type: 'updates', namespace: undefined, payload: {…}, id: 'audit-14-720562b0-145a-4376-ac34-7c5f421c86c2', timestamp: 1761027333036, …}
+Stream.tsx:193 [stream] event {type: 'tasks', namespace: undefined, payload: {…}, id: 'audit-15-21fb646e-6c5d-47d2-acee-d6dc2647956b', timestamp: 1761027333073, …}
+Stream.tsx:193 [stream] event {type: 'debug', namespace: undefined, payload: {…}, id: 'audit-16-df13fc36-83f5-4b22-bfbe-6d9ccbb1d274', timestamp: 1761027333073, …}
+Stream.tsx:193 [stream] event {type: 'checkpoints', namespace: undefined, payload: {…}, id: 'audit-17-7c0e38c9-1314-473f-bae6-cc2fe0d36c86', timestamp: 1761027333114, …}
+Stream.tsx:193 [stream] event {type: 'debug', namespace: undefined, payload: {…}, id: 'audit-18-6a789236-f10e-418b-acdb-f5aa972a4110', timestamp: 1761027333114, …}
+Stream.tsx:193 [stream] event {type: 'tasks', namespace: undefined, payload: {…}, id: 'audit-19-e3c7f76b-0d80-4cb2-b9e9-f8d2d3a32ab2', timestamp: 1761027333114, …}
+Stream.tsx:193 [stream] event {type: 'debug', namespace: undefined, payload: {…}, id: 'audit-20-322b856f-e366-4c48-9acd-d562596577b4', timestamp: 1761027333114, …}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-21-a6b98186-4919-4152-8e1e-26079fb9195e', timestamp: 1761027333114, sequence: 21}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-22-b28ca177-6d51-4bec-916e-741f3d9aabb5', timestamp: 1761027333114, sequence: 22}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-23-5aefe9e7-ad3f-430e-8d0f-104455cff8a7', timestamp: 1761027333114, sequence: 23}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-24-02e12f59-15ba-4d85-beb6-439ad18de21e', timestamp: 1761027333114, sequence: 24}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-25-f99e3e46-1a04-4f39-94d2-0db3d8d54556', timestamp: 1761027333115, sequence: 25}
+Stream.tsx:193 [stream] event {type: 'updates', namespace: undefined, payload: {…}, id: 'audit-26-e61131a5-e3c6-4996-9e5f-ee93cec2909e', timestamp: 1761027333115, …}
+Stream.tsx:193 [stream] event {type: 'tasks', namespace: undefined, payload: {…}, id: 'audit-27-5366125f-d2ab-4774-81b5-c402c8836381', timestamp: 1761027333152, …}
+Stream.tsx:193 [stream] event {type: 'debug', namespace: undefined, payload: {…}, id: 'audit-28-9e4c166b-aa9e-4996-a2e3-5ae0704d806d', timestamp: 1761027333152, …}
+Stream.tsx:193 [stream] event {type: 'checkpoints', namespace: undefined, payload: {…}, id: 'audit-29-c482a33f-5b5c-48a1-9c36-faff5602e5c5', timestamp: 1761027333187, …}
+Stream.tsx:193 [stream] event {type: 'debug', namespace: undefined, payload: {…}, id: 'audit-30-e88c137e-1085-4646-a0db-e943269d9724', timestamp: 1761027333187, …}
+Stream.tsx:193 [stream] event {type: 'tasks', namespace: undefined, payload: {…}, id: 'audit-31-88eaa483-f5fe-4982-b96d-81dea9e31808', timestamp: 1761027333187, …}
+Stream.tsx:193 [stream] event {type: 'debug', namespace: undefined, payload: {…}, id: 'audit-32-e270113d-5bba-4b70-b93e-6850fc3a5b2c', timestamp: 1761027333187, …}
+Stream.tsx:193 [stream] event {type: 'langchain', payload: {…}, id: 'audit-33-32f36c2c-f072-44cc-be0f-82a878ecb436', timestamp: 1761027333187, sequence: 33}
+Stream.tsx:193 [stream] event {type: 'tasks', namespace: undefined, payload: {…}, id: 'audit-34-79a42f46-001a-490d-ab05-b0d26a5649da', timestamp: 1761027333187, …}
+Stream.tsx:193 [stream] event {type: 'debug', namespace: undefined, payload: {…}, id: 'audit-35-42fb111d-2bee-4449-83c3-6a213abae7f9', timestamp: 1761027333188, …}
+Stream.tsx:338 RedisModuleVersionError: Required Redis db module search >= 20600 OR searchlight >= 20600 not installed. See Redis Stack docs at https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/.
+    at StreamManager.value [as start] (manager.js:117:43)
+    at async Object.submit (stream.js:300:9)
+error @ intercept-console-error.js:50
+value @ manager.js:177
+await in value
+submit @ stream.js:300
+StreamSession.useCallback[submit] @ Stream.tsx:338
+handleSubmit @ index.tsx:413
+executeDispatch @ react-dom-client.development.js:16502
+runWithFiberInDEV @ react-dom-client.development.js:845
+processDispatchQueue @ react-dom-client.development.js:16552
+eval @ react-dom-client.development.js:17150
+batchedUpdates$1 @ react-dom-client.development.js:3260
+dispatchEventForPluginEventSystem @ react-dom-client.development.js:16706
+dispatchEvent @ react-dom-client.development.js:20816
+dispatchDiscreteEvent @ react-dom-client.development.js:20784
+onKeyDown @ index.tsx:688
+executeDispatch @ react-dom-client.development.js:16502
+runWithFiberInDEV @ react-dom-client.development.js:845
+processDispatchQueue @ react-dom-client.development.js:16552
+eval @ react-dom-client.development.js:17150
+batchedUpdates$1 @ react-dom-client.development.js:3263
+dispatchEventForPluginEventSystem @ react-dom-client.development.js:16706
+dispatchEvent @ react-dom-client.development.js:20816
+dispatchDiscreteEvent @ react-dom-client.development.js:20784
+Stream.tsx:193 [stream] event {type: 'error', payload: RedisModuleVersionError: Required Redis db module search >= 20600 OR searchlight >= 20600 not insta…, run: {…}, id: 'audit-36-7bbf8781-e213-468c-a44a-3c95033c78ae', timestamp: 1761027333189, …}

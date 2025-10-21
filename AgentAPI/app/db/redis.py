@@ -19,6 +19,8 @@ class Redis:
             self._redis_session = AsyncRedis(
                 host=redis_host,
                 port=redis_port,
+                password=config.REDIS_PASSWORD,
+                db=config.REDIS_DB,
                 decode_responses=True
             )
 

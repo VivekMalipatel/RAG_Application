@@ -4,7 +4,6 @@ import { Thread } from "@langchain/langgraph-sdk";
 import { useEffect } from "react";
 
 import { getContentString } from "../utils";
-import { useQueryState, parseAsBoolean } from "nuqs";
 import {
   Sheet,
   SheetContent,
@@ -14,15 +13,17 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { PanelRightOpen, PanelRightClose } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useChatRuntime } from "@/providers/ChatRuntime";
 
 function ThreadList({
   threads,
+  activeThreadId,
   onThreadClick,
 }: {
   threads: Thread[];
+  activeThreadId: string | null;
   onThreadClick?: (threadId: string) => void;
 }) {
-  const [threadId, setThreadId] = useQueryState("threadId");
 
   return (
     <div className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
@@ -44,13 +45,14 @@ function ThreadList({
             className="w-full px-1"
           >
             <Button
-              variant="ghost"
+              variant={t.thread_id === activeThreadId ? "secondary" : "ghost"}
               className="w-[280px] items-start justify-start text-left font-normal"
               onClick={(e) => {
                 e.preventDefault();
+                if (t.thread_id === activeThreadId) {
+                  return;
+                }
                 onThreadClick?.(t.thread_id);
-                if (t.thread_id === threadId) return;
-                setThreadId(t.thread_id);
               }}
             >
               <p className="truncate text-ellipsis">{itemText}</p>
@@ -75,12 +77,15 @@ function ThreadHistoryLoading() {
   );
 }
 
-export default function ThreadHistory() {
+export default function ThreadHistory({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
-  const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
-    "chatHistoryOpen",
-    parseAsBoolean.withDefault(false),
-  );
+  const { threadId, setThreadId } = useChatRuntime();
 
   const { getThreads, threads, setThreads, threadsLoading, setThreadsLoading } =
     useThreads();
@@ -92,7 +97,7 @@ export default function ThreadHistory() {
       .then(setThreads)
       .catch(console.error)
       .finally(() => setThreadsLoading(false));
-  }, []);
+  }, [getThreads, setThreads, setThreadsLoading]);
 
   return (
     <>
@@ -101,9 +106,9 @@ export default function ThreadHistory() {
           <Button
             className="hover:bg-gray-100"
             variant="ghost"
-            onClick={() => setChatHistoryOpen((p) => !p)}
+            onClick={() => onOpenChange(!open)}
           >
-            {chatHistoryOpen ? (
+            {open ? (
               <PanelRightOpen className="size-5" />
             ) : (
               <PanelRightClose className="size-5" />
@@ -116,15 +121,21 @@ export default function ThreadHistory() {
         {threadsLoading ? (
           <ThreadHistoryLoading />
         ) : (
-          <ThreadList threads={threads} />
+          <ThreadList
+            threads={threads}
+            activeThreadId={threadId}
+            onThreadClick={(id) => {
+              setThreadId(id);
+            }}
+          />
         )}
       </div>
       <div className="lg:hidden">
         <Sheet
-          open={!!chatHistoryOpen && !isLargeScreen}
+          open={!!open && !isLargeScreen}
           onOpenChange={(open) => {
             if (isLargeScreen) return;
-            setChatHistoryOpen(open);
+            onOpenChange(open);
           }}
         >
           <SheetContent
@@ -136,7 +147,11 @@ export default function ThreadHistory() {
             </SheetHeader>
             <ThreadList
               threads={threads}
-              onThreadClick={() => setChatHistoryOpen((o) => !o)}
+              activeThreadId={threadId}
+              onThreadClick={(id) => {
+                setThreadId(id);
+                onOpenChange(false);
+              }}
             />
           </SheetContent>
         </Sheet>

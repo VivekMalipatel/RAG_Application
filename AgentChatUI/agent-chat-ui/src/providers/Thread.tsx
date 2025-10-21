@@ -1,7 +1,7 @@
+"use client";
+
 import { validate } from "uuid";
-import { getApiKey } from "@/lib/api-key";
 import { Thread } from "@langchain/langgraph-sdk";
-import { useQueryState } from "nuqs";
 import {
   createContext,
   useContext,
@@ -10,8 +10,11 @@ import {
   useState,
   Dispatch,
   SetStateAction,
+  useEffect,
 } from "react";
 import { createClient } from "./client";
+import { useAuth } from "@/providers/Auth";
+import { useChatRuntime } from "@/providers/ChatRuntime";
 
 interface ThreadContextType {
   getThreads: () => Promise<Thread[]>;
@@ -34,15 +37,15 @@ function getThreadSearchMetadata(
 }
 
 export function ThreadProvider({ children }: { children: ReactNode }) {
-  const [apiUrl] = useQueryState("apiUrl");
-  const [assistantId] = useQueryState("assistantId");
-  const [orgId] = useQueryState("orgId");
+  const { apiUrl, assistantId, orgId } = useChatRuntime();
+  const { token, user } = useAuth();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
+  const resolvedUserId = user?.id ?? null;
 
   const getThreads = useCallback(async (): Promise<Thread[]> => {
-    if (!apiUrl || !assistantId) return [];
-    const client = createClient(apiUrl, getApiKey() ?? undefined);
+    if (!apiUrl || !assistantId || !token || !resolvedUserId) return [];
+    const client = createClient(apiUrl, undefined, token);
 
     const metadata: Record<string, string> = {
       ...getThreadSearchMetadata(assistantId),
@@ -51,6 +54,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     if (effectiveOrgId) {
       metadata.org_id = effectiveOrgId;
     }
+    metadata.user_id = resolvedUserId;
 
     const threads = await client.threads.search({
       metadata,
@@ -58,7 +62,13 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     });
 
     return threads;
-  }, [apiUrl, assistantId, orgId]);
+  }, [apiUrl, assistantId, orgId, token, resolvedUserId]);
+
+  useEffect(() => {
+    if (!token) {
+      setThreads([]);
+    }
+  }, [token, resolvedUserId]);
 
   const value = {
     getThreads,

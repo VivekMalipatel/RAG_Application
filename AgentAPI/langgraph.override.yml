@@ -1,0 +1,4 @@
+services:
+  langgraph-api:
+    environment:
+      REDIS_URI: ${REDIS_URI}

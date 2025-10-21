@@ -1,3 +1,5 @@
+"use client";
+
 import React, {
   createContext,
   useContext,
@@ -9,7 +11,14 @@ import React, {
   useCallback,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import { type Message } from "@langchain/langgraph-sdk";
+import {
+  type Message,
+  type ThreadState,
+  type EventsStreamEvent,
+  type MetadataStreamEvent,
+  type DebugStreamEvent,
+  type Thread,
+} from "@langchain/langgraph-sdk";
 import { v4 as uuidv4 } from "uuid";
 import {
   uiMessageReducer,
@@ -18,19 +27,45 @@ import {
   type UIMessage,
   type RemoveUIMessage,
 } from "@langchain/langgraph-sdk/react-ui";
-import { useQueryState, parseAsBoolean } from "nuqs";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { LangGraphLogoSVG } from "@/components/icons/langgraph";
-import { Label } from "@/components/ui/label";
-import { ArrowRight } from "lucide-react";
-import { PasswordInput } from "@/components/ui/password-input";
-import { getApiKey } from "@/lib/api-key";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
 import { validate } from "uuid";
+import { useAuth } from "@/providers/Auth";
+import { useAgentCatalog, type CatalogAgent, type CatalogCapability } from "@/providers/AgentCatalog";
+import { useChatRuntime } from "@/providers/ChatRuntime";
 
-export type StateType = { messages: Message[]; ui?: UIMessage[] };
+export type StateType = {
+  messages: Message[];
+  ui?: UIMessage[];
+  context?: Record<string, unknown>;
+};
+
+type StreamUpdate = {
+  messages?: Message[] | Message | string;
+  ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
+  context?: Record<string, unknown>;
+};
+
+type StreamUpdateData = Record<string, StreamUpdate>;
+
+type StreamRunMeta = { run_id: string; thread_id: string };
+
+type StreamAuditEventInput =
+  | { type: "updates"; namespace?: string[]; payload: StreamUpdateData }
+  | { type: "custom"; namespace?: string[]; payload: UIMessage | RemoveUIMessage }
+  | { type: "metadata"; payload: MetadataStreamEvent["data"] }
+  | { type: "langchain"; payload: EventsStreamEvent["data"] }
+  | { type: "debug"; namespace?: string[]; payload: DebugStreamEvent["data"] }
+  | { type: "checkpoints"; namespace?: string[]; payload: unknown }
+  | { type: "tasks"; namespace?: string[]; payload: unknown }
+  | { type: "error"; payload: unknown; run?: StreamRunMeta }
+  | { type: "finish"; payload: ThreadState<StateType>; run?: StreamRunMeta };
+
+export type StreamAuditEvent = StreamAuditEventInput & {
+  id: string;
+  timestamp: number;
+  sequence: number;
+};
 
 const useTypedStream = useStream<
   StateType,
@@ -44,24 +79,32 @@ const useTypedStream = useStream<
   }
 >;
 
-type StreamContextType = ReturnType<typeof useTypedStream>;
+type StreamContextType = ReturnType<typeof useTypedStream> & {
+  auditEvents: StreamAuditEvent[];
+  clearAuditEvents: () => void;
+  capabilityFlags: Record<string, boolean>;
+  setCapabilityFlag: (name: string, value: boolean) => void;
+  capabilityDefinitions: CatalogCapability[];
+  assistantId: string;
+  assistantDefinition?: CatalogAgent;
+  setAssistantId: (assistantId: string) => void;
+  threadId: string | null;
+  setThreadId: (threadId: string | null) => void;
+};
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
 async function sleep(ms = 4000) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function checkGraphStatus(
-  apiUrl: string,
-  apiKey: string | null,
-): Promise<boolean> {
+async function checkGraphStatus(apiUrl: string, token: string | null): Promise<boolean> {
   try {
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     const res = await fetch(`${apiUrl}/info`, {
-      ...(apiKey && {
-        headers: {
-          "X-Api-Key": apiKey,
-        },
-      }),
+      headers: Object.keys(headers).length ? headers : undefined,
     });
 
     return res.ok;
@@ -73,32 +116,63 @@ async function checkGraphStatus(
 
 const StreamSession = ({
   children,
-  apiKey,
   apiUrl,
   assistantId,
+  assistantDefinition,
   orgId,
   userId,
-  enableKnowledgeSearch,
+  capabilities,
+  capabilityDefinitions,
+  onCapabilityChange,
+  onAssistantChange,
+  token,
+  threadId,
+  setThreadId,
 }: {
   children: ReactNode;
-  apiKey: string | null;
   apiUrl: string;
   assistantId: string;
+  assistantDefinition?: CatalogAgent;
   orgId: string;
   userId: string;
-  enableKnowledgeSearch: boolean;
+  capabilities: Record<string, boolean>;
+  capabilityDefinitions: CatalogCapability[];
+  onCapabilityChange: (name: string, value: boolean) => void;
+  onAssistantChange: (assistantId: string) => void;
+  token: string | null;
+  threadId: string | null;
+  setThreadId: (threadId: string | null) => void;
 }) => {
-  const [threadId, setThreadId] = useQueryState("threadId");
-  const { getThreads, setThreads } = useThreads();
+  const { getThreads, threads, setThreads } = useThreads();
   const threadIdRef = useRef<string | null>(null);
-  const configBase = useMemo(
-    () => ({
+  const auditSequenceRef = useRef(0);
+  const [auditEvents, setAuditEvents] = useState<StreamAuditEvent[]>([]);
+  const resolvedCapabilities = useMemo(() => {
+    if (capabilityDefinitions.length === 0) {
+      return { ...capabilities };
+    }
+    const result: Record<string, boolean> = {};
+    capabilityDefinitions.forEach((def) => {
+      const value = capabilities[def.name];
+      result[def.name] = typeof value === "boolean" ? value : def.enabled_by_default;
+    });
+    Object.entries(capabilities).forEach(([name, value]) => {
+      if (!(name in result)) {
+        result[name] = value;
+      }
+    });
+    return result;
+  }, [capabilities, capabilityDefinitions]);
+  const configBase = useMemo(() => {
+    const base: Record<string, string | boolean> = {
       org_id: orgId,
       user_id: userId,
-      enable_knowledge_search: enableKnowledgeSearch,
-    }),
-    [orgId, userId, enableKnowledgeSearch],
-  );
+    };
+    Object.entries(resolvedCapabilities).forEach(([name, value]) => {
+      base[`enable_${name}`] = value;
+    });
+    return base;
+  }, [orgId, userId, resolvedCapabilities]);
   const metadataBase = useMemo(() => {
     const metadata: Record<string, string> = validate(assistantId)
       ? { assistant_id: assistantId }
@@ -107,24 +181,119 @@ const StreamSession = ({
     if (userId) metadata.user_id = userId;
     return metadata;
   }, [assistantId, orgId, userId]);
+  const appendAuditEvent = useCallback((event: StreamAuditEventInput) => {
+    const now = Date.now();
+    auditSequenceRef.current += 1;
+    const uniqueId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : uuidv4();
+    const nextEvent: StreamAuditEvent = {
+      ...event,
+      id: `audit-${auditSequenceRef.current}-${uniqueId}`,
+      timestamp: now,
+      sequence: auditSequenceRef.current,
+    };
+    console.debug("[stream] event", nextEvent);
+    setAuditEvents((prev) => [
+      ...prev,
+      nextEvent,
+    ]);
+  }, []);
+  const clearAuditEvents = useCallback(() => {
+    auditSequenceRef.current = 0;
+    setAuditEvents([]);
+  }, []);
   useEffect(() => {
     if (!threadId) {
       threadIdRef.current = null;
     }
   }, [threadId]);
+  useEffect(() => {
+    auditSequenceRef.current = 0;
+    setAuditEvents([]);
+  }, [threadId]);
+  const knownThread = useMemo(() => {
+    if (!threadId) return false;
+    return threads.some((item: Thread) => item.thread_id === threadId);
+  }, [threads, threadId]);
+
+  const streamThreadId = knownThread ? threadId : null;
+
   const streamValue = useTypedStream({
     apiUrl,
-    apiKey: apiKey ?? undefined,
     assistantId,
-    threadId: threadId ?? null,
+    defaultHeaders: token ? { Authorization: `Bearer ${token}` } : undefined,
+    threadId: streamThreadId,
     fetchStateHistory: true,
+    onUpdateEvent: (data, options) => {
+      appendAuditEvent({
+        type: "updates",
+        namespace: options.namespace,
+        payload: data as StreamUpdateData,
+      });
+      options.mutate(() => {
+        const updates: Partial<StateType> = {};
+        let hasUpdate = false;
+        Object.values(data).forEach((value) => {
+          if (!value || typeof value !== "object") {
+            return;
+          }
+          Object.entries(value as Record<string, unknown>).forEach(
+            ([key, entry]) => {
+              (updates as Record<string, unknown>)[key] = entry;
+              hasUpdate = true;
+            },
+          );
+        });
+        return hasUpdate ? updates : {};
+      });
+    },
     onCustomEvent: (event, options) => {
+      appendAuditEvent({
+        type: "custom",
+        namespace: options.namespace,
+        payload: event,
+      });
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
         options.mutate((prev) => {
           const ui = uiMessageReducer(prev.ui ?? [], event);
           return { ...prev, ui };
         });
       }
+    },
+    onMetadataEvent: (data) => {
+      appendAuditEvent({ type: "metadata", payload: data });
+    },
+    onLangChainEvent: (data) => {
+      appendAuditEvent({ type: "langchain", payload: data });
+    },
+    onDebugEvent: (data, options) => {
+      appendAuditEvent({
+        type: "debug",
+        namespace: options.namespace,
+        payload: data,
+      });
+    },
+    onCheckpointEvent: (data, options) => {
+      appendAuditEvent({
+        type: "checkpoints",
+        namespace: options.namespace,
+        payload: data,
+      });
+    },
+    onTaskEvent: (data, options) => {
+      appendAuditEvent({
+        type: "tasks",
+        namespace: options.namespace,
+        payload: data,
+      });
+    },
+    onError: (error, run) => {
+      appendAuditEvent({ type: "error", payload: error, run: run ?? undefined });
+    },
+    onFinish: (state, run) => {
+      appendAuditEvent({ type: "finish", payload: state, run: run ?? undefined });
     },
     onThreadId: (id) => {
       if (id) {
@@ -186,18 +355,41 @@ const StreamSession = ({
     () => ({
       ...streamValue,
       submit,
+      auditEvents,
+      clearAuditEvents,
+      capabilityFlags: resolvedCapabilities,
+      setCapabilityFlag: onCapabilityChange,
+      capabilityDefinitions,
+      assistantId,
+      assistantDefinition,
+      setAssistantId: onAssistantChange,
+      threadId,
+      setThreadId,
     }),
-    [streamValue, submit],
+    [
+      streamValue,
+      submit,
+      auditEvents,
+      clearAuditEvents,
+      resolvedCapabilities,
+      onCapabilityChange,
+      capabilityDefinitions,
+      assistantId,
+      assistantDefinition,
+      onAssistantChange,
+      threadId,
+      setThreadId,
+    ],
   );
 
   useEffect(() => {
-    checkGraphStatus(apiUrl, apiKey).then((ok) => {
+    checkGraphStatus(apiUrl, token).then((ok) => {
       if (!ok) {
         toast.error("Failed to connect to LangGraph server", {
           description: () => (
             <p>
-              Please ensure your graph is running at <code>{apiUrl}</code> and
-              your API key is correctly set (if connecting to a deployed graph).
+              Please ensure your graph is running at <code>{apiUrl}</code> and that
+              your account has access to this deployment.
             </p>
           ),
           duration: 10000,
@@ -206,7 +398,7 @@ const StreamSession = ({
         });
       }
     });
-  }, [apiKey, apiUrl]);
+  }, [apiUrl, token]);
 
   return (
     <StreamContext.Provider value={streamContextValue}>
@@ -215,206 +407,99 @@ const StreamSession = ({
   );
 };
 
-// Default values for the form
-const DEFAULT_API_URL = "http://localhost:8123";
-const DEFAULT_ASSISTANT_ID = "chat_agent";
-const DEFAULT_ORG_ID = "local-org";
-const DEFAULT_USER_ID = "local-user";
-
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
-  // Get environment variables
-  const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
+  const envUserId: string | undefined = process.env.NEXT_PUBLIC_USER_ID;
+
+  const { token, user } = useAuth();
+  const { catalog } = useAgentCatalog();
+  const {
+    apiUrl,
+    orgId,
+    assistantId: runtimeAssistantId,
+    setAssistantId: setRuntimeAssistantId,
+    threadId,
+    setThreadId,
+  } = useChatRuntime();
+
   const envAssistantId: string | undefined =
     process.env.NEXT_PUBLIC_ASSISTANT_ID;
-  const envOrgId: string | undefined = process.env.NEXT_PUBLIC_ORG_ID;
-  const envUserId: string | undefined = process.env.NEXT_PUBLIC_USER_ID;
-  const envEnableKnowledgeSearch =
-    process.env.NEXT_PUBLIC_ENABLE_KNOWLEDGE_SEARCH === "true";
 
-  // Use URL params with env var fallbacks
-  const [apiUrl, setApiUrl] = useQueryState("apiUrl", {
-    defaultValue: envApiUrl || "",
-  });
-  const [assistantId, setAssistantId] = useQueryState("assistantId", {
-    defaultValue: envAssistantId || "",
-  });
-  const [orgId, setOrgId] = useQueryState("orgId", {
-    defaultValue: envOrgId || "",
-  });
-  const [userId, setUserId] = useQueryState("userId", {
-    defaultValue: envUserId || "",
-  });
-  const [enableKnowledgeSearch, setEnableKnowledgeSearch] = useQueryState(
-    "enableKnowledgeSearch",
-    parseAsBoolean.withDefault(envEnableKnowledgeSearch),
+  const assistantId = runtimeAssistantId || envAssistantId || "";
+  const userId = user?.id ?? envUserId ?? "";
+
+  const assistantDefinition = useMemo(
+    () => catalog.find((item) => item.agent_id === assistantId),
+    [catalog, assistantId],
+  );
+  const capabilityDefinitions = useMemo(
+    () => assistantDefinition?.capabilities ?? [],
+    [assistantDefinition],
+  );
+  const [capabilityFlags, setCapabilityFlags] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!assistantId && catalog.length > 0) {
+      setRuntimeAssistantId(catalog[0].agent_id);
+    }
+  }, [assistantId, catalog, setRuntimeAssistantId]);
+
+  useEffect(() => {
+    if (capabilityDefinitions.length === 0) {
+      setCapabilityFlags((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      return;
+    }
+    setCapabilityFlags((prev) => {
+      const next: Record<string, boolean> = {};
+      capabilityDefinitions.forEach((definition) => {
+        const current = prev[definition.name];
+        next[definition.name] =
+          typeof current === "boolean" ? current : definition.enabled_by_default;
+      });
+      const unchanged =
+        Object.keys(prev).length === Object.keys(next).length &&
+        capabilityDefinitions.every((definition) => prev[definition.name] === next[definition.name]);
+      return unchanged ? prev : next;
+    });
+  }, [capabilityDefinitions]);
+
+  const handleCapabilityChange = useCallback(
+    (name: string, value: boolean) => {
+      setCapabilityFlags((prev) => {
+        if (prev[name] === value) return prev;
+        return { ...prev, [name]: value };
+      });
+    },
+    [],
   );
 
-  // For API key, use localStorage with env var fallback
-  const [apiKey, _setApiKey] = useState(() => {
-    const storedKey = getApiKey();
-    return storedKey || "";
-  });
-
-  const setApiKey = (key: string) => {
-    window.localStorage.setItem("lg:chat:apiKey", key);
-    _setApiKey(key);
-  };
-
-  // Determine final values to use, prioritizing URL params then env vars
-  const finalApiUrl = apiUrl || envApiUrl;
-  const finalAssistantId = assistantId || envAssistantId;
-  const finalOrgId = orgId || envOrgId;
-  const finalUserId = userId || envUserId;
-  const finalEnableKnowledgeSearch = enableKnowledgeSearch;
-
-  // Show the form if we: don't have an API URL, or don't have an assistant ID
-  if (!finalApiUrl || !finalAssistantId || !finalOrgId || !finalUserId) {
-    return (
-      <div className="flex min-h-screen w-full items-center justify-center p-4">
-        <div className="animate-in fade-in-0 zoom-in-95 bg-background flex max-w-3xl flex-col rounded-lg border shadow-lg">
-          <div className="mt-14 flex flex-col gap-2 border-b p-6">
-            <div className="flex flex-col items-start gap-2">
-              <LangGraphLogoSVG className="h-7" />
-              <h1 className="text-xl font-semibold tracking-tight">
-                Agent Chat
-              </h1>
-            </div>
-            <p className="text-muted-foreground">
-              Welcome to Agent Chat! Before you get started, you need to enter
-              the URL of the deployment and the assistant / graph ID.
-            </p>
-          </div>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-
-              const form = e.target as HTMLFormElement;
-              const formData = new FormData(form);
-              const apiUrl = formData.get("apiUrl") as string;
-              const assistantId = formData.get("assistantId") as string;
-              const apiKey = formData.get("apiKey") as string;
-              const orgId = formData.get("orgId") as string;
-              const userId = formData.get("userId") as string;
-              setApiUrl(apiUrl);
-              setApiKey(apiKey);
-              setAssistantId(assistantId);
-              setOrgId(orgId);
-              setUserId(userId);
-
-              form.reset();
-            }}
-            className="bg-muted/50 flex flex-col gap-6 p-6"
-          >
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="apiUrl">
-                Deployment URL<span className="text-rose-500">*</span>
-              </Label>
-              <p className="text-muted-foreground text-sm">
-                This is the URL of your LangGraph deployment. Can be a local, or
-                production deployment.
-              </p>
-              <Input
-                id="apiUrl"
-                name="apiUrl"
-                className="bg-background"
-                defaultValue={apiUrl || envApiUrl || DEFAULT_API_URL}
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="assistantId">
-                Assistant / Graph ID<span className="text-rose-500">*</span>
-              </Label>
-              <p className="text-muted-foreground text-sm">
-                This is the ID of the graph (can be the graph name), or
-                assistant to fetch threads from, and invoke when actions are
-                taken.
-              </p>
-              <Input
-                id="assistantId"
-                name="assistantId"
-                className="bg-background"
-                defaultValue={
-                  assistantId || envAssistantId || DEFAULT_ASSISTANT_ID
-                }
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="orgId">
-                Organization ID<span className="text-rose-500">*</span>
-              </Label>
-              <p className="text-muted-foreground text-sm">
-                Threads and knowledge lookups are scoped to this organization.
-              </p>
-              <Input
-                id="orgId"
-                name="orgId"
-                className="bg-background"
-                defaultValue={orgId || envOrgId || DEFAULT_ORG_ID}
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="userId">
-                User ID<span className="text-rose-500">*</span>
-              </Label>
-              <p className="text-muted-foreground text-sm">
-                The chat session will be attributed to this user.
-              </p>
-              <Input
-                id="userId"
-                name="userId"
-                className="bg-background"
-                defaultValue={userId || envUserId || DEFAULT_USER_ID}
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="apiKey">LangSmith API Key</Label>
-              <p className="text-muted-foreground text-sm">
-                This is <strong>NOT</strong> required if using a local LangGraph
-                server. This value is stored in your browser's local storage and
-                is only used to authenticate requests sent to your LangGraph
-                server.
-              </p>
-              <PasswordInput
-                id="apiKey"
-                name="apiKey"
-                defaultValue={apiKey ?? ""}
-                className="bg-background"
-                placeholder="lsv2_pt_..."
-              />
-            </div>
-            <div className="mt-2 flex justify-end">
-              <Button
-                type="submit"
-                size="lg"
-              >
-                Continue
-                <ArrowRight className="size-5" />
-              </Button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  }
+  const handleAssistantChange = useCallback(
+    (nextAssistantId: string) => {
+      if (nextAssistantId === assistantId) {
+        return;
+      }
+      setRuntimeAssistantId(nextAssistantId);
+      setThreadId(null);
+      setCapabilityFlags({});
+    },
+    [assistantId, setRuntimeAssistantId, setThreadId],
+  );
 
   return (
     <StreamSession
-      apiKey={apiKey}
-      apiUrl={finalApiUrl!}
-      assistantId={finalAssistantId!}
-      orgId={finalOrgId!}
-      userId={finalUserId!}
-      enableKnowledgeSearch={finalEnableKnowledgeSearch}
+      apiUrl={apiUrl}
+      assistantId={assistantId}
+      assistantDefinition={assistantDefinition}
+      orgId={orgId}
+      userId={userId}
+      capabilities={capabilityFlags}
+      capabilityDefinitions={capabilityDefinitions}
+      onCapabilityChange={handleCapabilityChange}
+      onAssistantChange={handleAssistantChange}
+      token={token ?? null}
+      threadId={threadId}
+      setThreadId={setThreadId}
     >
       {children}
     </StreamSession>

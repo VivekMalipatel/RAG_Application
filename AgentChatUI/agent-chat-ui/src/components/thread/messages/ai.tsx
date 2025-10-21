@@ -119,6 +119,8 @@ export function AssistantMessage({
   const threadInterrupt = thread.interrupt;
 
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
+  const branchOptions = meta?.branchOptions;
+  const branch = meta?.branch;
   const anthropicStreamedToolCalls = Array.isArray(content)
     ? parseAnthropicStreamedToolCalls(content)
     : undefined;
@@ -192,8 +194,8 @@ export function AssistantMessage({
               )}
             >
               <BranchSwitcher
-                branch={meta?.branch}
-                branchOptions={meta?.branchOptions}
+                branch={branch}
+                branchOptions={branchOptions}
                 onSelect={(branch) => thread.setBranch(branch)}
                 isLoading={isLoading}
               />

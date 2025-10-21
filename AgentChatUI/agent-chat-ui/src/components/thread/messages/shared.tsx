@@ -21,12 +21,30 @@ function ContentCopyable({
   disabled: boolean;
 }) {
   const [copied, setCopied] = useState(false);
+  const clipboardSupported =
+    typeof navigator !== "undefined" &&
+    typeof navigator.clipboard !== "undefined" &&
+    typeof navigator.clipboard.writeText === "function";
 
-  const handleCopy = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
+  const handleCopy = async (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+
+    if (!clipboardSupported) {
+      return;
+    }
+
+    let copiedSuccessfully = false;
+    try {
+      await navigator.clipboard.writeText(content);
+      copiedSuccessfully = true;
+    } catch (err) {
+      copiedSuccessfully = false;
+    }
+
+    if (copiedSuccessfully) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   return (
@@ -34,7 +52,7 @@ function ContentCopyable({
       onClick={(e) => handleCopy(e)}
       variant="ghost"
       tooltip="Copy content"
-      disabled={disabled}
+      disabled={disabled || !clipboardSupported}
     >
       <AnimatePresence
         mode="wait"
@@ -79,6 +97,7 @@ export function BranchSwitcher({
 }) {
   if (!branchOptions || !branch) return null;
   const index = branchOptions.indexOf(branch);
+  if (index === -1) return null;
 
   return (
     <div className="flex items-center gap-2">
@@ -91,7 +110,7 @@ export function BranchSwitcher({
           if (!prevBranch) return;
           onSelect(prevBranch);
         }}
-        disabled={isLoading}
+  disabled={isLoading || !branchOptions[index - 1]}
       >
         <ChevronLeft />
       </Button>
@@ -107,7 +126,7 @@ export function BranchSwitcher({
           if (!nextBranch) return;
           onSelect(nextBranch);
         }}
-        disabled={isLoading}
+  disabled={isLoading || !branchOptions[index + 1]}
       >
         <ChevronRight />
       </Button>

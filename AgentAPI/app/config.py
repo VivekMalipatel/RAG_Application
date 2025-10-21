@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlparse
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,11 +55,27 @@ class Config:
 
     INDEXER_API_BASE_URL: str = os.getenv("INDEXER_API_BASE_URL")
 
-    # Redis Configuration
-    REDIS_HOST: str = os.getenv("REDIS_HOST")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT"))
-    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD")
-    REDIS_DB: int = int(os.getenv("REDIS_DB"))
+    _redis_uri = os.getenv("APP_REDIS_URI") or os.getenv("REDIS_URI")
+    _redis_host = os.getenv("REDIS_HOST", "localhost")
+    _redis_port = os.getenv("REDIS_PORT", "6379")
+    _redis_password = os.getenv("REDIS_PASSWORD")
+    _redis_db = os.getenv("REDIS_DB", "0")
+    if _redis_uri:
+        parsed = urlparse(_redis_uri)
+        if parsed.hostname:
+            _redis_host = parsed.hostname
+        if parsed.port is not None:
+            _redis_port = str(parsed.port)
+        if parsed.password is not None:
+            _redis_password = parsed.password
+        db_path = parsed.path.lstrip("/")
+        if db_path:
+            _redis_db = db_path
+    REDIS_URI: str | None = _redis_uri
+    REDIS_HOST: str = _redis_host
+    REDIS_PORT: int = int(_redis_port or 6379)
+    REDIS_PASSWORD: str | None = _redis_password
+    REDIS_DB: int = int(_redis_db or 0)
 
     # Searx Configuration
     SEARX_URL: str = "https://websearch.gauravshivaprasad.com"

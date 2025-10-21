@@ -44,6 +44,8 @@ export function HumanMessage({
   const thread = useStreamContext();
   const meta = thread.getMessagesMetadata(message);
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
+  const branchOptions = meta?.branchOptions;
+  const branch = meta?.branch;
 
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState("");
@@ -126,8 +128,8 @@ export function HumanMessage({
           )}
         >
           <BranchSwitcher
-            branch={meta?.branch}
-            branchOptions={meta?.branchOptions}
+            branch={branch}
+            branchOptions={branchOptions}
             onSelect={(branch) => thread.setBranch(branch)}
             isLoading={isLoading}
           />
