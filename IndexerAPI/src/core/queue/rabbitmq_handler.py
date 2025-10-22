@@ -6,6 +6,12 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from aio_pika.abc import AbstractIncomingMessage
+from botocore.exceptions import ClientError
+
+try:
+    from pandas.errors import EmptyDataError
+except Exception:
+    EmptyDataError = None
 
 from core.config import settings
 from core.logger_setup import logger
@@ -26,6 +32,35 @@ def _retry_queue_name() -> str:
 def _failed_queue_name() -> str:
     queue_name = settings.RABBITMQ_QUEUE_NAME
     return f"{queue_name}.failed" if queue_name else ""
+
+
+def _should_discard_error(exc: Exception) -> bool:
+    seen = set()
+    stack = [exc]
+    while stack:
+        current = stack.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, ClientError):
+            error_info = getattr(current, "response", None)
+            if not isinstance(error_info, dict):
+                error_info = {}
+            error_details = error_info.get("Error", {})
+            error_code = error_details.get("Code") if isinstance(error_details, dict) else None
+            if error_code == "NoSuchKey":
+                return True
+        if EmptyDataError is not None and isinstance(current, EmptyDataError):
+            return True
+        for nested in (getattr(current, "__cause__", None), getattr(current, "__context__", None)):
+            if nested is not None:
+                stack.append(nested)
+    message = str(exc)
+    if "NoSuchKey" in message:
+        return True
+    if "No columns to parse from file" in message:
+        return True
+    return False
 
 
 def _max_priority() -> int:
@@ -156,6 +191,11 @@ class TaskQueueConsumer(BaseConsumer):
             logger.error(
                 f"Task {task_message.task_id} failed in {elapsed:.2f}s on attempt {attempt}: {exc}"
             )
+            if _should_discard_error(exc):
+                await _send_to_failed_queue(task_message, str(exc), stack_trace, attempt, message.body)
+                await message.ack()
+                logger.info(f"Task {task_message.task_id} discarded due to non-retryable error")
+                return
             if self._calculate_retry_decision(attempt):
                 try:
                     await _send_to_retry_queue(task_message, str(exc), attempt, message.headers)
