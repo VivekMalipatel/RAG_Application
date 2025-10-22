@@ -1,7 +1,9 @@
 from typing import List, Dict, Any, Union, Optional
+import os
 import asyncio
 import logging
 import yaml
+import json
 from pathlib import Path
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, SystemMessage
 from langchain_core.messages.content_blocks import is_data_content_block
@@ -13,7 +15,6 @@ from langgraph.config import get_stream_writer
 
 
 def load_media_description_prompt() -> str:
-    """Load media description prompt from prompt.yaml file"""
     llm_prompt_path = Path(__file__).parent / "prompt.yaml"
     try:
         with open(llm_prompt_path, 'r', encoding='utf-8') as f:
@@ -333,9 +334,15 @@ def is_message_sequence(payload: Any) -> bool:
 
 
 def _announce_media_analysis(message: str = "Analysing Images.....\n\n") -> None:
-    writer = get_stream_writer()
-    if writer and message:
-        writer(message)
+    streaming_enabled = os.getenv("ENABLE_VLM_STREAM_UPDATES", "0") not in {"", "0", "false", "False"}
+    if not streaming_enabled or not message:
+        return
+    try:
+        writer = get_stream_writer()
+        if writer:
+            writer(message)
+    except (RuntimeError, Exception):
+        pass
 
 
 def prepare_input_sync(

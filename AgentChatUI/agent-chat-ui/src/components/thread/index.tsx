@@ -3,7 +3,6 @@ import { ReactNode, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
-import type { StreamAuditEvent } from "@/providers/Stream";
 import { useAgentCatalog } from "@/providers/AgentCatalog";
 import { useState, FormEvent } from "react";
 import { Button } from "../ui/button";
@@ -24,7 +23,6 @@ import {
   SquarePen,
   XIcon,
   Plus,
-  Bug,
   Globe2,
   ChevronDown,
   Check,
@@ -124,17 +122,6 @@ function OpenGitHubRepo() {
   );
 }
 
-const formatAuditPayload = (value: unknown): string => {
-  if (typeof value === "string") {
-    return value;
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-};
-
 export function Thread() {
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
@@ -143,10 +130,6 @@ export function Thread() {
   const [chatHistoryOpen, setChatHistoryOpen] = useState(false);
   const [hideToolCalls, setHideToolCalls] = useQueryState(
     "hideToolCalls",
-    parseAsBoolean.withDefault(false),
-  );
-  const [auditPanelOpen, setAuditPanelOpen] = useQueryState(
-    "streamInspector",
     parseAsBoolean.withDefault(false),
   );
   const [input, setInput] = useState("");
@@ -166,8 +149,6 @@ export function Thread() {
 
   const stream = useStreamContext();
   const {
-    clearAuditEvents,
-    auditEvents,
     capabilityDefinitions,
     capabilityFlags,
     setCapabilityFlag,
@@ -412,8 +393,7 @@ export function Thread() {
     stream.submit(
       { messages: [...toolMessages, newHumanMessage], context },
       {
-        streamMode: ["values"],
-        streamSubgraphs: true,
+        streamSubgraphs: false,
         streamResumable: true,
         optimisticValues: (prev) => ({
           ...prev,
@@ -439,8 +419,7 @@ export function Thread() {
     setFirstTokenReceived(false);
     stream.submit(undefined, {
       checkpoint: parentCheckpoint,
-      streamMode: ["values"],
-      streamSubgraphs: true,
+      streamSubgraphs: false,
       streamResumable: true,
     });
   };
@@ -576,15 +555,6 @@ export function Thread() {
                 <div className="flex items-center">
                   <OpenGitHubRepo />
                 </div>
-                <TooltipIconButton
-                  size="lg"
-                  className={cn("p-4", auditPanelOpen && "bg-muted")}
-                  tooltip="Toggle stream inspector"
-                  variant="ghost"
-                  onClick={() => void setAuditPanelOpen((value) => !value)}
-                >
-                  <Bug className="size-5" />
-                </TooltipIconButton>
                 <TooltipIconButton
                   size="lg"
                   className="p-4"
@@ -847,12 +817,6 @@ export function Thread() {
         </div>
       </div>
       <UserMenu />
-      <AuditInspector
-        open={auditPanelOpen ?? false}
-        onClose={() => void setAuditPanelOpen(false)}
-        onClear={clearAuditEvents}
-        events={auditEvents}
-      />
     </div>
   );
 }
@@ -969,92 +933,5 @@ function UserMenu() {
         </div>
       )}
     </div>
-  );
-}
-
-function AuditInspector(props: {
-  open: boolean;
-  onClose: () => void;
-  onClear: () => void;
-  events: StreamAuditEvent[];
-}) {
-  return (
-    <motion.div
-      className={cn(
-        "pointer-events-auto fixed bottom-0 right-0 z-50 flex h-[60vh] w-full max-w-full flex-col border border-border bg-background shadow-xl md:w-[480px]",
-        !props.open && "pointer-events-none",
-      )}
-      initial={false}
-      animate={{ y: props.open ? 0 : "105%" }}
-      transition={{ type: "spring", stiffness: 260, damping: 28 }}
-    >
-      <div className="flex items-center justify-between border-b p-3">
-        <div className="text-sm font-semibold">Stream Inspector</div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={props.onClear}
-            disabled={props.events.length === 0}
-          >
-            Clear
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={props.onClose}
-          >
-            <XIcon className="size-4" />
-          </Button>
-        </div>
-      </div>
-      <div className="flex items-center justify-between border-b px-3 py-2 text-xs text-muted-foreground">
-        <span>{props.events.length} events</span>
-        <span>{props.open ? "Recording" : "Hidden"}</span>
-      </div>
-      <div className="flex-1 overflow-y-auto p-3">
-        {props.events.length === 0 ? (
-          <div className="text-xs text-muted-foreground">
-            No events captured yet.
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {props.events.map((event) => {
-              const namespace =
-                "namespace" in event && Array.isArray(event.namespace)
-                  ? event.namespace
-                  : undefined;
-              const run = "run" in event ? event.run : undefined;
-              return (
-                <div
-                  key={event.id}
-                  className="rounded border border-border p-2 text-[11px] leading-snug"
-                >
-                  <div className="flex items-center justify-between font-semibold uppercase tracking-wide">
-                    <span>
-                      #{event.sequence} · {event.type}
-                    </span>
-                    <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
-                  </div>
-                  {namespace && namespace.length > 0 ? (
-                    <div className="mt-1 text-muted-foreground">
-                      {namespace.join(" / ")}
-                    </div>
-                  ) : null}
-                  {run ? (
-                    <div className="mt-1 text-muted-foreground">
-                      {run.run_id} · {run.thread_id}
-                    </div>
-                  ) : null}
-                  <pre className="mt-2 whitespace-pre-wrap break-words">
-                    {formatAuditPayload(event.payload)}
-                  </pre>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </motion.div>
   );
 }

@@ -61,14 +61,6 @@ async def _chat_node(state: BaseState, config: RunnableConfig) -> BaseState:
     return updated
 
 
-def _build_redis_uri() -> str:
-    if app_config.REDIS_URI:
-        return app_config.REDIS_URI
-    password = app_config.REDIS_PASSWORD
-    auth_prefix = f":{password}@" if password else ""
-    return f"redis://{auth_prefix}{app_config.REDIS_HOST}:{app_config.REDIS_PORT}/{app_config.REDIS_DB}"
-
-
 @lru_cache
 def create_graph() -> CompiledStateGraph:
     builder = StateGraph(BaseState)
@@ -77,6 +69,5 @@ def create_graph() -> CompiledStateGraph:
     builder.add_edge(START, "entry")
     builder.add_edge("entry", "chat")
     builder.add_edge("chat", END)
-    redis_uri = _build_redis_uri()
-    checkpointer = RedisSaver.from_conn_string(redis_uri)
+    checkpointer = RedisSaver.from_conn_string(app_config.REDIS_URI)
     return builder.compile(checkpointer=checkpointer)

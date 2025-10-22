@@ -28,6 +28,7 @@ import asyncio
 
 class LLM(BaseChatModel):
     reasoning_llm: BaseChatModel
+    utility_llm: BaseChatModel | None
     reasoning_llm_with_tools: Runnable[Any, Any]
     vlm_client: AsyncOpenAI
     vlm_model: str
@@ -36,11 +37,18 @@ class LLM(BaseChatModel):
     _tool_binding_kwargs: dict[str, Any]
     logger: logging.Logger
 
-    def __init__(self, reasoningllm_kwargs: Optional[dict] = None, vlm_kwargs: Optional[dict] = None):
+    def __init__(
+        self,
+        reasoningllm_kwargs: Optional[dict] = None,
+        vlm_kwargs: Optional[dict] = None,
+        utility_llm_kwargs: Optional[dict] = None,
+    ):
         if reasoningllm_kwargs is None:
             reasoningllm_kwargs = {}
         if vlm_kwargs is None:
             vlm_kwargs = {}
+        if utility_llm_kwargs is None:
+            utility_llm_kwargs = {}
             
         reasoning_llm_filtered_kwargs = {k: v for k, v in reasoningllm_kwargs.items() 
                                          if k not in ["model", "model_provider", "base_url", "api_key"]}
@@ -74,29 +82,60 @@ class LLM(BaseChatModel):
             # "presence_penalty": vlm_kwargs.get("presence_penalty", config.VLM_LLM_PRESENCE_PENALTY),
             **vlm_filtered_kwargs
         }
+
+        util_filtered_kwargs = {
+            k: v
+            for k, v in utility_llm_kwargs.items()
+            if k
+            not in [
+                "model",
+                "model_provider",
+                "base_url",
+                "api_key",
+                "timeout",
+                "max_retries",
+            ]
+        }
+        util_model = utility_llm_kwargs.get("model", config.UTIL_LLM_MODEL or reasoning_llm_config.get("model"))
+        util_config = {
+            "model": util_model,
+            "model_provider": utility_llm_kwargs.get("model_provider", "openai"),
+            "base_url": utility_llm_kwargs.get("base_url", config.OPENAI_BASE_URL),
+            "api_key": utility_llm_kwargs.get("api_key", config.OPENAI_API_KEY),
+            "timeout": utility_llm_kwargs.get("timeout", config.LLM_TIMEOUT),
+            "max_retries": utility_llm_kwargs.get("max_retries", config.LLM_MAX_RETRIES),
+            **util_filtered_kwargs,
+        }
         
         # object.__setattr__(self, "reasoning_llm", init_chat_model(**reasoning_llm_config))
         lite_llm = ChatLiteLLM(model="bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0")
         object.__setattr__(self, "llm", lite_llm)
         object.__setattr__(self, "reasoning_llm", lite_llm)
 
-        if config.ENABLE_VLM_PREPROCESSING:
-            object.__setattr__(
-                self,
-                "vlm_client",
-                AsyncOpenAI(
-                    api_key=vlm_config["api_key"],
-                    base_url=vlm_config["base_url"],
-                    timeout=vlm_config["timeout"],
-                    max_retries=vlm_config["max_retries"],
-                ),
+        utility_llm_instance: BaseChatModel | None = None
+        try:
+            if util_config.get("model"):
+                utility_llm_instance = init_chat_model(**util_config)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Failed to initialize utility LLM; falling back to reasoning model",
+                exc_info=exc,
             )
-            object.__setattr__(self, "vlm_model", vlm_config["model"])
-            object.__setattr__(self, "vlm_model_kwargs", {**vlm_filtered_kwargs})
-        else:
-            object.__setattr__(self, "vlm_client", None)
-            object.__setattr__(self, "vlm_model", None)
-            object.__setattr__(self, "vlm_model_kwargs", {})
+            utility_llm_instance = None
+        object.__setattr__(self, "utility_llm", utility_llm_instance or lite_llm)
+
+        object.__setattr__(
+            self,
+            "vlm_client",
+            AsyncOpenAI(
+                api_key=vlm_config["api_key"],
+                base_url=vlm_config["base_url"],
+                timeout=vlm_config["timeout"],
+                max_retries=vlm_config["max_retries"],
+            ),
+        )
+        object.__setattr__(self, "vlm_model", vlm_config["model"])
+        object.__setattr__(self, "vlm_model_kwargs", {**vlm_filtered_kwargs})
         object.__setattr__(self, "tools", [])
         object.__setattr__(self, "_tool_binding_kwargs", {})
         object.__setattr__(self, "_bound_binding", None)

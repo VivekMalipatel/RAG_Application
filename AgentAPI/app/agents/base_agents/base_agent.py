@@ -1,36 +1,37 @@
+import os
 import typing
 import asyncio
 import logging
 import json
-import threading
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Sequence, Union, Optional, Callable, AsyncIterator, Literal, Awaitable
+from langgraph.config import get_stream_writer
 from langgraph.typing import ContextT, InputT, OutputT, StateT
 from langgraph.types import (
     All,
     Checkpointer,
     Command,
+    StreamMode,
+    Durability,
 )
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.store.base import BaseStore, IndexConfig
-from langgraph.types import All, StreamMode, Durability
 from langgraph.cache.base import BaseCache
-from langgraph.utils.runnable import RunnableCallable
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.runnables.schema import StreamEvent
 from langchain_core.runnables.utils import Output
 from langchain_core.runnables.base import Input
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, RemoveMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, RemoveMessage, ToolMessage
 from langchain_core.messages.base import messages_to_dict
 from langmem import create_manage_memory_tool, create_memory_store_manager
 from langmem.reflection import ReflectionExecutor
-from langmem.short_term import summarize_messages, RunningSummary
-from langmem.utils import NamespaceTemplate
+from langmem.short_term import asummarize_messages
+from langmem.short_term.summarization import _preprocess_messages
 from openai import BaseModel
 from agents.utils import (
     _load_prompt,
@@ -42,6 +43,7 @@ from agents.utils import (
     format_procedural_overview,
     build_profile_directives,
     build_procedural_directives,
+    prepare_profile_precontext_payload,
     wrap_manage_memory_tool_json,
     register_precontext_provider,
     unregister_precontext_provider,
@@ -51,9 +53,10 @@ from agents.utils import (
     make_utc_datetime_precontext_provider,
     make_summary_precontext_provider,
     coerce_running_summary,
-    consume_summary_update,
-    count_words_in_messages,
+    build_message_token_counter,
+    count_tokens,
 )
+from agents.base_agents.utils import get_pending_tool_calls
 from pathlib import Path
 from llm.llm import LLM
 from llm.utils import prepare_input_async
@@ -141,10 +144,8 @@ class BaseAgent:
         self._procedural_reflection_executor = None
         self._procedural_manage_tool = None
         self._procedural_memory_key: Optional[str] = None
-        self._summarization_executor = None
         self._summarization_model = None
-        self._summary_updates: dict[str, dict[str, Any]] = {}
-        self._summary_lock = threading.Lock()
+        self._token_counter: Optional[Callable[[Sequence[Any]], int]] = None
         
         self._checkpointer = None
         self._store = None
@@ -191,6 +192,10 @@ class BaseAgent:
             tool.name = name
         self._memory_tools.append(tool)
 
+    def _get_memory_llm(self):
+        util_llm = getattr(self._llm, "utility_llm", None)
+        return util_llm or self._llm.reasoning_llm
+
     def _setup_semantic_manager(self, store: Optional[BaseStore]):
         self._semantic_manager = None
         self._reflection_executor = None
@@ -200,7 +205,7 @@ class BaseAgent:
         namespace = ("memories", "{org_id}", "{user_id}", "semantic")
         semantic_instructions = _load_prompt("semantic_memory_instructions", base_dir=Path(__file__).parent)
         self._semantic_manager = create_memory_store_manager(
-            self._llm.reasoning_llm,
+            self._get_memory_llm(),
             store=store,
             namespace=namespace,
             schemas=[SemanticMemory],
@@ -239,7 +244,7 @@ class BaseAgent:
         namespace = ("memories", "{org_id}", "{user_id}", "profile")
         profile_instructions = _load_prompt("profile_memory_instructions", base_dir=Path(__file__).parent)
         self._profile_manager = create_memory_store_manager(
-            self._llm.reasoning_llm,
+            self._get_memory_llm(),
             store=store,
             namespace=namespace,
             schemas=[UserProfileMemory],
@@ -266,9 +271,16 @@ class BaseAgent:
             tool_name="manage_profile_memory",
         )
         self._memory_tools.append(self._profile_manage_tool)
+
+        def _profile_directives_builder(payload: Any) -> Optional[str]:
+            precontext_payload = prepare_profile_precontext_payload(payload)
+            if not precontext_payload:
+                return None
+            return build_profile_directives(precontext_payload)
+
         profile_provider = make_profile_precontext_provider(
             lambda run_config: self._get_profile_context(run_config),
-            build_profile_directives,
+            _profile_directives_builder,
             lambda: self._profile_memory_key,
         )
         register_precontext_provider(self._precontext_providers, "profile_context", profile_provider)
@@ -284,7 +296,7 @@ class BaseAgent:
         namespace = ("memories", "{org_id}", "{user_id}", "procedural")
         procedural_instructions = _load_prompt("procedural_memory_instructions", base_dir=Path(__file__).parent)
         self._procedural_manager = create_memory_store_manager(
-            self._llm.reasoning_llm,
+            self._get_memory_llm(),
             store=store,
             namespace=namespace,
             schemas=[ProceduralMemoryModel],
@@ -325,7 +337,7 @@ class BaseAgent:
         namespace = ("memories", "{org_id}", "{user_id}", "episodic")
         episodic_instructions = _load_prompt("episodic_memory_instructions", base_dir=Path(__file__).parent)
         self._episodic_manager = create_memory_store_manager(
-            self._llm.reasoning_llm,
+            self._get_memory_llm(),
             store=store,
             namespace=namespace,
             schemas=[EpisodicMemoryModel],
@@ -352,17 +364,17 @@ class BaseAgent:
         self._memory_tools.append(self._episodic_manage_tool)
 
     def _setup_summarizer(self, store: Optional[BaseStore]):
-        self._summarization_executor = None
         self._summarization_model = None
+        self._token_counter = None
         unregister_precontext_provider(self._precontext_providers, "summary_context")
-        namespace = NamespaceTemplate(("threads", "{org_id}", "{user_id}", "summary"))
-
-        summarizer = RunnableCallable(self._execute_summarization_task)
-        summarizer.namespace = namespace
         self._summarization_model = self._llm.bind(
             max_tokens=envconfig.SUMMARIZATION_TARGET_TOKENS
         )
-        self._summarization_executor = ReflectionExecutor(summarizer, store=store)
+        model_name = None
+        reasoning_llm = getattr(self._llm, "reasoning_llm", None)
+        if reasoning_llm is not None:
+            model_name = getattr(reasoning_llm, "model_name", None) or getattr(reasoning_llm, "model", None)
+        self._token_counter = build_message_token_counter(model_name)
         register_precontext_provider(
             self._precontext_providers,
             "summary_context",
@@ -374,62 +386,120 @@ class BaseAgent:
         vlm_model = getattr(self._llm, "vlm_model", None)
         vlm_kwargs = getattr(self._llm, "vlm_model_kwargs", None)
         if not vlm_client or not vlm_model:
-            return messages
+            raise RuntimeError("VLM preprocessing is required for reflection but no VLM configuration is available.")
+        
+        async def _process_message(message: Any) -> Any:
+            if isinstance(message, ToolMessage):
+                return await self._process_tool_message_for_reflection(message, vlm_client, vlm_model, vlm_kwargs or {})
+            return message
+        
+        processed = await asyncio.gather(*[_process_message(msg) for msg in messages])
+        return list(processed)
+    
+    async def _process_tool_message_for_reflection(self, tool_msg: ToolMessage, vlm_client: Any, vlm_model: str, vlm_kwargs: dict[str, Any]) -> ToolMessage:
+        content = getattr(tool_msg, "content", None)
+        if not isinstance(content, list):
+            return tool_msg
+        
         try:
-            prepared = await prepare_input_async(
-                messages,
+            converted_content = await prepare_input_async(
+                [HumanMessage(content=content)],
                 vlm_client,
                 vlm_model,
-                vlm_kwargs or {},
+                vlm_kwargs,
+                announcement="",
             )
-        except Exception as exc:
-            self._logger.warning("Reflection preprocessing failed", exc_info=exc)
-            return messages
-        return prepared
-
-    def _execute_summarization_task(self, payload: dict[str, Any]) -> None:
-        thread_id = payload.get("thread_id")
-        if not thread_id:
-            return
-        model = self._summarization_model
-        messages = list(payload.get("messages", []))
-        running_summary = coerce_running_summary(payload.get("running_summary"))
-        token_history = list(payload.get("token_usage_history", []))
-        result_messages = list(messages)
-        summary_result = running_summary
-        history_result = token_history
-        if model is None:
-            self._logger.debug("Summarization model is unavailable; skipping task")
-        else:
-            try:
-                summarization_result = summarize_messages(
-                    messages,
-                    running_summary=running_summary,
-                    model=model,
-                    max_tokens=payload.get("max_tokens", envconfig.SUMMARIZATION_TARGET_TOKENS),
-                    max_tokens_before_summary=payload.get("max_tokens_before_summary", envconfig.MAX_STATE_TOKENS),
-                    max_summary_tokens=payload.get("max_summary_tokens", envconfig.SUMMARIZATION_SUMMARY_TOKENS),
+            if converted_content and len(converted_content) > 0:
+                processed_content = getattr(converted_content[0], "content", content)
+                return ToolMessage(
+                    content=processed_content,
+                    tool_call_id=tool_msg.tool_call_id,
+                    name=getattr(tool_msg, "name", None),
+                    additional_kwargs=getattr(tool_msg, "additional_kwargs", {}),
                 )
-            except Exception as exc:
-                self._logger.error("Summarization task failed", exc_info=exc)
-            else:
-                summary = summarization_result.running_summary
-                if summary:
-                    trimmed_messages = list(summarization_result.messages)
-                    if trimmed_messages and isinstance(trimmed_messages[0], SystemMessage):
-                        trimmed_messages = trimmed_messages[1:]
-                    result_messages = trimmed_messages
-                    summary_result = summary
-                    history_result = []
-                else:
-                    result_messages = list(messages)
-        update = {
-            "messages": result_messages,
-            "running_summary": summary_result,
-            "token_usage_history": history_result,
-        }
-        with self._summary_lock:
-            self._summary_updates[thread_id] = update
+        except Exception as exc:
+            self._logger.error("ToolMessage VLM preprocessing failed", exc_info=exc)
+            raise
+        
+        return tool_msg
+
+    async def summarization_node(self, state: BaseState, config: RunnableConfig) -> dict[str, Any]:
+        if self._summarization_model is None:
+            return {}
+        messages = list(state.get("messages", []))
+        if not messages:
+            return {}
+        
+        pending_tool_calls = get_pending_tool_calls(messages)
+        if pending_tool_calls:
+            self._logger.debug(
+                f"Skipping summarization due to {len(pending_tool_calls)} pending tool calls without results"
+            )
+            return {}
+        
+        run_config = config or self.config
+        configurable = run_config.get("configurable", {}) if run_config else {}
+        thread_id = configurable.get("thread_id")
+        context_payload = dict(state.get("context", {}) or {})
+        existing_summary = context_payload.get("running_summary")
+        running_summary = coerce_running_summary(existing_summary)
+        counter = self._token_counter or build_message_token_counter(None)
+        preprocessed = _preprocess_messages(
+            messages=messages,
+            running_summary=running_summary,
+            max_tokens=envconfig.SUMMARIZATION_TARGET_TOKENS,
+            max_tokens_before_summary=envconfig.MAX_STATE_TOKENS,
+            max_summary_tokens=envconfig.SUMMARIZATION_SUMMARY_TOKENS,
+            token_counter=counter,
+        )
+        should_summarize = bool(preprocessed.messages_to_summarize)
+        writer = None
+        streaming_enabled = os.getenv("ENABLE_SUMMARIZATION_STREAM_UPDATES", "0") not in {"", "0", "false", "False"}
+        if should_summarize and streaming_enabled:
+            try:
+                writer = get_stream_writer()
+                if writer:
+                    writer({
+                        "type": "summary_status",
+                        "stage": "started",
+                        "thread_id": thread_id,
+                        "messages": len(preprocessed.messages_to_summarize),
+                        "tokens": preprocessed.n_tokens_to_summarize,
+                    })
+            except (RuntimeError, Exception):
+                writer = None
+        summarization_result = await asummarize_messages(
+            messages,
+            running_summary=running_summary,
+            model=self._summarization_model,
+            max_tokens=envconfig.SUMMARIZATION_TARGET_TOKENS,
+            max_tokens_before_summary=envconfig.MAX_STATE_TOKENS,
+            max_summary_tokens=envconfig.SUMMARIZATION_SUMMARY_TOKENS,
+            token_counter=counter,
+        )
+        updated_summary = summarization_result.running_summary or running_summary
+        if should_summarize and writer:
+            writer({
+                "type": "summary_status",
+                "stage": "complete",
+                "thread_id": thread_id,
+                "messages": len(preprocessed.messages_to_summarize),
+                "tokens": preprocessed.n_tokens_to_summarize,
+                "retained_tokens": count_tokens(summarization_result.messages, self._token_counter, logger=self._logger),
+            })
+
+        state_update: dict[str, Any] = {}
+        if should_summarize:
+            state_update["messages"] = [RemoveMessage(id=REMOVE_ALL_MESSAGES)] + summarization_result.messages
+        
+        if updated_summary is not None:
+            context_payload["running_summary"] = updated_summary
+            state_update["context"] = context_payload
+            state_update["summary_context"] = updated_summary
+        elif context_payload:
+            state_update["context"] = context_payload
+            
+        return state_update
 
     async def _get_profile_context(self, config: Optional[RunnableConfig]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
         self._profile_memory_key = None
@@ -454,10 +524,9 @@ class BaseAgent:
             if confidence is not None and confidence < envconfig.PROFILE_MEMORY_MIN_CONFIDENCE:
                 self._profile_memory_key = None
                 return None, content
-        overview_source = {
-            key: value for key, value in content.items() if key != "Metadata"
-        }
-        return format_profile_overview(overview_source), content
+        overview_source = prepare_profile_precontext_payload(content)
+        overview_text = format_profile_overview(overview_source)
+        return overview_text, content
 
     async def _get_procedural_context(self, config: Optional[RunnableConfig]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
         self._procedural_memory_key = None
@@ -484,25 +553,22 @@ class BaseAgent:
         configurable = run_config.get("configurable", {}) if run_config else {}
         thread_id = configurable.get("thread_id")
 
-        summary_update = consume_summary_update(self._summary_updates, self._summary_lock, thread_id)
-        base_messages = list(state.get("messages", []))
-        existing_summary = state.get("summary_context")
-        summary_context = coerce_running_summary(existing_summary) or existing_summary
-        token_history = list(state.get("token_usage_history", []) or [])
-        summarization_pending = bool(state.get("summarization_pending"))
+        context_payload = dict(state.get("context", {}) or {})
+        existing_summary = context_payload.get("running_summary")
+        running_summary = coerce_running_summary(existing_summary)
+        if running_summary is not None:
+            context_payload["running_summary"] = running_summary
+        else:
+            context_payload.pop("running_summary", None)
 
-        if summary_update:
-            base_messages = list(summary_update.get("messages", base_messages))
-            updated_summary = summary_update.get("running_summary")
-            summary_context = updated_summary if updated_summary is not None else summary_context
-            token_history = list(summary_update.get("token_usage_history", []))
-            summarization_pending = False
+        base_messages = list(state.get("messages", []))
+        token_history = list(state.get("token_usage_history", []) or [])
 
         state_for_precontext = dict(state)
         state_for_precontext["messages"] = base_messages
-        state_for_precontext["summary_context"] = summary_context
+        state_for_precontext["context"] = context_payload
+        state_for_precontext["summary_context"] = running_summary
         state_for_precontext["token_usage_history"] = token_history
-        state_for_precontext["summarization_pending"] = summarization_pending
 
         system_parts = await build_system_precontext(
             self.prompt,
@@ -512,7 +578,7 @@ class BaseAgent:
             fallback_config=self.config,
             logger=self._logger,
         )
-        system_messages = [SystemMessage(content="\n\n".join(system_parts))]
+        system_messages = [SystemMessage(content="\n\n".join(system_parts))] if system_parts else []
         messages = system_messages + base_messages
 
         response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
@@ -520,17 +586,12 @@ class BaseAgent:
         if self._is_structured_output:
             response = AIMessage(content=json.dumps(response))
 
-        messages_updates: list[Any] = []
-        if summary_update:
-            messages_updates.append(RemoveMessage(id=REMOVE_ALL_MESSAGES))
-            messages_updates.extend(base_messages)
-        messages_updates.append(response)
+        messages_updates: list[Any] = [response]
 
         payload_messages = [*base_messages, response]
         preprocess_for_background = any(
             executor is not None
             for executor in (
-                self._summarization_executor,
                 self._reflection_executor,
                 self._profile_reflection_executor if self._config.profile_memory_enabled else None,
                 self._procedural_reflection_executor,
@@ -542,8 +603,8 @@ class BaseAgent:
             reflection_messages = await self._prepare_messages_for_reflection(payload_messages)
 
         usage = getattr(response, "usage_metadata", None)
-        approx_tokens = count_words_in_messages(payload_messages)
-        token_entry: dict[str, int] = {"approx_tokens": approx_tokens}
+        counted_tokens = count_tokens(payload_messages, self._token_counter, logger=self._logger)
+        token_entry: dict[str, int] = {"approx_tokens": counted_tokens}
         if isinstance(usage, dict):
             for key, value in usage.items():
                 if isinstance(value, (int, float)):
@@ -551,35 +612,6 @@ class BaseAgent:
         token_history.append(token_entry)
         if len(token_history) > 100:
             token_history = token_history[-100:]
-
-        soft_limit = int(envconfig.MAX_STATE_TOKENS * envconfig.SUMMARIZATION_SOFT_LIMIT_RATIO)
-        if (
-            self._summarization_executor
-            and thread_id
-            and approx_tokens >= soft_limit
-            and not summarization_pending
-        ):
-            running_summary = coerce_running_summary(summary_context)
-            if running_summary:
-                summary_context = running_summary
-            summarization_payload = {
-                "thread_id": thread_id,
-                "messages": reflection_messages,
-                "running_summary": summary_context,
-                "token_usage_history": token_history,
-                "max_tokens": envconfig.SUMMARIZATION_TARGET_TOKENS,
-                "max_tokens_before_summary": envconfig.MAX_STATE_TOKENS,
-                "max_summary_tokens": envconfig.SUMMARIZATION_SUMMARY_TOKENS,
-            }
-            try:
-                self._summarization_executor.submit(
-                    summarization_payload,
-                    after_seconds=envconfig.SUMMARIZATION_DELAY_SECONDS,
-                    config=build_memory_config(config),
-                )
-                summarization_pending = True
-            except Exception as exc:
-                self._logger.error("Summarization submission failed", exc_info=exc)
 
         if self._reflection_executor:
             payload = {
@@ -636,26 +668,30 @@ class BaseAgent:
         result: dict[str, Any] = {
             "messages": messages_updates,
             "token_usage_history": token_history,
-            "summarization_pending": summarization_pending,
         }
-        result["summary_context"] = summary_context
+        result["context"] = context_payload
+        result["summary_context"] = running_summary
         return result
 
     def _compile_graph(self, has_tools: bool, **compile_kwargs) -> CompiledStateGraph[StateT, ContextT, InputT, OutputT]:
         graph_builder = StateGraph(BaseState)
         llm_node_name = f"llm${self.config.get('configurable').get('user_id')}"
+        summarize_node_name = "summarize"
+        graph_builder.add_node(summarize_node_name, self.summarization_node)
         graph_builder.add_node(llm_node_name, self.llm_node)
         if has_tools:
             graph_builder.add_node("tools", ToolNode(self._tools))
-            graph_builder.add_edge(START, llm_node_name)
+            graph_builder.add_edge(START, summarize_node_name)
+            graph_builder.add_edge(summarize_node_name, llm_node_name)
             graph_builder.add_conditional_edges(
                 llm_node_name,
                 tools_condition,
                 {"tools": "tools", "__end__": END}
             )
-            graph_builder.add_edge("tools", llm_node_name)
+            graph_builder.add_edge("tools", summarize_node_name)
         else:
-            graph_builder.add_edge(START, llm_node_name)
+            graph_builder.add_edge(START, summarize_node_name)
+            graph_builder.add_edge(summarize_node_name, llm_node_name)
             graph_builder.add_edge(llm_node_name, END)
         
         compiled_graph = graph_builder.compile(**compile_kwargs)
@@ -697,8 +733,6 @@ class BaseAgent:
             )
             self._store = store
             await self._store.setup()
-        self._summary_updates.clear()
-        self._llm_runnable = None
         self._memory_tools = []
         self._setup_semantic_manager(self._store)
         self._setup_profile_manager(self._store)
@@ -755,13 +789,11 @@ class BaseAgent:
         _shutdown_executor("_profile_reflection_executor")
         _shutdown_executor("_procedural_reflection_executor")
         _shutdown_executor("_episodic_reflection_executor")
-        _shutdown_executor("_summarization_executor")
 
         checkpointer, store = self._checkpointer, self._store
         self._checkpointer = None
         self._store = None
         self._summarization_model = None
-        self._summary_updates.clear()
 
         if store is not None:
             try:

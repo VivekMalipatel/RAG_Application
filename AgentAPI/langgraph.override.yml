@@ -1,4 +1,4 @@
 services:
   langgraph-api:
     environment:
-      REDIS_URI: ${REDIS_URI}
+      REDIS_URI: "redis://:${REDIS_PASSWORD:-password}@${REDIS_HOST:-192.168.0.10}:${REDIS_PORT:-6379}/${REDIS_DB:-0}"

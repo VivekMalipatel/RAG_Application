@@ -1,16 +1,16 @@
+import os
 import yaml
 import json
 import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from typing import Optional, Dict, Any, List
-from langgraph.config import get_stream_writer
 from pydantic import Field, BaseModel
-
-logger = logging.getLogger(__name__)
-
+from langgraph.config import get_stream_writer
+from langgraph.graph.ui import push_ui_message
 from core.knowledge_search.queries import (
     execute_search_documents,
     execute_get_document_details,
@@ -34,6 +34,39 @@ from core.knowledge_search.queries import (
     execute_get_entity_context,
     execute_raw_cypher,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+STREAMING_EVENTS_ENABLED = os.getenv("ENABLE_KNOWLEDGE_STREAM_UPDATES", "0") not in {"", "0", "false", "False"}
+
+
+def emit_ui_status(operation: str, query: Optional[str] = None, status: str = "searching") -> None:
+    if not STREAMING_EVENTS_ENABLED:
+        return
+    push_ui_message(
+        "knowledge_search_status",
+        {
+            "operation": operation,
+            "query": query[:100] if query and len(query) > 100 else query,
+            "status": status,
+            "timestamp": datetime.now().isoformat()
+        }
+    )
+
+
+def emit_stream_message(message: str) -> None:
+    if not STREAMING_EVENTS_ENABLED:
+        return
+    try:
+        writer = get_stream_writer()
+    except RuntimeError:
+        return
+    try:
+        writer({"type": "log", "message": message})
+    except Exception:
+        logger.debug("Failed to emit stream message", exc_info=True)
 
 def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml") -> str:
     yaml_path = Path(__file__).parent / yaml_filename
@@ -420,8 +453,10 @@ async def search_documents(
     }, user_id, org_id)
     
     try:
-        writer = get_stream_writer()
-        writer(f"search_documents: filename_pattern={filename_pattern}, file_type={file_type}")
+        emit_ui_status("Searching documents", f"{filename_pattern or 'all'} ({file_type or 'any type'})", "searching")
+        emit_stream_message(
+            f"search_documents: filename_pattern={filename_pattern}, file_type={file_type}"
+        )
         
         results = await execute_search_documents(
             user_id=user_id,
@@ -434,6 +469,7 @@ async def search_documents(
         )
         
         formatted_results = await format_neo4j_results(results)
+        emit_ui_status("Documents found", f"{len(results)} results", "complete")
         log_tool_success("search_documents", len(results), user_id, org_id)
         return formatted_results
     except Exception as e:
@@ -464,8 +500,7 @@ async def get_document_details(
     log_tool_call("get_document_details", {"internal_object_id": internal_object_id}, user_id, org_id)
     
     try:
-        writer = get_stream_writer()
-        writer(f"get_document_details: {internal_object_id}")
+        emit_stream_message(f"get_document_details: {internal_object_id}")
         
         results = await execute_get_document_details(
             user_id=user_id,
@@ -508,8 +543,7 @@ async def search_pages_by_content(
     log_tool_call("search_pages_by_content", {"query_text": query_text[:100], "similarity_threshold": similarity_threshold, "limit": limit}, user_id, org_id)
     
     try:
-        writer = get_stream_writer()
-        writer(f"search_pages_by_content: {query_text[:50]}")
+        emit_stream_message(f"search_pages_by_content: {query_text[:50]}")
         
         results = await execute_search_pages_by_content(
             user_id=user_id,
@@ -554,8 +588,7 @@ async def search_pages_in_document(
     log_tool_call("search_pages_in_document", {"document_id": document_id, "page_number": page_number, "is_tabular": is_tabular}, user_id, org_id)
     
     try:
-        writer = get_stream_writer()
-        writer(f"search_pages_in_document: {document_id}")
+        emit_stream_message(f"search_pages_in_document: {document_id}")
         
         results = await execute_search_pages_in_document(
             user_id=user_id,
@@ -598,8 +631,7 @@ async def get_page_details(
     log_tool_call("get_page_details", {"document_id": document_id, "page_number": page_number}, user_id, org_id)
     
     try:
-        writer = get_stream_writer()
-        writer(f"get_page_details: {document_id}, page {page_number}")
+        emit_stream_message(f"get_page_details: {document_id}, page {page_number}")
         
         results = await execute_get_page_details(
             user_id=user_id,
@@ -646,8 +678,7 @@ async def search_entities_by_semantic(
     log_tool_call("search_entities_by_semantic", {"query_text": query_text[:100], "entity_type": entity_type, "similarity_threshold": similarity_threshold, "limit": limit}, user_id, org_id)
     
     try:
-        writer = get_stream_writer()
-        writer(f"search_entities_by_semantic: {query_text[:50]}")
+        emit_stream_message(f"search_entities_by_semantic: {query_text[:50]}")
         
         results = await execute_search_entities_by_semantic(
             user_id=user_id,
@@ -692,8 +723,7 @@ async def search_entities_by_type(
     log_tool_call("search_entities_by_type", {"entity_type": entity_type, "limit": limit}, user_id, org_id)
     
     try:
-        writer = get_stream_writer()
-        writer(f"search_entities_by_type: {entity_type}")
+        emit_stream_message(f"search_entities_by_type: {entity_type}")
         
         results = await execute_search_entities_by_type(
             user_id=user_id,
@@ -738,8 +768,7 @@ async def search_entities_by_text(
     try:
         log_tool_call("search_entities_by_text", {"text_pattern": text_pattern, "entity_type": entity_type, "limit": limit}, user_id, org_id)
 
-        writer = get_stream_writer()
-        writer(f"search_entities_by_text: {text_pattern}")
+        emit_stream_message(f"search_entities_by_text: {text_pattern}")
         
         results = await execute_search_entities_by_text(
             user_id=user_id,
@@ -783,8 +812,7 @@ async def get_entity_details(
     log_tool_call("get_entity_details", {"entity_id": entity_id}, user_id, org_id)
     
     try:
-        writer = get_stream_writer()
-        writer(f"get_entity_details: {entity_id}")
+        emit_stream_message(f"get_entity_details: {entity_id}")
         
         results = await execute_get_entity_details(
             user_id=user_id,
@@ -841,8 +869,7 @@ async def find_entity_relationships(
             org_id,
         )
 
-        writer = get_stream_writer()
-        writer(f"find_entity_relationships: {entity_id}, direction={direction}")
+        emit_stream_message(f"find_entity_relationships: {entity_id}, direction={direction}")
         
         results = await execute_find_entity_relationships(
             user_id=user_id,
@@ -892,8 +919,7 @@ async def search_relationships_by_type(
             org_id,
         )
 
-        writer = get_stream_writer()
-        writer(f"search_relationships_by_type: {relation_type}")
+        emit_stream_message(f"search_relationships_by_type: {relation_type}")
         
         results = await execute_search_relationships_by_type(
             user_id=user_id,
@@ -938,8 +964,7 @@ async def search_relationships_semantic(
     log_tool_call("search_relationships_semantic", {"query_text": query_text[:100], "limit": limit}, user_id, org_id)
     
     try:
-        writer = get_stream_writer()
-        writer(f"search_relationships_semantic: {query_text[:50]}")
+        emit_stream_message(f"search_relationships_semantic: {query_text[:50]}")
         
         results = await execute_search_relationships_semantic(
             user_id=user_id,
@@ -997,8 +1022,7 @@ async def traverse_entity_graph(
             org_id,
         )
 
-        writer = get_stream_writer()
-        writer(f"traverse_entity_graph: {entity_id}, max_hops={max_hops}")
+        emit_stream_message(f"traverse_entity_graph: {entity_id}, max_hops={max_hops}")
         
         results = await execute_traverse_entity_graph(
             user_id=user_id,
@@ -1056,8 +1080,9 @@ async def search_columns(
             user_id,
             org_id,
         )
-        writer = get_stream_writer()
-        writer(f"search_columns: pattern={column_name_pattern}, semantic={semantic_query is not None}")
+        emit_stream_message(
+            f"search_columns: pattern={column_name_pattern}, semantic={semantic_query is not None}"
+        )
         
         results = await execute_search_columns(
             user_id=user_id,
@@ -1113,8 +1138,7 @@ async def get_column_values(
             org_id,
         )
 
-        writer = get_stream_writer()
-        writer(f"get_column_values: {column_name}")
+        emit_stream_message(f"get_column_values: {column_name}")
         
         results = await execute_get_column_values(
             user_id=user_id,
@@ -1172,8 +1196,7 @@ async def search_row_values(
             org_id,
         )
 
-        writer = get_stream_writer()
-        writer(f"search_row_values: {value_pattern}")
+        emit_stream_message(f"search_row_values: {value_pattern}")
         
         results = await execute_search_row_values(
             user_id=user_id,
@@ -1220,8 +1243,7 @@ async def query_tabular_data(
     try:
         log_tool_call("query_tabular_data", {"document_id": document_id}, user_id, org_id)
 
-        writer = get_stream_writer()
-        writer(f"query_tabular_data: {document_id}, sheet={sheet_name}")
+        emit_stream_message(f"query_tabular_data: {document_id}, sheet={sheet_name}")
         
         results = await execute_query_tabular_data(
             user_id=user_id,
@@ -1269,8 +1291,8 @@ async def hybrid_search(
     try:
         log_tool_call("hybrid_search", {"query_text": query_text[:100], "search_nodes": search_nodes, "include_relationships": include_relationships, "limit": limit}, user_id, org_id)
 
-        writer = get_stream_writer()
-        writer(f"hybrid_search: {query_text[:50]}, nodes={search_nodes}")
+        emit_ui_status("Hybrid search", query_text, "searching")
+        emit_stream_message(f"hybrid_search: {query_text[:50]}, nodes={search_nodes}")
         
         results = await execute_hybrid_search(
             user_id=user_id,
@@ -1283,6 +1305,7 @@ async def hybrid_search(
         
         
         formatted_results = await format_neo4j_results(results)
+        emit_ui_status("Search complete", f"{len(results)} results", "complete")
         log_tool_success("hybrid_search", len(results), user_id, org_id)
         return formatted_results
     except Exception as e:
@@ -1321,8 +1344,9 @@ async def breadth_first_search(
     try:
         log_tool_call("breadth_first_search", {"start_node_type": start_node_type, "start_node_id": start_node_id, "max_depth": max_depth, "relationship_types": relationship_types, "limit": limit}, user_id, org_id)
 
-        writer = get_stream_writer()
-        writer(f"breadth_first_search: {start_node_type}/{start_node_id}, depth={max_depth}")
+        emit_stream_message(
+            f"breadth_first_search: {start_node_type}/{start_node_id}, depth={max_depth}"
+        )
         
         results = await execute_breadth_first_search(
             user_id=user_id,
@@ -1374,8 +1398,7 @@ async def get_entity_context(
     try:
         log_tool_call("get_entity_context", {"entity_id": entity_id, "document_id": document_id, "include_pages": include_pages, "include_related_entities": include_related_entities, "include_document": include_document}, user_id, org_id)
 
-        writer = get_stream_writer()
-        writer(f"get_entity_context: {entity_id}")
+        emit_stream_message(f"get_entity_context: {entity_id}")
         
         results = await execute_get_entity_context(
             user_id=user_id,
@@ -1418,8 +1441,7 @@ async def execute_raw_cypher_query(
         return [{"type": "text", "text": error_msg}]
     log_tool_call("execute_raw_cypher_query", {"cypher_query": cypher_query[:200], "parameters": parameters}, user_id, org_id)
     try:
-        writer = get_stream_writer()
-        writer(f"execute_raw_cypher_query: {cypher_query[:80]}")
+        emit_stream_message(f"execute_raw_cypher_query: {cypher_query[:80]}")
         results = await execute_raw_cypher(
             user_id=user_id,
             org_id=org_id,

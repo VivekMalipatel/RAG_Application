@@ -13,14 +13,8 @@ class Redis:
 
     def init_session(self):
         if self._redis_session is None:
-            redis_host = config.REDIS_HOST
-            redis_port = int(config.REDIS_PORT)
-
-            self._redis_session = AsyncRedis(
-                host=redis_host,
-                port=redis_port,
-                password=config.REDIS_PASSWORD,
-                db=config.REDIS_DB,
+            self._redis_session = AsyncRedis.from_url(
+                config.REDIS_URI,
                 decode_responses=True
             )
 

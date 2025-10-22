@@ -1,15 +1,16 @@
 import asyncio
 import json
 import logging
-import threading
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 from typing import Any, Optional, Union, Sequence, Dict, Callable, Awaitable, get_args, get_origin
+from langchain_core.messages import AIMessage, BaseMessage, ChatMessage, FunctionMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
+from litellm import token_counter as litellm_token_counter
 from pydantic import BaseModel, model_validator
 from langmem.short_term import RunningSummary
 
@@ -66,41 +67,61 @@ def coerce_running_summary(value: Any) -> Optional[RunningSummary]:
         )
     return None
 
-
-def consume_summary_update(
-    summary_updates: dict[str, dict[str, Any]],
-    summary_lock: threading.Lock,
-    thread_id: Optional[str],
-) -> Optional[dict[str, Any]]:
-    if not thread_id:
-        return None
-    with summary_lock:
-        return summary_updates.pop(thread_id, None)
-
 def coerce_profile_content(payload: Any) -> Optional[dict[str, Any]]:
-    if hasattr(payload, "model_dump"):
-        payload = payload.model_dump(exclude_none=True)
-    elif hasattr(payload, "dict"):
-        payload = payload.dict(exclude_none=True)
-    elif isinstance(payload, dict):
-        payload = {k: v for k, v in payload.items()}
-    else:
+    data = _coerce_mapping(payload)
+    if not isinstance(data, dict):
         return None
-    if isinstance(payload, dict) and "content" in payload:
-        content = payload["content"]
-        if hasattr(content, "model_dump"):
-            return content.model_dump(exclude_none=True)
-        if hasattr(content, "dict"):
-            return content.dict(exclude_none=True)
-        if isinstance(content, dict):
-            return {k: v for k, v in content.items()}
-        return None
-    return payload if isinstance(payload, dict) else None
+    if "content" in data:
+        content = _coerce_mapping(data["content"])
+        if not isinstance(content, dict):
+            return None
+        data = content
+    if "Address" in data:
+        address = _normalize_profile_address(data.get("Address"))
+        if address is None:
+            data.pop("Address", None)
+        else:
+            data["Address"] = address
+    return data
 
 def coerce_procedural_content(payload: Any) -> Optional[dict[str, Any]]:
     content = coerce_profile_content(payload)
     if isinstance(content, dict):
         return {k: v for k, v in content.items()}
+    return None
+
+
+def _coerce_mapping(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(exclude_none=True)
+    if hasattr(value, "dict"):
+        return value.dict(exclude_none=True)
+    if isinstance(value, dict):
+        return {k: v for k, v in value.items()}
+    return value
+
+
+def _normalize_profile_address(value: Any) -> Optional[dict[str, Any]]:
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        return {"primary": value.model_dump(exclude_none=True)}
+    if hasattr(value, "dict"):
+        return {"primary": value.dict(exclude_none=True)}
+    if isinstance(value, dict):
+        if not value:
+            return None
+        core_fields = {"Street", "City", "State", "ZipCode", "Country"}
+        if any(key in core_fields for key in value.keys()):
+            return {"primary": {k: v for k, v in value.items() if v is not None}}
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            coerced = _coerce_mapping(item)
+            if isinstance(coerced, dict):
+                filtered = {k: v for k, v in coerced.items() if v is not None}
+                if filtered:
+                    normalized[str(key)] = filtered
+        return normalized or None
     return None
 
 def format_profile_overview(data: Any) -> Optional[str]:
@@ -214,6 +235,67 @@ def _extract_profile_strings(value: Any) -> list[str]:
             items.extend(_extract_profile_strings(item))
         return items
     return []
+
+PROFILE_PRECONTEXT_FIELDS: tuple[str, ...] = (
+    "PreferredName",
+    "FormalName",
+    "Pronouns",
+    "Locale",
+    "Timezone",
+    "Greeting",
+    "Summary",
+    "Communication",
+    "Preferences",
+    "WorkContext",
+)
+
+def _profile_value_is_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value)
+    if isinstance(value, (list, tuple, set)):
+        return any(_profile_value_is_present(item) for item in value)
+    if isinstance(value, dict):
+        return any(_profile_value_is_present(item) for item in value.values())
+    return True
+
+def normalize_profile_value(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(exclude_none=True)
+    elif hasattr(value, "dict"):
+        value = value.dict(exclude_none=True)
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, inner in value.items():
+            normalized_inner = normalize_profile_value(inner)
+            if _profile_value_is_present(normalized_inner):
+                normalized[str(key)] = normalized_inner
+        return normalized
+    if isinstance(value, (list, tuple, set)):
+        normalized_items = [normalize_profile_value(item) for item in value]
+        return [item for item in normalized_items if _profile_value_is_present(item)]
+    if isinstance(value, str):
+        text = value.strip()
+        return text if text else None
+    return value
+
+def prepare_profile_precontext_payload(content: Any) -> dict[str, Any]:
+    if hasattr(content, "model_dump"):
+        content = content.model_dump(exclude_none=True)
+    elif hasattr(content, "dict"):
+        content = content.dict(exclude_none=True)
+    if not isinstance(content, dict):
+        return {}
+    payload: dict[str, Any] = {}
+    for key in PROFILE_PRECONTEXT_FIELDS:
+        if key not in content:
+            continue
+        normalized = normalize_profile_value(content[key])
+        if not _profile_value_is_present(normalized):
+            continue
+        payload[key] = normalized
+    return payload
 
 def build_profile_directives(content: Any) -> Optional[str]:
     if not isinstance(content, dict):
@@ -390,6 +472,77 @@ def unregister_precontext_provider(registry: dict[str, PrecontextProvider], name
     registry.pop(name, None)
 
 
+def _message_to_token_payload(message: BaseMessage) -> dict[str, Any]:
+    if isinstance(message, HumanMessage):
+        return {"role": "user", "content": message.content}
+    if isinstance(message, SystemMessage):
+        return {"role": "system", "content": message.content}
+    if isinstance(message, AIMessage):
+        payload: dict[str, Any] = {"role": "assistant", "content": message.content}
+        if message.tool_calls:
+            payload["tool_calls"] = message.tool_calls
+        if "function_call" in message.additional_kwargs:
+            payload["function_call"] = message.additional_kwargs["function_call"]
+        if "reasoning_content" in message.additional_kwargs:
+            payload["reasoning_content"] = message.additional_kwargs["reasoning_content"]
+        return payload
+    if isinstance(message, ToolMessage):
+        return {"role": "tool", "content": message.content, "tool_call_id": message.tool_call_id}
+    if isinstance(message, FunctionMessage):
+        return {"role": "function", "content": message.content, "name": message.name}
+    if isinstance(message, ChatMessage):
+        return {"role": message.role, "content": message.content}
+    return {"role": "assistant", "content": getattr(message, "content", "")}
+
+
+def _fallback_token_count(messages: Sequence[Any]) -> int:
+    total = 0
+    for message in messages:
+        content = getattr(message, "content", message)
+        if isinstance(content, str):
+            total += len([part for part in content.split() if part])
+        elif isinstance(content, list):
+            total += _fallback_token_count(content)
+        elif isinstance(content, dict):
+            total += _fallback_token_count(list(content.values()))
+        else:
+            total += len([part for part in str(content).split() if part])
+    return total
+
+
+def build_message_token_counter(model_name: Optional[str]) -> Callable[[Sequence[Any]], int]:
+    resolved_name = model_name or ""
+
+    def _counter(messages: Sequence[Any]) -> int:
+        payload: list[dict[str, Any]] = []
+        for message in messages:
+            if isinstance(message, RemoveMessage):
+                continue
+            if isinstance(message, BaseMessage):
+                payload.append(_message_to_token_payload(message))
+            elif isinstance(message, dict) and "role" in message:
+                payload.append(message)
+        if not payload:
+            return 0
+        try:
+            return int(litellm_token_counter(model=resolved_name, messages=payload))
+        except Exception:
+            return _fallback_token_count(messages)
+
+    return _counter
+
+
+def count_tokens(messages: Sequence[Any], counter: Optional[Callable[[Sequence[Any]], int]], *, logger: Optional[logging.Logger] = None) -> int:
+    if counter is None:
+        return _fallback_token_count(messages)
+    try:
+        return counter(messages)
+    except Exception as exc:
+        if logger is not None:
+            logger.warning("Token counter failed", exc_info=exc)
+        return _fallback_token_count(messages)
+
+
 async def build_system_precontext(
     prompt: str,
     providers: dict[str, PrecontextProvider],
@@ -471,6 +624,10 @@ def make_summary_precontext_provider() -> PrecontextProvider:
         if not isinstance(state, dict):
             return None
         summary_value = state.get("summary_context")
+        if summary_value is None:
+            context_payload = state.get("context")
+            if isinstance(context_payload, dict):
+                summary_value = context_payload.get("running_summary")
         if isinstance(summary_value, RunningSummary):
             summary_text = summary_value.summary
         elif isinstance(summary_value, dict):

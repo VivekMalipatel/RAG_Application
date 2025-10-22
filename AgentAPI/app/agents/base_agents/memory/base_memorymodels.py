@@ -14,23 +14,44 @@ class SemanticMemory(BaseModel):
 
 # Profile Memory
 
+class AddressModel(BaseModel):
+    Street: Optional[str] = Field(None, description="Street address")
+    City: Optional[str] = Field(None, description="City name")
+    State: Optional[str] = Field(None, description="State or province")
+    ZipCode: Optional[str] = Field(None, description="Postal code")
+    Country: Optional[str] = Field(None, description="Country name")
+    Extra: Optional[str] = Field(None, description="Additional address details")
+
+class ContactBookModel(BaseModel):
+    Name: Optional[str] = Field(None, description="Contact's full name")
+    Pronouns: Optional[str] = Field(None, description="Contact's preferred pronouns")
+    Nickname: Optional[str] = Field(None, description="Contact's nickname")
+    Relationship: Optional[str] = Field(None, description="Relationship to the user")
+    DateOfBirth: Optional[str] = Field(None, description="Contact's date of birth")
+    Email: Optional[str] = Field(None, description="Contact's email address")
+    Phone: Optional[str] = Field(None, description="Contact's phone number")
+    Address: Optional[AddressModel] = Field(None, description="Contact's address")
+    Notes: Optional[str] = Field(None, description="Additional notes about the contact")
+    Languages: Optional[list[str]] = Field(None, description="Languages spoken by the contact")
+
+class PreferenceModel(BaseModel):
+    Category: Optional[str] = Field(None, description="Category of the preference")
+    Details: Optional[str] = Field(None, description="Specific details of the preference")
+    Importance: Optional[str] = Field(None, description="Importance level of the preference")
+
 class UserProfileMemory(BaseModel):
     PreferredName: Optional[str] = Field(None, description="Preferred form of address")
     FormalName: Optional[str] = Field(None, description="Full formal name")
     Pronouns: Optional[str] = Field(None, description="Pronouns the user prefers")
     Locale: Optional[str] = Field(None, description="Primary locale or language")
     Timezone: Optional[str] = Field(None, description="Primary timezone")
-    Greeting: Optional[str] = Field(None, description="Suggested greeting style")
-    Summary: Optional[str] = Field(None, description="Short personalization summary")
+    DateOfBirth: Optional[str] = Field(None, description="Date of birth")
     Email: Optional[str] = Field(None, description="Primary email address")
     Phone: Optional[str] = Field(None, description="Primary phone number")
-    Address: Optional[str] = Field(None, description="Primary address")
-    Preferences: Optional[str] = Field(None, description="Durable user preferences")
-    Communication: Optional[str] = Field(None, description="Communication guidance")
-    WorkContext: Optional[str] = Field(None, description="Work roles, teams, or projects")
-    Contacts: Optional[str] = Field(None, description="Important contacts and relationships")
-    Notes: Optional[str] = Field(None, description="Additional narrative context")
-    Metadata: Optional[dict[str, Any]] = Field(None, description="Profile tracking metadata")
+    Address: Optional[dict[str, AddressModel]] = Field(None, description="Aaddress details keyed by identifier")
+    Preferences: Optional[dict[str, PreferenceModel]] = Field(None, description="Durable user preferences keyed by identifier")
+    Contacts: Optional[dict[str, ContactBookModel]] = Field(None, description="Important contacts keyed by identifier")
+    Notes: Optional[dict[str, str]] = Field(None, description="Additional notes about the user keyed by identifier")
 
 # Episodic Memory
 

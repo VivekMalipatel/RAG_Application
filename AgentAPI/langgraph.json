@@ -32,6 +32,9 @@
     "chat_agent": "./app/langgraph_app/graphs/chat.py:create_graph",
     "knowledge_search_agent": "./app/langgraph_app/subgraphs/knowledge_search.py:create_graph"
   },
+  "ui": {
+    "chat_agent": "./app/langgraph_app/ui/index.tsx"
+  },
   "http": {
     "app": "./app/main.py:app"
   },

@@ -1,14 +1,35 @@
 import os
-from urllib.parse import urlparse
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+_redis_uri = None
+_redis_override_keys = (
+    "REDIS_URI_OVERRIDE",
+    "EXTERNAL_REDIS_URI",
+    "HOST_REDIS_URI",
+)
+
+for _override_key in _redis_override_keys:
+    _value = os.getenv(_override_key)
+    if _value:
+        _redis_uri = _value
+        break
+
+if not _redis_uri:
+    _redis_uri = os.getenv("REDIS_URI")
+
+if not _redis_uri:
+    raise RuntimeError(
+        "Missing Redis configuration. Set REDIS_URI (or one of REDIS_URI_OVERRIDE / EXTERNAL_REDIS_URI / HOST_REDIS_URI) before starting AgentAPI."
+    )
 
 class Config:
 
     # Models Configuration
     REASONING_LLM_MODEL: str = os.getenv("REASONING_LLM_MODEL")
     VLM_MODEL: str = os.getenv("VLM_MODEL")
+    UTIL_LLM_MODEL: str | None = os.getenv("UTIL_LLM_MODEL")
     MULTIMODEL_EMBEDDING_MODEL: str = os.getenv("MULTIMODEL_EMBEDDING_MODEL")
     MULTIMODEL_EMBEDDING_MODEL_DIMS: int = int(os.getenv("MULTIMODEL_EMBEDDING_MODEL_DIMS",2048))
     TEXT_EMBEDDING_MODEL: str = os.getenv("TEXT_EMBEDDING_MODEL")
@@ -27,7 +48,6 @@ class Config:
     REASONING_LLM_PRESENCE_PENALTY: float = float(os.getenv("REASONING_LLM_PRESENCE_PENALTY", 1.25))
     REASONING_LLM_TOP_K: int = int(os.getenv("REASONING_LLM_TOP_K", 20))
     REASONING_LLM_MIN_P: int = int(os.getenv("REASONING_LLM_MIN_P", 0))
-
     VLM_LLM_TEMPERATURE: float = float(os.getenv("VLM_LLM_TEMPERATURE", 1.0))
     VLM_LLM_TOP_P: float = float(os.getenv("VLM_LLM_TOP_P", 0.95))
     VLM_LLM_REPETITION_PENALTY: float = float(os.getenv("VLM_LLM_REPETITION_PENALTY", 1.0))
@@ -38,7 +58,7 @@ class Config:
     SEMANTIC_MEMORY_DELAY_SECONDS: int = int(os.getenv("SEMANTIC_MEMORY_DELAY_SECONDS", 60))
     SEMANTIC_MEMORY_QUERY_LIMIT: int = int(os.getenv("SEMANTIC_MEMORY_QUERY_LIMIT", 10))
     SEMANTIC_MEMORY_MAX_UPDATES_PER_TURN: int = int(os.getenv("SEMANTIC_MEMORY_MAX_UPDATES_PER_TURN", 1))
-    PROFILE_MEMORY_DELAY_SECONDS: int = int(os.getenv("PROFILE_MEMORY_DELAY_SECONDS", 60))
+    PROFILE_MEMORY_DELAY_SECONDS: int = int(os.getenv("PROFILE_MEMORY_DELAY_SECONDS", 240))
     PROFILE_MEMORY_MAX_UPDATES_PER_TURN: int = int(os.getenv("PROFILE_MEMORY_MAX_UPDATES_PER_TURN", 1))
     PROFILE_MEMORY_MIN_CONFIDENCE: float = float(os.getenv("PROFILE_MEMORY_MIN_CONFIDENCE", 0.5))
     PROFILE_MEMORY_QUERY_LIMIT: int = int(os.getenv("PROFILE_MEMORY_QUERY_LIMIT", 10))
@@ -55,27 +75,8 @@ class Config:
 
     INDEXER_API_BASE_URL: str = os.getenv("INDEXER_API_BASE_URL")
 
-    _redis_uri = os.getenv("APP_REDIS_URI") or os.getenv("REDIS_URI")
-    _redis_host = os.getenv("REDIS_HOST", "localhost")
-    _redis_port = os.getenv("REDIS_PORT", "6379")
-    _redis_password = os.getenv("REDIS_PASSWORD")
-    _redis_db = os.getenv("REDIS_DB", "0")
-    if _redis_uri:
-        parsed = urlparse(_redis_uri)
-        if parsed.hostname:
-            _redis_host = parsed.hostname
-        if parsed.port is not None:
-            _redis_port = str(parsed.port)
-        if parsed.password is not None:
-            _redis_password = parsed.password
-        db_path = parsed.path.lstrip("/")
-        if db_path:
-            _redis_db = db_path
-    REDIS_URI: str | None = _redis_uri
-    REDIS_HOST: str = _redis_host
-    REDIS_PORT: int = int(_redis_port or 6379)
-    REDIS_PASSWORD: str | None = _redis_password
-    REDIS_DB: int = int(_redis_db or 0)
+    # Redis Configuration
+    REDIS_URI: str = _redis_uri
 
     # Searx Configuration
     SEARX_URL: str = "https://websearch.gauravshivaprasad.com"

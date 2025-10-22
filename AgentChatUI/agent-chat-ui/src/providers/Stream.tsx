@@ -11,14 +11,7 @@ import React, {
   useCallback,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import {
-  type Message,
-  type ThreadState,
-  type EventsStreamEvent,
-  type MetadataStreamEvent,
-  type DebugStreamEvent,
-  type Thread,
-} from "@langchain/langgraph-sdk";
+import { type Message, type Thread } from "@langchain/langgraph-sdk";
 import { v4 as uuidv4 } from "uuid";
 import {
   uiMessageReducer,
@@ -40,33 +33,6 @@ export type StateType = {
   context?: Record<string, unknown>;
 };
 
-type StreamUpdate = {
-  messages?: Message[] | Message | string;
-  ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
-  context?: Record<string, unknown>;
-};
-
-type StreamUpdateData = Record<string, StreamUpdate>;
-
-type StreamRunMeta = { run_id: string; thread_id: string };
-
-type StreamAuditEventInput =
-  | { type: "updates"; namespace?: string[]; payload: StreamUpdateData }
-  | { type: "custom"; namespace?: string[]; payload: UIMessage | RemoveUIMessage }
-  | { type: "metadata"; payload: MetadataStreamEvent["data"] }
-  | { type: "langchain"; payload: EventsStreamEvent["data"] }
-  | { type: "debug"; namespace?: string[]; payload: DebugStreamEvent["data"] }
-  | { type: "checkpoints"; namespace?: string[]; payload: unknown }
-  | { type: "tasks"; namespace?: string[]; payload: unknown }
-  | { type: "error"; payload: unknown; run?: StreamRunMeta }
-  | { type: "finish"; payload: ThreadState<StateType>; run?: StreamRunMeta };
-
-export type StreamAuditEvent = StreamAuditEventInput & {
-  id: string;
-  timestamp: number;
-  sequence: number;
-};
-
 const useTypedStream = useStream<
   StateType,
   {
@@ -80,8 +46,6 @@ const useTypedStream = useStream<
 >;
 
 type StreamContextType = ReturnType<typeof useTypedStream> & {
-  auditEvents: StreamAuditEvent[];
-  clearAuditEvents: () => void;
   capabilityFlags: Record<string, boolean>;
   setCapabilityFlag: (name: string, value: boolean) => void;
   capabilityDefinitions: CatalogCapability[];
@@ -145,8 +109,6 @@ const StreamSession = ({
 }) => {
   const { getThreads, threads, setThreads } = useThreads();
   const threadIdRef = useRef<string | null>(null);
-  const auditSequenceRef = useRef(0);
-  const [auditEvents, setAuditEvents] = useState<StreamAuditEvent[]>([]);
   const resolvedCapabilities = useMemo(() => {
     if (capabilityDefinitions.length === 0) {
       return { ...capabilities };
@@ -181,37 +143,10 @@ const StreamSession = ({
     if (userId) metadata.user_id = userId;
     return metadata;
   }, [assistantId, orgId, userId]);
-  const appendAuditEvent = useCallback((event: StreamAuditEventInput) => {
-    const now = Date.now();
-    auditSequenceRef.current += 1;
-    const uniqueId =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : uuidv4();
-    const nextEvent: StreamAuditEvent = {
-      ...event,
-      id: `audit-${auditSequenceRef.current}-${uniqueId}`,
-      timestamp: now,
-      sequence: auditSequenceRef.current,
-    };
-    console.debug("[stream] event", nextEvent);
-    setAuditEvents((prev) => [
-      ...prev,
-      nextEvent,
-    ]);
-  }, []);
-  const clearAuditEvents = useCallback(() => {
-    auditSequenceRef.current = 0;
-    setAuditEvents([]);
-  }, []);
   useEffect(() => {
     if (!threadId) {
       threadIdRef.current = null;
     }
-  }, [threadId]);
-  useEffect(() => {
-    auditSequenceRef.current = 0;
-    setAuditEvents([]);
   }, [threadId]);
   const knownThread = useMemo(() => {
     if (!threadId) return false;
@@ -227,11 +162,6 @@ const StreamSession = ({
     threadId: streamThreadId,
     fetchStateHistory: true,
     onUpdateEvent: (data, options) => {
-      appendAuditEvent({
-        type: "updates",
-        namespace: options.namespace,
-        payload: data as StreamUpdateData,
-      });
       options.mutate(() => {
         const updates: Partial<StateType> = {};
         let hasUpdate = false;
@@ -250,50 +180,12 @@ const StreamSession = ({
       });
     },
     onCustomEvent: (event, options) => {
-      appendAuditEvent({
-        type: "custom",
-        namespace: options.namespace,
-        payload: event,
-      });
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
         options.mutate((prev) => {
           const ui = uiMessageReducer(prev.ui ?? [], event);
           return { ...prev, ui };
         });
       }
-    },
-    onMetadataEvent: (data) => {
-      appendAuditEvent({ type: "metadata", payload: data });
-    },
-    onLangChainEvent: (data) => {
-      appendAuditEvent({ type: "langchain", payload: data });
-    },
-    onDebugEvent: (data, options) => {
-      appendAuditEvent({
-        type: "debug",
-        namespace: options.namespace,
-        payload: data,
-      });
-    },
-    onCheckpointEvent: (data, options) => {
-      appendAuditEvent({
-        type: "checkpoints",
-        namespace: options.namespace,
-        payload: data,
-      });
-    },
-    onTaskEvent: (data, options) => {
-      appendAuditEvent({
-        type: "tasks",
-        namespace: options.namespace,
-        payload: data,
-      });
-    },
-    onError: (error, run) => {
-      appendAuditEvent({ type: "error", payload: error, run: run ?? undefined });
-    },
-    onFinish: (state, run) => {
-      appendAuditEvent({ type: "finish", payload: state, run: run ?? undefined });
     },
     onThreadId: (id) => {
       if (id) {
@@ -355,8 +247,6 @@ const StreamSession = ({
     () => ({
       ...streamValue,
       submit,
-      auditEvents,
-      clearAuditEvents,
       capabilityFlags: resolvedCapabilities,
       setCapabilityFlag: onCapabilityChange,
       capabilityDefinitions,
@@ -369,8 +259,6 @@ const StreamSession = ({
     [
       streamValue,
       submit,
-      auditEvents,
-      clearAuditEvents,
       resolvedCapabilities,
       onCapabilityChange,
       capabilityDefinitions,
