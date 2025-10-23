@@ -2,15 +2,17 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
+import tiktoken
 from typing import Any, Optional, Union, Sequence, Dict, Callable, Awaitable, get_args, get_origin
 from langchain_core.messages import AIMessage, BaseMessage, ChatMessage, FunctionMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
-from litellm import token_counter as litellm_token_counter
 from pydantic import BaseModel, model_validator
 from langmem.short_term import RunningSummary
 
@@ -495,23 +497,51 @@ def _message_to_token_payload(message: BaseMessage) -> dict[str, Any]:
     return {"role": "assistant", "content": getattr(message, "content", "")}
 
 
-def _fallback_token_count(messages: Sequence[Any]) -> int:
-    total = 0
-    for message in messages:
-        content = getattr(message, "content", message)
+@lru_cache(maxsize=32)
+def _encoding_for_model(name: str) -> tiktoken.Encoding:
+    candidates: list[str] = []
+    cleaned = (name or "").strip()
+    if cleaned:
+        candidates.append(cleaned)
+        if "/" in cleaned:
+            candidates.extend(part for part in cleaned.split("/") if part)
+        if ":" in cleaned:
+            candidates.extend(part for part in cleaned.split(":") if part)
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for candidate in candidates:
+        key = candidate.strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        ordered.append(key)
+    for candidate in ordered:
+        try:
+            return tiktoken.encoding_for_model(candidate)
+        except Exception:
+            continue
+    return tiktoken.get_encoding("cl100k_base")
+
+
+def _count_with_encoding(messages: Sequence[dict[str, Any]], encoding: tiktoken.Encoding) -> int:
+    def _encode_content(message: dict[str, Any]) -> int:
+        content = message.get("content", "")
         if isinstance(content, str):
-            total += len([part for part in content.split() if part])
-        elif isinstance(content, list):
-            total += _fallback_token_count(content)
-        elif isinstance(content, dict):
-            total += _fallback_token_count(list(content.values()))
+            return len(encoding.encode(content))
         else:
-            total += len([part for part in str(content).split() if part])
-    return total
+            serialized = json.dumps(content, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
+            return len(encoding.encode(serialized))
+    
+    if len(messages) < 10:
+        return sum(_encode_content(msg) for msg in messages)
+    
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        return sum(executor.map(_encode_content, messages))
 
 
 def build_message_token_counter(model_name: Optional[str]) -> Callable[[Sequence[Any]], int]:
     resolved_name = model_name or ""
+    encoding = _encoding_for_model(resolved_name)
 
     def _counter(messages: Sequence[Any]) -> int:
         payload: list[dict[str, Any]] = []
@@ -524,23 +554,15 @@ def build_message_token_counter(model_name: Optional[str]) -> Callable[[Sequence
                 payload.append(message)
         if not payload:
             return 0
-        try:
-            return int(litellm_token_counter(model=resolved_name, messages=payload))
-        except Exception:
-            return _fallback_token_count(messages)
+        return _count_with_encoding(payload, encoding)
 
     return _counter
 
 
 def count_tokens(messages: Sequence[Any], counter: Optional[Callable[[Sequence[Any]], int]], *, logger: Optional[logging.Logger] = None) -> int:
     if counter is None:
-        return _fallback_token_count(messages)
-    try:
-        return counter(messages)
-    except Exception as exc:
-        if logger is not None:
-            logger.warning("Token counter failed", exc_info=exc)
-        return _fallback_token_count(messages)
+        raise ValueError("Token counter is not initialized")
+    return counter(messages)
 
 
 async def build_system_precontext(
@@ -617,31 +639,6 @@ def make_procedural_precontext_provider(
 
     return _provider
 
-
-def make_summary_precontext_provider() -> PrecontextProvider:
-
-    def _provider(state: Any, config: RunnableConfig) -> Optional[str]:
-        if not isinstance(state, dict):
-            return None
-        summary_value = state.get("summary_context")
-        if summary_value is None:
-            context_payload = state.get("context")
-            if isinstance(context_payload, dict):
-                summary_value = context_payload.get("running_summary")
-        if isinstance(summary_value, RunningSummary):
-            summary_text = summary_value.summary
-        elif isinstance(summary_value, dict):
-            summary_text = summary_value.get("summary")
-        else:
-            summary_text = None
-        if not summary_text:
-            return None
-        content = summary_text.strip()
-        if not content:
-            return None
-        return "\n".join(("<Conversation Summary>", content, "</Conversation Summary>"))
-
-    return _provider
 
 def count_words_in_messages(messages: Sequence[Any]) -> int:
     total = 0

@@ -51,12 +51,10 @@ from agents.utils import (
     make_profile_precontext_provider,
     make_procedural_precontext_provider,
     make_utc_datetime_precontext_provider,
-    make_summary_precontext_provider,
     coerce_running_summary,
     build_message_token_counter,
     count_tokens,
 )
-from agents.base_agents.utils import get_pending_tool_calls
 from pathlib import Path
 from llm.llm import LLM
 from llm.utils import prepare_input_async
@@ -144,7 +142,6 @@ class BaseAgent:
         self._procedural_reflection_executor = None
         self._procedural_manage_tool = None
         self._procedural_memory_key: Optional[str] = None
-        self._summarization_model = None
         self._token_counter: Optional[Callable[[Sequence[Any]], int]] = None
         
         self._checkpointer = None
@@ -194,7 +191,8 @@ class BaseAgent:
 
     def _get_memory_llm(self):
         util_llm = getattr(self._llm, "utility_llm", None)
-        return util_llm or self._llm.reasoning_llm
+        #return util_llm or self._llm.reasoning_llm
+        return self._llm.reasoning_llm
 
     def _setup_semantic_manager(self, store: Optional[BaseStore]):
         self._semantic_manager = None
@@ -364,39 +362,32 @@ class BaseAgent:
         self._memory_tools.append(self._episodic_manage_tool)
 
     def _setup_summarizer(self, store: Optional[BaseStore]):
-        self._summarization_model = None
         self._token_counter = None
-        unregister_precontext_provider(self._precontext_providers, "summary_context")
-        self._summarization_model = self._llm.bind(
-            max_tokens=envconfig.SUMMARIZATION_TARGET_TOKENS
-        )
         model_name = None
         reasoning_llm = getattr(self._llm, "reasoning_llm", None)
         if reasoning_llm is not None:
             model_name = getattr(reasoning_llm, "model_name", None) or getattr(reasoning_llm, "model", None)
         self._token_counter = build_message_token_counter(model_name)
-        register_precontext_provider(
-            self._precontext_providers,
-            "summary_context",
-            make_summary_precontext_provider(),
-        )
 
     async def _prepare_messages_for_reflection(self, messages: list[Any]) -> list[Any]:
-        vlm_client = getattr(self._llm, "vlm_client", None)
-        vlm_model = getattr(self._llm, "vlm_model", None)
-        vlm_kwargs = getattr(self._llm, "vlm_model_kwargs", None)
-        if not vlm_client or not vlm_model:
+        vlm_processor = getattr(self._llm, "vlm_processor", None)
+        is_configured = False
+        if vlm_processor is not None:
+            checker = getattr(vlm_processor, "is_configured", None)
+            if callable(checker):
+                is_configured = checker()
+        if not is_configured:
             raise RuntimeError("VLM preprocessing is required for reflection but no VLM configuration is available.")
         
         async def _process_message(message: Any) -> Any:
             if isinstance(message, ToolMessage):
-                return await self._process_tool_message_for_reflection(message, vlm_client, vlm_model, vlm_kwargs or {})
+                return await self._process_tool_message_for_reflection(message, vlm_processor)
             return message
         
         processed = await asyncio.gather(*[_process_message(msg) for msg in messages])
         return list(processed)
     
-    async def _process_tool_message_for_reflection(self, tool_msg: ToolMessage, vlm_client: Any, vlm_model: str, vlm_kwargs: dict[str, Any]) -> ToolMessage:
+    async def _process_tool_message_for_reflection(self, tool_msg: ToolMessage, vlm_processor: Any) -> ToolMessage:
         content = getattr(tool_msg, "content", None)
         if not isinstance(content, list):
             return tool_msg
@@ -404,9 +395,7 @@ class BaseAgent:
         try:
             converted_content = await prepare_input_async(
                 [HumanMessage(content=content)],
-                vlm_client,
-                vlm_model,
-                vlm_kwargs,
+                vlm_processor,
                 announcement="",
             )
             if converted_content and len(converted_content) > 0:
@@ -424,19 +413,7 @@ class BaseAgent:
         return tool_msg
 
     async def summarization_node(self, state: BaseState, config: RunnableConfig) -> dict[str, Any]:
-        if self._summarization_model is None:
-            return {}
         messages = list(state.get("messages", []))
-        if not messages:
-            return {}
-        
-        pending_tool_calls = get_pending_tool_calls(messages)
-        if pending_tool_calls:
-            self._logger.debug(
-                f"Skipping summarization due to {len(pending_tool_calls)} pending tool calls without results"
-            )
-            return {}
-        
         run_config = config or self.config
         configurable = run_config.get("configurable", {}) if run_config else {}
         thread_id = configurable.get("thread_id")
@@ -471,13 +448,30 @@ class BaseAgent:
         summarization_result = await asummarize_messages(
             messages,
             running_summary=running_summary,
-            model=self._summarization_model,
+            model=self._llm,
             max_tokens=envconfig.SUMMARIZATION_TARGET_TOKENS,
             max_tokens_before_summary=envconfig.MAX_STATE_TOKENS,
             max_summary_tokens=envconfig.SUMMARIZATION_SUMMARY_TOKENS,
             token_counter=counter,
         )
         updated_summary = summarization_result.running_summary or running_summary
+        
+        result_messages = list(summarization_result.messages)
+        has_non_system_message = any(
+            not isinstance(msg, SystemMessage) for msg in result_messages
+        )
+        
+        if should_summarize and not has_non_system_message and messages:
+            min_to_retain = envconfig.SUMMARIZATION_MIN_MESSAGES_TO_RETAIN
+            recent_messages = messages[-min_to_retain:] if len(messages) > min_to_retain else messages
+            non_system_recent = [msg for msg in recent_messages if not isinstance(msg, SystemMessage)]
+            
+            if non_system_recent:
+                result_messages = result_messages + non_system_recent
+                self._logger.warning(
+                    f"Summarization left only system messages. Retained {len(non_system_recent)} recent non-system messages to maintain conversation flow."
+                )
+        
         if should_summarize and writer:
             writer({
                 "type": "summary_status",
@@ -485,17 +479,16 @@ class BaseAgent:
                 "thread_id": thread_id,
                 "messages": len(preprocessed.messages_to_summarize),
                 "tokens": preprocessed.n_tokens_to_summarize,
-                "retained_tokens": count_tokens(summarization_result.messages, self._token_counter, logger=self._logger),
+                "retained_tokens": count_tokens(result_messages, self._token_counter, logger=self._logger),
             })
 
         state_update: dict[str, Any] = {}
         if should_summarize:
-            state_update["messages"] = [RemoveMessage(id=REMOVE_ALL_MESSAGES)] + summarization_result.messages
+            state_update["messages"] = [RemoveMessage(id=REMOVE_ALL_MESSAGES)] + result_messages
         
         if updated_summary is not None:
             context_payload["running_summary"] = updated_summary
             state_update["context"] = context_payload
-            state_update["summary_context"] = updated_summary
         elif context_payload:
             state_update["context"] = context_payload
             
@@ -549,10 +542,6 @@ class BaseAgent:
         return overview, content
 
     async def llm_node(self, state: BaseState, config: RunnableConfig):
-        run_config = config or self.config
-        configurable = run_config.get("configurable", {}) if run_config else {}
-        thread_id = configurable.get("thread_id")
-
         context_payload = dict(state.get("context", {}) or {})
         existing_summary = context_payload.get("running_summary")
         running_summary = coerce_running_summary(existing_summary)
@@ -567,7 +556,6 @@ class BaseAgent:
         state_for_precontext = dict(state)
         state_for_precontext["messages"] = base_messages
         state_for_precontext["context"] = context_payload
-        state_for_precontext["summary_context"] = running_summary
         state_for_precontext["token_usage_history"] = token_history
 
         system_parts = await build_system_precontext(
@@ -581,7 +569,7 @@ class BaseAgent:
         system_messages = [SystemMessage(content="\n\n".join(system_parts))] if system_parts else []
         messages = system_messages + base_messages
 
-        response = await self._llm.ainvoke(messages, **self._config.node_kwargs)
+        response = await self._llm.ainvoke(messages, config, **self._config.node_kwargs)
 
         if self._is_structured_output:
             response = AIMessage(content=json.dumps(response))
@@ -670,7 +658,6 @@ class BaseAgent:
             "token_usage_history": token_history,
         }
         result["context"] = context_payload
-        result["summary_context"] = running_summary
         return result
 
     def _compile_graph(self, has_tools: bool, **compile_kwargs) -> CompiledStateGraph[StateT, ContextT, InputT, OutputT]:
@@ -793,7 +780,6 @@ class BaseAgent:
         checkpointer, store = self._checkpointer, self._store
         self._checkpointer = None
         self._store = None
-        self._summarization_model = None
 
         if store is not None:
             try:
@@ -954,353 +940,3 @@ class BaseAgent:
     @property
     def graph(self) -> Optional[CompiledStateGraph]:
         return self._compiled_graph
-
-
-if __name__ == "__main__":
-    async def test_semantic_memory():
-        """Test semantic memory functionality following LangMem patterns."""
-        import time
-        output_lines = []
-        
-        print("=== Testing Semantic Memory with BaseAgent ===")
-        output_lines.append("=== Testing Semantic Memory with BaseAgent ===")
-        
-        # Test configuration with two different users
-        user1_config = {
-            "configurable": {
-                "thread_id": "memory_test_thread_1",
-                "user_id": "alice_user", 
-                "org_id": "test_company"
-            }
-        }
-        
-        user2_config = {
-            "configurable": {
-                "thread_id": "memory_test_thread_2", 
-                "user_id": "bob_user",
-                "org_id": "test_company"
-            }
-        }
-        
-        async def test_memory_ingestion_and_retrieval():
-            """Test memory ingestion for Alice and retrieval by Bob."""
-            
-            # === PHASE 1: Alice shares information (Memory Ingestion) ===
-            print("\n--- Phase 1: Alice shares personal information ---")
-            output_lines.append("\n--- Phase 1: Alice shares personal information ---")
-            
-            alice_agent = BaseAgent(
-                prompt="You are a helpful assistant. Always introduce yourself as Alice's personal assistant.",
-                model_kwargs={},
-                vlm_kwargs={}, 
-                node_kwargs={},
-                debug=False,
-                config=user1_config
-            )
-            
-            alice_compiled = await alice_agent.compile(name="alice_agent")
-            
-            # Alice shares rich personal information
-            alice_messages = [
-                "Hi! I'm Alice Johnson, and I work as a Senior Data Scientist at Google. My favorite programming languages are Python and R.",
-                "I love machine learning, especially deep learning and NLP. I have a PhD in Computer Science from Stanford.",
-                "My hobbies include hiking, photography, and playing piano. I have a golden retriever named Max.",
-                "I prefer working remotely and usually start my day at 9 AM PST. I'm vegetarian and love Italian food."
-            ]
-            
-            for i, msg in enumerate(alice_messages, 1):
-                print(f"\nAlice Message {i}: {msg[:50]}...")
-                output_lines.append(f"\nAlice Message {i}: {msg[:50]}...")
-                
-                result = await alice_compiled.ainvoke(
-                    {"messages": [HumanMessage(content=msg)]},
-                    config=user1_config
-                )
-                print(f"Response: {result['messages'][-1].content[:100]}...")
-                output_lines.append(f"Response: {result['messages'][-1].content[:100]}...")
-                
-                # Small delay between messages
-                await asyncio.sleep(0.1)
-            
-            print("\n--- Waiting for semantic memory processing (3 minutes delay) ---")
-            output_lines.append("\n--- Waiting for semantic memory processing (3 minutes delay) ---")
-            
-            # Wait for reflection executor to process (3 minutes as configured)
-            print("Waiting 200 seconds for ReflectionExecutor to process memories...")
-            await asyncio.sleep(200)  # Wait a bit longer than the 180-second delay
-            
-            # === PHASE 2: Check if memories were stored ===
-            print("\n--- Phase 2: Checking stored memories ---")
-            output_lines.append("\n--- Phase 2: Checking stored memories ---")
-            
-            if alice_compiled._store:
-                try:
-                    # Search for Alice's semantic memories
-                    alice_namespace = ("memories", "test_company", "alice_user", "semantic")
-                    stored_memories = await alice_compiled._store.asearch(alice_namespace)
-                    
-                    print(f"Found {len(stored_memories)} semantic memories for Alice")
-                    output_lines.append(f"Found {len(stored_memories)} semantic memories for Alice")
-                    
-                    for i, memory in enumerate(stored_memories[:3]):  # Show first 3
-                        print(f"Memory {i+1}: {str(memory.value)[:100]}...")
-                        output_lines.append(f"Memory {i+1}: {str(memory.value)[:100]}...")
-                        
-                except Exception as e:
-                    print(f"Error checking memories: {e}")
-                    output_lines.append(f"Error checking memories: {e}")
-            
-            return alice_compiled
-        
-        async def test_cross_user_memory_access(alice_agent):
-            """Test Bob cannot access Alice's memories."""
-            
-            print("\n--- Phase 3: Bob queries for Alice's information using search tool ---")
-            output_lines.append("\n--- Phase 3: Bob queries for Alice's information using search tool ---")
-            
-            # Create Bob's agent with same org but different user
-            bob_agent = BaseAgent(
-                prompt="You are a helpful assistant. Always introduce yourself as Bob's assistant. When asked about colleagues, use the MemorySearch tool to find relevant information.",
-                model_kwargs={},
-                vlm_kwargs={},
-                node_kwargs={},
-                debug=False,
-                config=user2_config
-            )
-            
-            bob_compiled = await bob_agent.compile(name="bob_agent")
-            
-            # Bob asks questions that should trigger memory search
-            bob_queries = [
-                "Do you know anything about Alice Johnson who works at our company?",
-                "What are Alice's technical skills and background?",
-                "What are Alice's personal interests and hobbies?"
-            ]
-            
-            for i, query in enumerate(bob_queries, 1):
-                print(f"\nBob Query {i}: {query}")
-                output_lines.append(f"\nBob Query {i}: {query}")
-                
-                try:
-                    result = await bob_compiled.ainvoke(
-                        {"messages": [HumanMessage(content=query)]},
-                        config=user2_config
-                    )
-
-                    response_content = result['messages'][-1].content
-                    print(f"Bob's Response: {response_content[:200]}...")
-                    output_lines.append(f"Bob's Response: {response_content[:200]}...")
-
-                    used_tools = len(result['messages']) > 2
-                    if used_tools:
-                        print("✅ Agent attempted memory search (expected)")
-                        output_lines.append("✅ Agent attempted memory search (expected)")
-
-                    has_cross_user_data = "alice" in response_content.lower() and (
-                        "google" in response_content.lower()
-                        or "stanford" in response_content.lower()
-                        or "hiking" in response_content.lower()
-                    )
-
-                    if has_cross_user_data:
-                        print("❌ Bob should not access Alice's memories but some information leaked")
-                        output_lines.append("❌ Bob should not access Alice's memories but some information leaked")
-                    else:
-                        print("✅ Bob could not access another user's memories")
-                        output_lines.append("✅ Bob could not access another user's memories")
-
-                    if not used_tools:
-                        print("⚠️  Agent didn't use tools")
-                        output_lines.append("⚠️  Agent didn't use tools")
-
-                except Exception as e:
-                    print(f"Error in Bob's query: {e}")
-                    output_lines.append(f"Error in Bob's query: {e}")
-                
-                await asyncio.sleep(0.5)
-        
-        async def verify_namespace_isolation():
-            """Test that different users have isolated memory namespaces."""
-            print("\n--- Phase 4: Testing namespace isolation ---")
-            output_lines.append("\n--- Phase 4: Testing namespace isolation ---")
-            
-            charlie_config = {
-                "configurable": {
-                    "thread_id": "memory_test_thread_3",
-                    "user_id": "charlie_user",
-                    "org_id": "different_company"
-                }
-            }
-            
-            charlie_agent = BaseAgent(
-                prompt="You are Charlie's assistant. Use the MemorySearch tool when asked about colleagues.",
-                config=charlie_config
-            )
-            
-            charlie_compiled = await charlie_agent.compile(name="charlie_agent")
-            
-            # Charlie (different org) should not find Alice's memories
-            result = await charlie_compiled.ainvoke(
-                {"messages": [HumanMessage(content="Tell me about Alice Johnson")]},
-                config=charlie_config
-            )
-            
-            response = result['messages'][-1].content
-            print(f"Charlie's response: {response[:150]}...")
-            output_lines.append(f"Charlie's response: {response[:150]}...")
-            
-            # Verify Charlie can't access Alice's org memories
-            if ("don't have" in response.lower() or "no information" in response.lower() or 
-                "not in our org" in response.lower() or "different org" in response.lower()):
-                print("✅ Namespace isolation working correctly - Charlie can't access Alice's memories")
-                output_lines.append("✅ Namespace isolation working correctly - Charlie can't access Alice's memories")
-            else:
-                print("⚠️  Possible namespace leakage - Charlie found Alice's info")
-                output_lines.append("⚠️  Possible namespace leakage - Charlie found Alice's info")
-        
-        async def test_profile_memory_flow():
-            """Test profile memory retrieval and overview injection."""
-            print("\n--- Phase 5: Testing profile memory extraction and retrieval ---")
-            output_lines.append("\n--- Phase 5: Testing profile memory extraction and retrieval ---")
-
-            profile_config = {
-                "configurable": {
-                    "thread_id": "memory_test_thread_4",
-                    "user_id": "dana_user",
-                    "org_id": "test_company"
-                }
-            }
-
-            profile_agent = BaseAgent(
-                prompt="You are Dana's assistant. Personalize responses using stored profile details.",
-                model_kwargs={},
-                vlm_kwargs={},
-                node_kwargs={},
-                debug=False,
-                config=profile_config,
-                enable_profile_memory=True
-            )
-
-            try:
-                profile_compiled = await profile_agent.compile(name="profile_agent")
-
-                # Dana provides profile information through natural conversation
-                profile_messages = [
-                    "I'm Dana Williams, the Director of Data at Horizon Labs. I split my time between San Francisco and Los Angeles, so keep that in mind for scheduling.",
-                    "When you give me updates, keep them concise—bullet summaries with action items first. I prefer direct communication over lengthy explanations."
-                ]
-
-                print("\nDana shares profile information:")
-                output_lines.append("\nDana shares profile information:")
-                
-                for idx, message in enumerate(profile_messages, 1):
-                    print(f"Dana Message {idx}: {message[:60]}...")
-                    output_lines.append(f"Dana Message {idx}: {message[:60]}...")
-                    
-                    result = await profile_compiled.ainvoke(
-                        {"messages": [HumanMessage(content=message)]},
-                        config=profile_config
-                    )
-                    response_content = result["messages"][-1].content
-                    print(f"Agent Response: {response_content[:80]}...")
-                    output_lines.append(f"Agent Response: {response_content[:80]}...")
-                    
-                    await asyncio.sleep(0.1)
-
-                print("\n--- Waiting for profile memory processing (3 minutes delay) ---")
-                output_lines.append("\n--- Waiting for profile memory processing (3 minutes delay) ---")
-                
-                # Wait for profile reflection to process
-                print("Waiting 200 seconds for profile ReflectionExecutor to process memories...")
-                await asyncio.sleep(200)  # Wait longer than the 180-second delay
-
-                # Check if profile was created via background reflection
-                print("\n--- Phase 5b: Verifying profile extraction ---")
-                output_lines.append("\n--- Phase 5b: Verifying profile extraction ---")
-                
-                try:
-                    # Check if profile memories were created in the store
-                    namespace = ("memories", "test_company", "dana_user", "profile")
-                    stored_profiles = await profile_compiled._store.asearch(namespace)
-                    
-                    print(f"Found {len(stored_profiles)} profile memories for Dana")
-                    output_lines.append(f"Found {len(stored_profiles)} profile memories for Dana")
-                    
-                    for i, profile in enumerate(stored_profiles[:2]):  # Show first 2
-                        print(f"Profile {i+1}: {str(profile.value)[:120]}...")
-                        output_lines.append(f"Profile {i+1}: {str(profile.value)[:120]}...")
-                        
-                except Exception as e:
-                    print(f"Error checking profile memories: {e}")
-                    output_lines.append(f"Error checking profile memories: {e}")
-
-                search_results = await profile_agent._profile_manager.asearch(limit=1, config=profile_config)
-                print(f"Profile search results: {len(search_results)}")
-                output_lines.append(f"Profile search results: {len(search_results)}")
-
-                overview, profile_content = await profile_agent._get_profile_context(profile_config)
-                print(f"Overview injected: {overview is not None}")
-                output_lines.append(f"Overview injected: {overview is not None}")
-
-                retrieved_profile = await profile_agent.get_user_profile(profile_config)
-                print(f"Retrieved profile keys: {list(retrieved_profile.keys()) if retrieved_profile else []}")
-                output_lines.append(f"Retrieved profile keys: {list(retrieved_profile.keys()) if retrieved_profile else []}")
-                
-                # Test hot-path injection with a personalized query
-                if overview:
-                    print(f"\nOverview format: {overview[:100]}...")
-                    output_lines.append(f"\nOverview format: {overview[:100]}...")
-                    
-                    personalized_result = await profile_compiled.ainvoke(
-                        {"messages": [HumanMessage(content="Give me a quick status update on our Q4 metrics.")]},
-                        config=profile_config
-                    )
-                    response = personalized_result["messages"][-1].content
-                    print(f"Personalized response: {response[:150]}...")
-                    output_lines.append(f"Personalized response: {response[:150]}...")
-                    
-                    if "bullet" in response.lower() or "concise" in response.lower() or "dana" in response.lower():
-                        print("✅ Agent used profile information for personalization")
-                        output_lines.append("✅ Agent used profile information for personalization")
-                    else:
-                        print("⚠️  Agent may not have fully utilized profile information")
-                        output_lines.append("⚠️  Agent may not have fully utilized profile information")
-            finally:
-                await profile_agent.aclose()
-
-        # Run all test phases
-        try:
-            # alice_agent = await test_memory_ingestion_and_retrieval()
-            # await test_cross_user_memory_access(alice_agent)
-            # await verify_namespace_isolation()
-            await test_profile_memory_flow()
-            
-            print("\n=== Test Summary ===")
-            output_lines.append("\n=== Test Summary ===")
-            print("✅ Memory ingestion test completed")
-            print("✅ Cross-user memory access test completed")
-            print("✅ Namespace isolation test completed")
-            print("✅ Profile memory test completed")
-            output_lines.extend([
-                "✅ Memory ingestion test completed",
-                "✅ Cross-user memory access test completed", 
-                "✅ Namespace isolation test completed",
-                "✅ Profile memory test completed"
-            ])
-            
-        except Exception as e:
-            print(f"❌ Test failed with error: {e}")
-            output_lines.append(f"❌ Test failed with error: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # Save detailed output
-        with open("semantic_memory_test_output.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(output_lines))
-        
-        print(f"\n📄 Detailed output saved to semantic_memory_test_output.txt ({len(output_lines)} lines)")
-    
-    asyncio.run(test_semantic_memory())
-    
-    
-    

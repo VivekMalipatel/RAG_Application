@@ -1,6 +1,6 @@
 import tiktoken
 import logging
-from typing import List, Tuple, Optional, Any, Set
+from typing import List, Tuple, Optional, Any, Set, Dict
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, ToolMessage
 from config import config as envconfig
 
@@ -97,27 +97,3 @@ def should_trim_state(messages: List[BaseMessage]) -> bool:
     
     num_tokens = last_message.usage_metadata.get("total_tokens", 0)
     return num_tokens >= envconfig.MAX_STATE_TOKENS
-
-
-def get_pending_tool_calls(messages: List[Any]) -> Set[str]:
-    tool_call_ids = set()
-    tool_result_ids = set()
-    
-    for msg in messages:
-        if isinstance(msg, AIMessage):
-            tool_calls = getattr(msg, "tool_calls", None) or []
-            for tc in tool_calls:
-                if isinstance(tc, dict):
-                    tc_id = tc.get("id")
-                else:
-                    tc_id = getattr(tc, "id", None)
-                if tc_id:
-                    tool_call_ids.add(tc_id)
-        
-        elif isinstance(msg, ToolMessage):
-            tc_id = getattr(msg, "tool_call_id", None)
-            if tc_id:
-                tool_result_ids.add(tc_id)
-    
-    pending = tool_call_ids - tool_result_ids
-    return pending

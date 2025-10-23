@@ -5,13 +5,72 @@ import logging
 import yaml
 import json
 from pathlib import Path
-from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, SystemMessage
-from langchain_core.messages.content_blocks import is_data_content_block
+from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, SystemMessage, is_data_content_block
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain import embeddings
 from langchain_core.embeddings import Embeddings
 from langchain_core.runnables import Runnable
-from openai import AsyncOpenAI
 from langgraph.config import get_stream_writer
+
+
+class VLMProcessor:
+    def __init__(
+        self,
+        vlm_model: Optional[BaseChatModel],
+        invoke_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.vlm_model = vlm_model
+        self.invoke_kwargs = invoke_kwargs or {}
+
+    def is_configured(self) -> bool:
+        return self.vlm_model is not None
+
+    def _should_process(self, payload: Any) -> bool:
+        return is_message_sequence(payload) and has_media(payload)
+
+    def process_sync(
+        self,
+        payload: Any,
+        *,
+        logger: Optional[logging.Logger] = None,
+        announcement: str = "Analysing Images.....\n\n",
+    ) -> Any:
+        if not self.is_configured():
+            return payload
+        if not self._should_process(payload):
+            return payload
+        _announce_media_analysis(announcement)
+        try:
+            return asyncio.run(
+                process_media_with_vlm(
+                    self.vlm_model,
+                    payload,
+                    **self.invoke_kwargs,
+                )
+            )
+        except RuntimeError as exc:
+            if "asyncio.run() cannot be called" in str(exc):
+                if logger:
+                    logger.warning("Media preprocessing skipped because event loop is running")
+                return payload
+            raise
+
+    async def process_async(
+        self,
+        payload: Any,
+        *,
+        announcement: str = "Analysing Images.....\n\n",
+    ) -> Any:
+        if not self.is_configured():
+            return payload
+        if not self._should_process(payload):
+            return payload
+        _announce_media_analysis(announcement)
+        return await process_media_with_vlm(
+            self.vlm_model,
+            payload,
+            **self.invoke_kwargs,
+        )
 
 
 def load_media_description_prompt() -> str:
@@ -153,55 +212,80 @@ def is_media_block(block: dict, media_types: List[str]) -> bool:
     return False
 
 
-async def get_media_descriptions_batch(vlm_client: AsyncOpenAI, model: str, media_blocks_info: List[Dict], chat_context: str = "", **model_kwargs) -> List[str]:
+def _extract_text_from_message(message: BaseMessage) -> str:
+    if isinstance(message.content, str):
+        return message.content
+    if isinstance(message.content, list):
+        parts = []
+        for block in message.content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return " ".join(part for part in parts if part)
+    return str(message.content)
+
+
+async def get_media_descriptions_batch(
+    vlm_model: BaseChatModel,
+    media_blocks_info: List[Dict],
+    chat_context: str = "",
+    **invoke_kwargs: Any,
+) -> List[str]:
     logger = logging.getLogger(__name__)
     vlm_tasks = []
-    
+
     for block_info in media_blocks_info:
-        block = block_info['block']
-        
+        block = block_info["block"]
+
         human_content = [block]
         if chat_context:
             human_content.insert(0, {"type": "text", "text": chat_context})
-        
+
         messages = [
-            {"role": "system", "content": load_media_description_prompt()},
-            {"role": "user", "content": human_content}
+            SystemMessage(content=load_media_description_prompt()),
+            HumanMessage(content=human_content),
         ]
-        
-        vlm_tasks.append(safe_vlm_invoke(vlm_client, model, messages, **model_kwargs))
-    
+
+        vlm_tasks.append(safe_vlm_invoke(vlm_model, messages, **invoke_kwargs))
+
     descriptions = await asyncio.gather(*vlm_tasks, return_exceptions=True)
-    
+
     processed_descriptions = []
     error_count = 0
-    
+
     for i, desc in enumerate(descriptions):
         if isinstance(desc, Exception):
             error_count += 1
-            processed_descriptions.append(f"[Error processing {media_blocks_info[i]['media_type']}: {str(desc)}]")
+            processed_descriptions.append(
+                f"[Error processing {media_blocks_info[i]['media_type']}: {str(desc)}]"
+            )
         else:
             processed_descriptions.append(desc)
-    
+
     if error_count > 0:
-        logger.warning(f"Failed to process {error_count} out of {len(media_blocks_info)} media blocks")
-    
+        logger.warning(
+            f"Failed to process {error_count} out of {len(media_blocks_info)} media blocks"
+        )
+
     return processed_descriptions
 
 
-async def safe_vlm_invoke(vlm_client: AsyncOpenAI, model: str, messages: List[Dict], **model_kwargs) -> str:
+async def safe_vlm_invoke(
+    vlm_model: BaseChatModel,
+    messages: List[BaseMessage],
+    **invoke_kwargs: Any,
+) -> str:
     logger = logging.getLogger(__name__)
+    if vlm_model is None:
+        raise RuntimeError("VLM model is not configured")
     try:
-        response = await vlm_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=False,
-            **model_kwargs
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        logger.error(f"VLM invocation failed: {e}")
-        raise e
+        try:
+            response = await vlm_model.ainvoke(messages, **invoke_kwargs)
+        except TypeError:
+            response = await vlm_model.ainvoke(messages)
+        return _extract_text_from_message(response)
+    except Exception as exc:
+        logger.error(f"VLM invocation failed: {exc}")
+        raise
 
 async def replace_media_blocks_in_message(
     message: BaseMessage, 
@@ -242,7 +326,12 @@ async def replace_media_blocks_in_message(
     return type(message)(content=new_content, **message_attrs)
 
 
-async def process_media_with_vlm(vlm_client: AsyncOpenAI, model: str, messages: List[BaseMessage], media_types: List[str] = None, **model_kwargs) -> List[BaseMessage]:
+async def process_media_with_vlm(
+    vlm_model: BaseChatModel,
+    messages: List[BaseMessage],
+    media_types: List[str] = None,
+    **invoke_kwargs: Any,
+) -> List[BaseMessage]:
     if media_types is None:
         media_types = ["image", "audio", "video"]
     
@@ -287,7 +376,12 @@ async def process_media_with_vlm(vlm_client: AsyncOpenAI, model: str, messages: 
     ]
     
     chat_context = extract_chat_context(messages)
-    unique_descriptions = await get_media_descriptions_batch(vlm_client, model, unique_media_list, chat_context, **model_kwargs)
+    unique_descriptions = await get_media_descriptions_batch(
+        vlm_model,
+        unique_media_list,
+        chat_context,
+        **invoke_kwargs,
+    )
     
     media_key_to_description = {
         list(unique_media_blocks.keys())[i]: desc
@@ -333,6 +427,26 @@ def is_message_sequence(payload: Any) -> bool:
     return isinstance(payload, list) and all(isinstance(item, BaseMessage) for item in payload)
 
 
+def normalize_message_roles(messages: List[BaseMessage]) -> List[BaseMessage]:
+    normalized = []
+    for message in messages:
+        if isinstance(message, SystemMessage):
+            role = getattr(message, 'role', 'system')
+            if role == 'developer':
+                new_message = SystemMessage(
+                    content=message.content,
+                    additional_kwargs=message.additional_kwargs,
+                    response_metadata=message.response_metadata,
+                    id=message.id,
+                )
+                normalized.append(new_message)
+            else:
+                normalized.append(message)
+        else:
+            normalized.append(message)
+    return normalized
+
+
 def _announce_media_analysis(message: str = "Analysing Images.....\n\n") -> None:
     streaming_enabled = os.getenv("ENABLE_VLM_STREAM_UPDATES", "0") not in {"", "0", "false", "False"}
     if not streaming_enabled or not message:
@@ -347,58 +461,39 @@ def _announce_media_analysis(message: str = "Analysing Images.....\n\n") -> None
 
 def prepare_input_sync(
     payload: Any,
-    vlm_client: AsyncOpenAI,
-    vlm_model: str,
-    vlm_model_kwargs: Dict[str, Any],
+    processor: Optional[VLMProcessor],
     *,
     logger: Optional[logging.Logger] = None,
     announcement: str = "Analysing Images.....\n\n",
 ) -> Any:
-    if vlm_client is None or not vlm_model:
+    if processor is None:
+        if is_message_sequence(payload):
+            return normalize_message_roles(payload)
         return payload
-    if not is_message_sequence(payload):
-        return payload
-    if not has_media(payload):
-        return payload
-
-    _announce_media_analysis(announcement)
-
-    try:
-        return asyncio.run(
-            process_media_with_vlm(
-                vlm_client,
-                vlm_model,
-                payload,
-                **vlm_model_kwargs,
-            )
-        )
-    except RuntimeError as exc:
-        if "asyncio.run() cannot be called" in str(exc):
-            if logger:
-                logger.warning("Media preprocessing skipped because event loop is running")
-            return payload
-        raise
+    processed = processor.process_sync(
+        payload,
+        logger=logger,
+        announcement=announcement,
+    )
+    if is_message_sequence(processed):
+        return normalize_message_roles(processed)
+    return processed
 
 
 async def prepare_input_async(
     payload: Any,
-    vlm_client: AsyncOpenAI,
-    vlm_model: str,
-    vlm_model_kwargs: Dict[str, Any],
+    processor: Optional[VLMProcessor],
     *,
     announcement: str = "Analysing Images.....\n\n",
 ) -> Any:
-    if vlm_client is None or not vlm_model:
+    if processor is None:
+        if is_message_sequence(payload):
+            return normalize_message_roles(payload)
         return payload
-    if not is_message_sequence(payload):
-        return payload
-    if not has_media(payload):
-        return payload
-
-    _announce_media_analysis(announcement)
-    return await process_media_with_vlm(
-        vlm_client,
-        vlm_model,
+    processed = await processor.process_async(
         payload,
-        **vlm_model_kwargs,
+        announcement=announcement,
     )
+    if is_message_sequence(processed):
+        return normalize_message_roles(processed)
+    return processed

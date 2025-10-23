@@ -1,13 +1,10 @@
 import yaml
-import hashlib
-import uuid
 from pathlib import Path
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage
 from typing import Optional, Dict, Any, List
 
-from agents.base_agents.base_state import BaseState
 from agents.base_agents.base_agent import BaseAgent
 from pydantic import BaseModel, Field
 from agents.util_agents.knowledge_search_agent.knowledge_search_agent import KnowledgeSearchAgent
@@ -35,24 +32,18 @@ def get_tool_description(tool_name: str, yaml_filename: str = "description.yaml"
 )
 async def knowledge_search_agent(prompt : str, config: RunnableConfig) -> List[Dict[str, Any]] :
 
-    parent_thread_id = config.get("configurable").get("thread_id")
-    parent_user_id = config.get("configurable").get("user_id")
-    parent_org_id = config.get("configurable").get("org_id")
-    
-    subgraph_thread_id = str(uuid.uuid5(uuid.UUID(parent_thread_id), TOOL_NAME))
+    incoming_config: Dict[str, Any] = dict(config or {})
+    configurable: Dict[str, Any] = dict(incoming_config.get("configurable") or {})
+    incoming_config["configurable"] = configurable
 
-    modified_config = dict(config)
-    if "configurable" not in modified_config:
-        modified_config["configurable"] = {}
-    else:
-        modified_config["configurable"] = dict(modified_config["configurable"])
-    
-    modified_config["configurable"]["thread_id"] = subgraph_thread_id
-    modified_config["configurable"]["user_id"] = parent_user_id
-    modified_config["configurable"]["org_id"] = parent_org_id
+    user_id = configurable.get("user_id")
+    org_id = configurable.get("org_id")
+
+    if not user_id or not org_id:
+        raise ValueError("Knowledge search agent requires user_id and org_id in configurable config")
 
     knowledge_search_agent = KnowledgeSearchAgent(
-                                config=modified_config,
+                                config=incoming_config,
                                 model_kwargs={},
                                 vlm_kwargs={},
                                 node_kwargs={},
@@ -65,9 +56,9 @@ async def knowledge_search_agent(prompt : str, config: RunnableConfig) -> List[D
             "messages": [
                 HumanMessage(content=prompt)
             ],
-            "user_id": parent_user_id,
-            "org_id": parent_org_id
+            "user_id": user_id,
+            "org_id": org_id
         }
 
-    result = await compiled_agent.ainvoke(input, config=modified_config)
+    result = await compiled_agent.ainvoke(input, config=incoming_config)
     return [{"type": "text", "text": result["messages"][-1].content}]
